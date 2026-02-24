@@ -1,0 +1,100 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — DPC Advance{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Shows</h1>
+    <p class="page-sub">{{ active_shows|length }} active · {{ archived_shows|length }} archived</p>
+  </div>
+  <a href="{{ url_for('new_show') }}" class="btn btn-primary">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    New Show
+  </a>
+</div>
+
+<!-- Active Shows -->
+<section class="section">
+  <h2 class="section-label">UPCOMING / ACTIVE</h2>
+  {% if active_shows %}
+  <div class="show-grid">
+    {% for s in active_shows %}
+    <div class="show-card">
+      <div class="show-card-top">
+        <div class="show-date-badge">
+          {% if s.show_date %}
+            <span class="show-month">{{ s.show_date|string|truncate(7,True,'')|replace('-','/')|truncate(7,True,'') }}</span>
+            <span class="show-day">{{ s.show_date[-2:] }}</span>
+          {% else %}
+            <span class="show-month">NO</span>
+            <span class="show-day">DATE</span>
+          {% endif %}
+        </div>
+        <div class="show-info">
+          <div class="show-name">{{ s.name }}</div>
+          <div class="show-meta">{{ s.venue or '—' }}{% if s.show_time %} · {{ s.show_time }}{% endif %}</div>
+        </div>
+      </div>
+      <div class="show-card-actions">
+        <a href="{{ url_for('show_page', show_id=s.id, tab='advance') }}" class="btn btn-sm btn-ghost">Advance</a>
+        <a href="{{ url_for('show_page', show_id=s.id, tab='schedule') }}" class="btn btn-sm btn-ghost">Schedule</a>
+        <a href="{{ url_for('show_page', show_id=s.id, tab='export') }}" class="btn btn-sm btn-accent">Export</a>
+        <form method="post" action="{{ url_for('archive_show', show_id=s.id) }}" style="display:inline" onsubmit="return confirm('Archive this show?')">
+          <button type="submit" class="btn btn-sm btn-danger-ghost" title="Archive">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+          </button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+    <p>No active shows. <a href="{{ url_for('new_show') }}">Create one →</a></p>
+  </div>
+  {% endif %}
+</section>
+
+<!-- Archived Shows -->
+{% if archived_shows %}
+<section class="section">
+  <button class="section-label toggle-archived" onclick="document.getElementById('archived-list').classList.toggle('hidden')">
+    ARCHIVED ({{ archived_shows|length }})
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
+  </button>
+  <div id="archived-list" class="show-grid archived hidden">
+    {% for s in archived_shows %}
+    <div class="show-card archived">
+      <div class="show-card-top">
+        <div class="show-date-badge dim">
+          {% if s.show_date %}
+            <span class="show-month">{{ s.show_date[:7].replace('-','/') }}</span>
+            <span class="show-day">{{ s.show_date[-2:] }}</span>
+          {% else %}
+            <span class="show-month">—</span><span class="show-day">—</span>
+          {% endif %}
+        </div>
+        <div class="show-info">
+          <div class="show-name">{{ s.name }}</div>
+          <div class="show-meta">{{ s.venue or '—' }}</div>
+        </div>
+      </div>
+      <div class="show-card-actions">
+        <a href="{{ url_for('show_page', show_id=s.id, tab='advance') }}" class="btn btn-sm btn-ghost">View</a>
+        <form method="post" action="{{ url_for('restore_show', show_id=s.id) }}" style="display:inline">
+          <button class="btn btn-sm btn-ghost">Restore</button>
+        </form>
+        {% if user.role == 'admin' %}
+        <form method="post" action="{{ url_for('delete_show', show_id=s.id) }}" style="display:inline" onsubmit="return confirm('Permanently delete this show and all its data?')">
+          <button class="btn btn-sm btn-danger-ghost">Delete</button>
+        </form>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+
+{% endblock %}

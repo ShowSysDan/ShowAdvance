@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Login — DPC Advance{% endblock %}
+
+{% block auth_content %}
+<div class="login-page">
+  <div class="login-card">
+    <div class="login-brand">
+      <span class="brand-icon lg">⬡</span>
+      <h1>DPC ADVANCE</h1>
+      <p>Production Management System</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for cat, msg in messages %}
+          <div class="flash flash-{{ cat }}">{{ msg }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <form method="post" class="login-form">
+      <input type="hidden" name="next" value="{{ next }}">
+      <div class="field-group">
+        <label class="field-label">USERNAME</label>
+        <input type="text" name="username" class="field-input" autofocus autocomplete="username" required>
+      </div>
+      <div class="field-group">
+        <label class="field-label">PASSWORD</label>
+        <input type="password" name="password" class="field-input" autocomplete="current-password" required>
+      </div>
+      <button type="submit" class="btn btn-primary btn-full">Sign In</button>
+    </form>
+
+    <p class="login-footer">Dr. Phillips Center for the Performing Arts</p>
+  </div>
+</div>
+{% endblock %}

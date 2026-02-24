@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}New Show — DPC Advance{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="{{ url_for('dashboard') }}" class="back-link">← Dashboard</a>
+    <h1 class="page-title">New Show</h1>
+  </div>
+</div>
+
+<div class="form-page-card">
+  <form method="post" class="form-grid">
+    <div class="form-row">
+      <div class="field-group required">
+        <label class="field-label">SHOW NAME *</label>
+        <input type="text" name="name" class="field-input" placeholder="e.g. Judy Carmichael" autofocus required>
+      </div>
+    </div>
+    <div class="form-row cols-3">
+      <div class="field-group">
+        <label class="field-label">SHOW DATE</label>
+        <input type="date" name="show_date" class="field-input">
+      </div>
+      <div class="field-group">
+        <label class="field-label">SHOW TIME(S)</label>
+        <input type="text" name="show_time" class="field-input" placeholder="e.g. 7pm and 9pm">
+      </div>
+      <div class="field-group">
+        <label class="field-label">VENUE</label>
+        <input type="text" name="venue" class="field-input" value="Judson's Live">
+      </div>
+    </div>
+    <div class="form-actions">
+      <a href="{{ url_for('dashboard') }}" class="btn btn-ghost">Cancel</a>
+      <button type="submit" class="btn btn-primary">Create Show →</button>
+    </div>
+  </form>
+</div>
+{% endblock %}

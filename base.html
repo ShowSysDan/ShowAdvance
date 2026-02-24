@@ -1,0 +1,339 @@
+{% extends "base.html" %}
+{% block title %}Settings — DPC Advance{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Settings</h1>
+    <p class="page-sub">Manage contacts directory and user accounts</p>
+  </div>
+</div>
+
+<!-- Settings Tabs -->
+<div class="tab-nav">
+  <button class="tab-btn active" onclick="switchSettingsTab('contacts')">Contacts</button>
+  <button class="tab-btn" onclick="switchSettingsTab('users')">Users</button>
+  <button class="tab-btn" onclick="switchSettingsTab('account')">My Account</button>
+</div>
+
+{# ── CONTACTS ─────────────────────────────────────────────────────── #}
+<div id="stab-contacts" class="stab-pane active">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> CONTACTS DIRECTORY
+      <span class="section-count ml-auto text-dim">{{ contacts|length }} contacts</span>
+    </div>
+
+    <!-- Add Contact Form -->
+    <div class="form-section-body" style="border-bottom:1px solid var(--border);">
+      <h3 class="sub-section-label">ADD CONTACT</h3>
+      <form method="post" action="{{ url_for('add_contact') }}" class="form-row cols-5 align-end">
+        <div class="field-group">
+          <label class="field-label">NAME *</label>
+          <input type="text" name="name" class="field-input" required placeholder="Full Name">
+        </div>
+        <div class="field-group">
+          <label class="field-label">TITLE</label>
+          <input type="text" name="title" class="field-input" placeholder="Job Title">
+        </div>
+        <div class="field-group">
+          <label class="field-label">DEPARTMENT</label>
+          <select name="department" class="field-input">
+            <option value="">— None —</option>
+            {% for d in departments %}
+            <option value="{{ d }}">{{ d }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">PHONE</label>
+          <input type="text" name="phone" class="field-input" placeholder="407-000-0000">
+        </div>
+        <div class="field-group">
+          <label class="field-label">EMAIL</label>
+          <input type="email" name="email" class="field-input" placeholder="name@dpc.org">
+        </div>
+        <button type="submit" class="btn btn-primary">Add</button>
+      </form>
+    </div>
+
+    <!-- Contacts Table -->
+    <div class="form-section-body no-pad">
+      <!-- Filter bar -->
+      <div class="table-toolbar">
+        <input type="text" id="contact-search" class="field-input field-input-sm" placeholder="Search contacts..." oninput="filterContacts(this.value)" style="max-width:280px">
+        <select id="dept-filter" class="field-input field-input-sm" onchange="filterContacts()" style="max-width:200px">
+          <option value="">All Departments</option>
+          {% for d in departments %}
+          <option value="{{ d }}">{{ d }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <table class="data-table" id="contacts-table">
+        <thead>
+          <tr>
+            <th>NAME</th>
+            <th>TITLE</th>
+            <th>DEPARTMENT</th>
+            <th>PHONE</th>
+            <th>EMAIL</th>
+            <th style="width:80px">ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for c in contacts %}
+          <tr data-id="{{ c.id }}" data-dept="{{ c.department }}">
+            <td class="contact-name" data-field="name">{{ c.name }}</td>
+            <td class="text-dim" data-field="title">{{ c.title or '—' }}</td>
+            <td>
+              {% if c.department %}
+              <span class="dept-badge dept-{{ c.department.lower().replace(' ','-') }}">{{ c.department }}</span>
+              {% else %}—{% endif %}
+            </td>
+            <td class="mono text-sm" data-field="phone">{{ c.phone or '—' }}</td>
+            <td class="text-sm" data-field="email">{{ c.email or '—' }}</td>
+            <td>
+              <div class="action-btns">
+                <button class="btn btn-xs btn-ghost" onclick="editContact(this, {{ c.id }})" title="Edit">✎</button>
+                <button class="btn btn-xs btn-danger-ghost" onclick="deleteContact({{ c.id }}, this)" title="Delete">×</button>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{# ── USERS ────────────────────────────────────────────────────────── #}
+<div id="stab-users" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> USER ACCOUNTS</div>
+
+    {% if user.role == 'admin' %}
+    <div class="form-section-body" style="border-bottom:1px solid var(--border)">
+      <h3 class="sub-section-label">ADD USER</h3>
+      <form method="post" action="{{ url_for('add_user') }}" class="form-row cols-4 align-end">
+        <div class="field-group">
+          <label class="field-label">USERNAME *</label>
+          <input type="text" name="username" class="field-input" required placeholder="jsmith">
+        </div>
+        <div class="field-group">
+          <label class="field-label">DISPLAY NAME</label>
+          <input type="text" name="display_name" class="field-input" placeholder="John Smith">
+        </div>
+        <div class="field-group">
+          <label class="field-label">PASSWORD *</label>
+          <input type="password" name="password" class="field-input" required placeholder="Temporary password">
+        </div>
+        <div class="field-group">
+          <label class="field-label">ROLE</label>
+          <select name="role" class="field-input">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        <button type="submit" class="btn btn-primary">Add User</button>
+      </form>
+    </div>
+    {% endif %}
+
+    <div class="form-section-body no-pad">
+      <table class="data-table">
+        <thead><tr><th>DISPLAY NAME</th><th>USERNAME</th><th>ROLE</th><th>CREATED</th><th>ACTIONS</th></tr></thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>{{ u.display_name or u.username }}</td>
+            <td class="mono text-sm">{{ u.username }}</td>
+            <td><span class="role-badge role-{{ u.role }}">{{ u.role.upper() }}</span></td>
+            <td class="text-dim text-sm">{{ u.created_at[:10] if u.created_at else '—' }}</td>
+            <td>
+              <div class="action-btns">
+                {% if user.role == 'admin' %}
+                <button class="btn btn-xs btn-ghost" onclick="resetPassword({{ u.id }})">Reset PW</button>
+                {% if u.id != user.id %}
+                <button class="btn btn-xs btn-danger-ghost" onclick="deleteUser({{ u.id }}, this)">Delete</button>
+                {% endif %}
+                {% endif %}
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{# ── MY ACCOUNT ───────────────────────────────────────────────────── #}
+<div id="stab-account" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> CHANGE PASSWORD</div>
+    <div class="form-section-body">
+      <div id="pw-form" style="max-width:400px">
+        <div class="field-group">
+          <label class="field-label">CURRENT PASSWORD</label>
+          <input type="password" id="pw-current" class="field-input">
+        </div>
+        <div class="field-group">
+          <label class="field-label">NEW PASSWORD</label>
+          <input type="password" id="pw-new" class="field-input">
+        </div>
+        <div class="field-group">
+          <label class="field-label">CONFIRM NEW PASSWORD</label>
+          <input type="password" id="pw-confirm" class="field-input">
+        </div>
+        <div id="pw-msg" class="field-msg" style="display:none"></div>
+        <button class="btn btn-primary" onclick="changePassword()">Change Password</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Contact Modal -->
+<div id="edit-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeEditModal()">
+  <div class="modal-card">
+    <div class="modal-header">Edit Contact <button onclick="closeEditModal()" class="modal-close">×</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-id">
+      <div class="field-group">
+        <label class="field-label">NAME</label>
+        <input type="text" id="edit-name" class="field-input">
+      </div>
+      <div class="field-group">
+        <label class="field-label">TITLE</label>
+        <input type="text" id="edit-title" class="field-input">
+      </div>
+      <div class="field-group">
+        <label class="field-label">DEPARTMENT</label>
+        <select id="edit-dept" class="field-input">
+          <option value="">— None —</option>
+          {% for d in departments %}
+          <option value="{{ d }}">{{ d }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">PHONE</label>
+        <input type="text" id="edit-phone" class="field-input">
+      </div>
+      <div class="field-group">
+        <label class="field-label">EMAIL</label>
+        <input type="email" id="edit-email" class="field-input">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveContact()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function switchSettingsTab(name) {
+  document.querySelectorAll('.stab-pane').forEach(p => p.style.display='none');
+  document.getElementById('stab-' + name).style.display='block';
+  document.querySelectorAll('.tab-btn').forEach((b,i) => {
+    b.classList.toggle('active', ['contacts','users','account'][i] === name);
+  });
+}
+
+function filterContacts(val) {
+  const q   = (val || document.getElementById('contact-search').value).toLowerCase();
+  const dept = document.getElementById('dept-filter').value;
+  document.querySelectorAll('#contacts-table tbody tr').forEach(row => {
+    const text = row.textContent.toLowerCase();
+    const d    = row.dataset.dept;
+    row.style.display = ((!q || text.includes(q)) && (!dept || d === dept)) ? '' : 'none';
+  });
+}
+
+function editContact(btn, id) {
+  const row = btn.closest('tr');
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-name').value  = row.querySelector('[data-field=name]').textContent.trim();
+  document.getElementById('edit-title').value = row.querySelector('[data-field=title]').textContent.replace('—','').trim();
+  document.getElementById('edit-phone').value = row.querySelector('[data-field=phone]').textContent.replace('—','').trim();
+  document.getElementById('edit-email').value = row.querySelector('[data-field=email]').textContent.replace('—','').trim();
+  document.getElementById('edit-dept').value  = row.dataset.dept || '';
+  document.getElementById('edit-modal').classList.remove('hidden');
+}
+
+function closeEditModal() {
+  document.getElementById('edit-modal').classList.add('hidden');
+}
+
+async function saveContact() {
+  const id = document.getElementById('edit-id').value;
+  const data = {
+    name:       document.getElementById('edit-name').value,
+    title:      document.getElementById('edit-title').value,
+    department: document.getElementById('edit-dept').value,
+    phone:      document.getElementById('edit-phone').value,
+    email:      document.getElementById('edit-email').value,
+  };
+  const resp = await fetch(`/settings/contacts/${id}/edit`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+  });
+  if ((await resp.json()).success) { closeEditModal(); location.reload(); }
+}
+
+async function deleteContact(id, btn) {
+  if (!confirm('Delete this contact?')) return;
+  const resp = await fetch(`/settings/contacts/${id}/delete`, {method:'POST'});
+  if ((await resp.json()).success) btn.closest('tr').remove();
+}
+
+async function deleteUser(id, btn) {
+  if (!confirm('Delete this user?')) return;
+  const resp = await fetch(`/settings/users/${id}/delete`, {method:'POST'});
+  const data = await resp.json();
+  if (data.success) btn.closest('tr').remove();
+  else alert(data.error);
+}
+
+async function resetPassword(id) {
+  const pw = prompt('Enter new password for this user:');
+  if (!pw) return;
+  const resp = await fetch(`/settings/users/${id}/reset_password`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({password: pw})
+  });
+  const data = await resp.json();
+  alert(data.success ? 'Password reset successfully.' : data.error);
+}
+
+async function changePassword() {
+  const current = document.getElementById('pw-current').value;
+  const newpw   = document.getElementById('pw-new').value;
+  const confirm = document.getElementById('pw-confirm').value;
+  const msg     = document.getElementById('pw-msg');
+  if (newpw !== confirm) { showMsg(msg,'Passwords do not match.','error'); return; }
+  if (newpw.length < 6)  { showMsg(msg,'Password must be at least 6 characters.','error'); return; }
+  const resp = await fetch('/account/change_password', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({current_password:current, new_password:newpw})
+  });
+  const data = await resp.json();
+  showMsg(msg, data.success ? 'Password changed successfully.' : data.error,
+          data.success ? 'success' : 'error');
+}
+
+function showMsg(el, text, type) {
+  el.textContent = text;
+  el.className = 'field-msg field-msg-' + type;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display='none', 4000);
+}
+
+// Anchor-based tab from flash redirects
+const hash = location.hash.replace('#','');
+if (['contacts','users','account'].includes(hash)) switchSettingsTab(hash);
+</script>
+{% endblock %}

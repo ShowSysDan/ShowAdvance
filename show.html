@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: letter landscape; margin: 0.5in 0.6in 0.6in; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 8.5pt; color: #1a1a1a; line-height: 1.35; }
+
+  /* ── Header ── */
+  .doc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2.5px solid #000; }
+  .doc-title { font-size: 18pt; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+  .doc-title span { color: #B8840A; }
+  .doc-org { font-size: 7pt; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
+  .doc-meta { text-align: right; font-size: 7.5pt; color: #444; }
+  .doc-meta .version { font-size: 10pt; font-weight: bold; color: #B8840A; }
+
+  /* ── Info bar ── */
+  .info-bar { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; margin-bottom: 10px; background: #f5f5f5; border: 1px solid #ddd; padding: 7px 10px; }
+  .info-item .lbl { font-size: 6.5pt; font-weight: bold; color: #888; text-transform: uppercase; letter-spacing: 0.06em; }
+  .info-item .val { font-size: 8.5pt; color: #111; margin-top: 1px; font-weight: 600; }
+
+  /* ── Schedule Table ── */
+  .sched-table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  .sched-table th { background: #1a1a1a; color: #fff; font-size: 7pt; letter-spacing: 0.08em; text-align: left; padding: 5px 8px; text-transform: uppercase; }
+  .sched-table td { padding: 5px 8px; border-bottom: 1px solid #e0e0e0; vertical-align: top; }
+  .sched-table tr:nth-child(even) td { background: #fafafa; }
+  .sched-table tr:last-child td { border-bottom: 2px solid #bbb; }
+  .sched-table .time-col { font-weight: bold; white-space: nowrap; font-size: 8.5pt; color: #333; }
+  .sched-table .desc-col { font-size: 8.5pt; }
+  .sched-table .notes-col { font-size: 7.5pt; color: #555; }
+
+  /* ── Contacts grid ── */
+  .contacts-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .contacts-box { border: 1px solid #ccc; }
+  .contacts-box-head { background: #333; color: #fff; font-size: 7pt; font-weight: bold; letter-spacing: 0.1em; padding: 4px 7px; text-transform: uppercase; }
+  .contacts-table { width: 100%; border-collapse: collapse; }
+  .contacts-table td { padding: 3px 7px; border-bottom: 1px solid #eee; font-size: 8pt; }
+  .contacts-table td.lbl { font-size: 7pt; font-weight: bold; color: #666; text-transform: uppercase; width: 38%; }
+  .contacts-table tr:last-child td { border-bottom: none; }
+
+  /* ── Footer ── */
+  .doc-footer { position: fixed; bottom: 0.3in; left: 0.6in; right: 0.6in; font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+{% set d = schedule_meta %}
+{% macro m(key, default='') %}{{ d.get(key, default)|string|trim }}{% endmacro %}
+
+<!-- Header -->
+<div class="doc-header">
+  <div>
+    <div class="doc-title">DPC <span>PRODUCTION</span> SCHEDULE</div>
+    <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+  </div>
+  <div class="doc-meta">
+    <div class="version">v{{ version }}</div>
+    <div>{{ export_date }}</div>
+    <div style="margin-top:3px; font-size:8pt; color:#222">
+      <strong>{{ show.name }}</strong> &nbsp;·&nbsp; {{ show.show_date or '—' }}{% if show.show_time %} &nbsp;·&nbsp; {{ show.show_time }}{% endif %}
+    </div>
+  </div>
+</div>
+
+<!-- Info Bar -->
+<div class="info-bar">
+  <div class="info-item">
+    <div class="lbl">Venue</div>
+    <div class="val">{{ show.venue or '—' }}</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">WiFi Network</div>
+    <div class="val">{{ m('wifi_network') or '—' }}</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">WiFi Code</div>
+    <div class="val">{{ m('wifi_code') or '—' }}</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">Radio Channel</div>
+    <div class="val">{{ m('radio_channel') or '—' }}</div>
+  </div>
+  <div class="info-item">
+    <div class="lbl">Mix Position</div>
+    <div class="val">{{ m('mix_position') or 'FOH' }}</div>
+  </div>
+</div>
+
+{% if m('parking_security') %}
+<div style="background:#fff8e8; border:1px solid #e8c870; padding:4px 8px; margin-bottom:10px; font-size:8pt;">
+  <strong>Parking &amp; Security:</strong> {{ m('parking_security') }}
+</div>
+{% endif %}
+
+<!-- Schedule Table -->
+<table class="sched-table">
+  <thead>
+    <tr>
+      <th style="width:90px">Start</th>
+      <th style="width:90px">End</th>
+      <th>Description</th>
+      <th style="width:200px">Notes</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in schedule_rows %}
+    {% if row.description or row.start_time %}
+    <tr>
+      <td class="time-col">{{ row.start_time or '' }}</td>
+      <td class="time-col">{{ row.end_time or '' }}</td>
+      <td class="desc-col">{{ row.description or '' }}</td>
+      <td class="notes-col">{{ row.notes or '' }}</td>
+    </tr>
+    {% endif %}
+    {% endfor %}
+    {% if not schedule_rows %}
+    <tr><td colspan="4" style="text-align:center;color:#aaa;padding:12px;">No schedule rows entered.</td></tr>
+    {% endif %}
+  </tbody>
+</table>
+
+<!-- Contacts -->
+<div class="contacts-grid">
+  <!-- Artist / Tour Contacts -->
+  <div class="contacts-box">
+    <div class="contacts-box-head">Artist / Tour Contacts</div>
+    <div style="padding:6px 8px; font-size:8pt; white-space:pre-wrap; min-height:50px;">{{ m('artist_contacts') or '—' }}</div>
+  </div>
+
+  <!-- DPC Contacts -->
+  <div class="contacts-box">
+    <div class="contacts-box-head">DPC Contacts</div>
+    <table class="contacts-table">
+      {% for role, key in [
+        ('Production Manager', 'contact_production_manager'),
+        ('Programming', 'contact_programming'),
+        ('Event Manager', 'contact_event_manager'),
+        ('Hospitality', 'contact_hospitality'),
+        ('Guest Services', 'contact_guest_services'),
+        ('Runner', 'contact_runner'),
+        ('Security', 'security_email'),
+      ] %}
+      {% set val = m(key) %}
+      {% if val and val not in ['-',''] %}
+      <tr>
+        <td class="lbl">{{ role }}</td>
+        <td>{{ val }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+<!-- Footer -->
+<div class="doc-footer">
+  <span>{{ show.name }}  ·  {{ show.show_date or '—' }}</span>
+  <span>PRODUCTION SCHEDULE v{{ version }}  ·  Exported {{ export_date }}</span>
+  <span>Dr. Phillips Center for the Performing Arts</span>
+</div>
+
+</body>
+</html>

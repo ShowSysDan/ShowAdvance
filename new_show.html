@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: letter; margin: 0.6in 0.55in 0.65in; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 8.5pt; color: #1a1a1a; line-height: 1.35; }
+
+  /* ── Header ── */
+  .doc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; padding-bottom: 8px; border-bottom: 2.5px solid #000; }
+  .doc-title { font-size: 18pt; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+  .doc-title span { color: #B8840A; }
+  .doc-org { font-size: 7pt; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
+  .doc-meta { text-align: right; font-size: 7.5pt; color: #444; }
+  .doc-meta .version { font-size: 10pt; font-weight: bold; color: #B8840A; }
+
+  /* ── Section ── */
+  .section { margin-bottom: 8px; border: 1px solid #ccc; }
+  .section-head { background: #1a1a1a; color: #fff; font-size: 7pt; font-weight: bold; letter-spacing: 0.1em; padding: 4px 7px; text-transform: uppercase; }
+  .section-body { padding: 0; }
+
+  /* ── Two-col layout ── */
+  .two-col-table { width: 100%; border-collapse: collapse; }
+  .two-col-table td { padding: 3.5px 7px; border-bottom: 1px solid #e8e8e8; vertical-align: top; }
+  .two-col-table tr:last-child td { border-bottom: none; }
+  .two-col-table .lbl { width: 40%; font-size: 7pt; font-weight: bold; color: #555; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+  .two-col-table .val { font-size: 8.5pt; color: #111; }
+  .two-col-table .val-empty { color: #aaa; font-style: italic; }
+
+  /* ── Side-by-side sections ── */
+  .side-by-side { display: flex; gap: 0; }
+  .side-by-side .section { flex: 1; }
+  .side-by-side .section:first-child { margin-right: 8px; }
+
+  /* ── Full-row multi-col ── */
+  .header-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+  .header-grid .section { margin-bottom: 0; }
+
+  /* ── Notes block ── */
+  .notes-val { white-space: pre-wrap; font-size: 8pt; color: #222; padding: 4px 7px; }
+
+  /* ── Footer ── */
+  .doc-footer { position: fixed; bottom: 0.35in; left: 0.55in; right: 0.55in; font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; display: flex; justify-content: space-between; }
+
+  /* ── Checkbox indicator ── */
+  .cb { display: inline-block; width: 9px; height: 9px; border: 1px solid #555; margin-right: 3px; vertical-align: middle; position: relative; }
+  .cb.checked::after { content: '✓'; position: absolute; top: -2px; left: 0px; font-size: 8pt; font-weight: bold; color: #1a1a1a; }
+</style>
+</head>
+<body>
+
+{# Helper: only render a row if value is non-empty #}
+{% macro row(label, value) %}
+  {% set v = value|string|trim %}
+  {% if v and v not in ['-','—','None','none','false'] %}
+  <tr>
+    <td class="lbl">{{ label }}</td>
+    <td class="val">{{ v }}</td>
+  </tr>
+  {% endif %}
+{% endmacro %}
+
+{% macro cb_row(label, checked) %}
+  {% if checked == 'true' %}
+  <tr>
+    <td class="lbl"></td>
+    <td class="val"><span class="cb checked"></span> {{ label }}</td>
+  </tr>
+  {% endif %}
+{% endmacro %}
+
+{% set d = advance_data %}
+{% macro v(key, default='') %}{{ d.get(key, default)|string|trim }}{% endmacro %}
+
+<!-- Header -->
+<div class="doc-header">
+  <div>
+    <div class="doc-title">DPC <span>ADVANCE</span> SHEET</div>
+    <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+  </div>
+  <div class="doc-meta">
+    <div class="version">v{{ version }}</div>
+    <div>{{ export_date }}</div>
+    <div style="margin-top:3px; font-size:8pt; color:#222">
+      <strong>{{ show.name }}</strong> &nbsp;·&nbsp; {{ show.show_date or '—' }}
+    </div>
+  </div>
+</div>
+
+<!-- Show Info + Right Column side by side -->
+<div class="side-by-side">
+  <div class="section" style="flex:1.2">
+    <div class="section-head">Show Information</div>
+    <table class="two-col-table">
+      {{ row('Show Name',  v('show_name', show.name)) }}
+      {{ row('Date',       v('show_date', show.show_date or '')) }}
+      {{ row('Time',       v('show_time', show.show_time)) }}
+      {{ row('Venue',      v('venue',     show.venue)) }}
+      {{ row('Prod. Manager', v('production_manager')) }}
+      {{ row('Tour Manager',  v('tour_manager')) }}
+      {{ row('Promoter',      v('promoter')) }}
+      {{ row('Addl. Contacts',v('additional_contacts')) }}
+    </table>
+  </div>
+  <div class="section" style="flex:1">
+    <div class="section-head">Contacts &amp; Logistics</div>
+    <table class="two-col-table">
+      {{ row('Programming',    v('programming')) }}
+      {{ row('Events',         v('events')) }}
+      {{ row('Hospitality',    v('hospitality_contact')) }}
+      {{ row('Guest Services', v('guest_services')) }}
+      {{ row('Radio Channel',  v('radio_channel')) }}
+      {{ row('Runner',         v('runner')) }}
+      {{ row('Rental Works?',  v('rental_works')) }}
+      {{ row('Budget — What',  v('budget_what')) }}
+      {{ row('Budget — Amount',v('budget_amount')) }}
+    </table>
+  </div>
+</div>
+
+<!-- Arrival & Parking -->
+{% set has_arrival = v('access_time') or v('loading_dock') not in ['','-'] or v('runner_needed') not in ['','-'] or v('parking_validations') not in ['','-'] or v('special_accommodations') not in ['','-'] or v('additional_space') not in ['','-'] or v('arrival_notes') %}
+{% if has_arrival %}
+<div class="section">
+  <div class="section-head">Arrival &amp; Parking</div>
+  <table class="two-col-table">
+    {{ row('Access Time',       v('access_time')) }}
+    {{ row('Loading Dock',      v('loading_dock')) }}
+    {% set veh_parts = [] %}
+    {% if v('vehicle_dpc') == 'true' %}{% set _ = veh_parts.append('DPC Van') %}{% endif %}
+    {% if v('vehicle_dpc_truck') == 'true' %}{% set _ = veh_parts.append('DPC Truck') %}{% endif %}
+    {% if v('vehicle_rental') == 'true' %}{% set _ = veh_parts.append('Rental Vehicle') %}{% endif %}
+    {% if v('vehicle_other') == 'true' %}{% set _ = veh_parts.append('Other') %}{% endif %}
+    {% if veh_parts %}{{ row('Vehicles', veh_parts|join(', ') + ((' · ' + v('vehicle_notes')) if v('vehicle_notes') else '')) }}{% endif %}
+    {{ row('Runner Needed',     v('runner_needed')) }}
+    {{ row('Runner Time',       v('runner_time')) }}
+    {{ row('Runner Vehicle',    v('runner_vehicle')) }}
+    {{ row('Rental Car',        v('rental_car_needed')) }}
+    {{ row('Rental Drop-Offs',  v('rental_drop_offs')) }}
+    {{ row('Parking Validations', v('parking_validations')) }}
+    {{ row('Validation Count',  v('parking_validations_count')) }}
+    {{ row('Special Accommodations', v('special_accommodations')) }}
+    {{ row('Accomm. Details',   v('special_accommodations_details')) }}
+    {{ row('Additional Space',  v('additional_space')) }}
+    {{ row('Space Details',     v('additional_space_details')) }}
+  </table>
+  {% if v('arrival_notes') %}
+  <div class="notes-val">{{ v('arrival_notes') }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Security -->
+{% set has_sec = v('backstage_headcount') or v('credentials_badges') not in ['','-'] or v('extra_security') not in ['','-'] or v('security_meeting') not in ['','-'] or v('security_notes') %}
+{% if has_sec %}
+<div class="section">
+  <div class="section-head">Security</div>
+  <table class="two-col-table">
+    {{ row('Backstage Headcount', v('backstage_headcount')) }}
+    {{ row('Credentials / Badges', v('credentials_badges')) }}
+    {{ row('Extra Security Needs', v('extra_security')) }}
+    {{ row('Extra Security Details', v('extra_security_details')) }}
+    {{ row('Security Meeting', v('security_meeting')) }}
+    {{ row('Security Meeting Time', v('security_meeting_time')) }}
+  </table>
+  {% if v('security_notes') %}
+  <div class="notes-val">{{ v('security_notes') }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Hospitality + FOH side by side -->
+{% set has_hosp = v('food_beverage') not in ['','-'] or v('allergies') not in ['','-'] or v('hospitality_notes') %}
+{% set has_foh  = v('foh_contact') or v('foh_activations') not in ['','-'] or v('foh_notes') %}
+{% if has_hosp or has_foh %}
+<div class="side-by-side">
+  {% if has_hosp %}
+  <div class="section">
+    <div class="section-head">Hospitality</div>
+    <table class="two-col-table">
+      {{ row('Food & Bev Needs', v('food_beverage')) }}
+      {{ row('F&B Details',      v('food_beverage_details')) }}
+      {{ row('Allergies',        v('allergies')) }}
+      {{ row('Allergy Details',  v('allergies_details')) }}
+    </table>
+    {% if v('hospitality_notes') %}
+    <div class="notes-val">{{ v('hospitality_notes') }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% if has_foh %}
+  <div class="section">
+    <div class="section-head">Front of House</div>
+    <table class="two-col-table">
+      {{ row('FOH Contact',     v('foh_contact')) }}
+      {{ row('FOH Activations', v('foh_activations')) }}
+      {{ row('Activation Details', v('foh_activations_details')) }}
+    </table>
+    {% if v('foh_notes') %}
+    <div class="notes-val">{{ v('foh_notes') }}</div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- General Info -->
+{% set has_gen = v('load_in_needed') not in ['','-'] or v('general_notes') %}
+{% if has_gen %}
+<div class="section">
+  <div class="section-head">General Information</div>
+  <table class="two-col-table">
+    {{ row('Load-In Needed', v('load_in_needed')) }}
+    {{ row('Load-In Details', v('load_in_details')) }}
+  </table>
+  {% if v('general_notes') %}
+  <div class="notes-val">{{ v('general_notes') }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Footer -->
+<div class="doc-footer">
+  <span>{{ show.name }}  ·  {{ show.show_date or '—' }}</span>
+  <span>ADVANCE SHEET v{{ version }}  ·  Exported {{ export_date }}</span>
+  <span>Dr. Phillips Center for the Performing Arts</span>
+</div>
+
+</body>
+</html>
