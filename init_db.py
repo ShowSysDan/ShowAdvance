@@ -1,101 +1,194 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>{% block title %}DPC Advance{% endblock %}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  {% block head %}{% endblock %}
-</head>
-<body>
+"""
+Run this once to create the database and seed it with contacts from the Excel.
+Usage: python init_db.py
+"""
+import sqlite3
+import os
+from werkzeug.security import generate_password_hash
 
-{% if user %}
-<div class="app-layout">
+DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advance.db')
 
-  <!-- Sidebar -->
-  <aside class="sidebar">
-    <div class="sidebar-brand">
-      <span class="brand-icon">⬡</span>
-      <div>
-        <div class="brand-name">DPC ADVANCE</div>
-        <div class="brand-sub">Production Management</div>
-      </div>
-    </div>
+SCHEMA = """
+PRAGMA foreign_keys = ON;
 
-    <nav class="sidebar-nav">
-      <a href="{{ url_for('dashboard') }}" class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
-        Dashboard
-      </a>
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    role TEXT DEFAULT 'user',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-      {% if request.endpoint in ['show_page'] %}
-      <div class="nav-section-label">CURRENT SHOW</div>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='advance') }}" class="nav-item sub {% if tab == 'advance' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
-        Advance Sheet
-      </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='schedule') }}" class="nav-item sub {% if tab == 'schedule' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
-        Production Schedule
-      </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='postnotes') }}" class="nav-item sub {% if tab == 'postnotes' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        Post-Show Notes
-      </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='export') }}" class="nav-item sub {% if tab == 'export' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-        Export PDFs
-      </a>
-      {% endif %}
+CREATE TABLE IF NOT EXISTS shows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    show_date DATE,
+    show_time TEXT DEFAULT '',
+    venue TEXT DEFAULT 'Judson''s Live',
+    status TEXT DEFAULT 'active',
+    advance_version INTEGER DEFAULT 0,
+    schedule_version INTEGER DEFAULT 0,
+    created_by INTEGER REFERENCES users(id),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-      <div class="nav-section-label">SYSTEM</div>
-      <a href="{{ url_for('settings') }}" class="nav-item {% if request.endpoint == 'settings' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
-        Settings
-      </a>
-    </nav>
+CREATE TABLE IF NOT EXISTS advance_data (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    field_key TEXT NOT NULL,
+    field_value TEXT DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(show_id, field_key)
+);
 
-    <div class="sidebar-footer">
-      <div class="sidebar-user">
-        <div class="user-avatar">{{ user.display_name[0].upper() }}</div>
-        <div class="user-info">
-          <div class="user-name">{{ user.display_name }}</div>
-          <div class="user-role">{{ user.role }}</div>
-        </div>
-      </div>
-      <a href="{{ url_for('logout') }}" class="logout-btn" title="Logout">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
-      </a>
-    </div>
-  </aside>
+CREATE TABLE IF NOT EXISTS schedule_rows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    sort_order INTEGER DEFAULT 0,
+    start_time TEXT DEFAULT '',
+    end_time TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    notes TEXT DEFAULT ''
+);
 
-  <!-- Main -->
-  <main class="main-content">
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        <div class="flash-container">
-          {% for cat, msg in messages %}
-            <div class="flash flash-{{ cat }}">
-              {{ msg }}
-              <button onclick="this.parentElement.remove()">×</button>
-            </div>
-          {% endfor %}
-        </div>
-      {% endif %}
-    {% endwith %}
+CREATE TABLE IF NOT EXISTS schedule_meta (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    field_key TEXT NOT NULL,
+    field_value TEXT DEFAULT '',
+    UNIQUE(show_id, field_key)
+);
 
-    {% block content %}{% endblock %}
-  </main>
+CREATE TABLE IF NOT EXISTS post_show_notes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    field_key TEXT NOT NULL,
+    field_value TEXT DEFAULT '',
+    UNIQUE(show_id, field_key)
+);
 
-</div>
-{% else %}
-  {% block auth_content %}{% endblock %}
-{% endif %}
+CREATE TABLE IF NOT EXISTS contacts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    title TEXT DEFAULT '',
+    department TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
-<script src="{{ url_for('static', filename='js/app.js') }}"></script>
-{% block scripts %}{% endblock %}
-</body>
-</html>
+CREATE TABLE IF NOT EXISTS export_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id INTEGER REFERENCES shows(id) ON DELETE SET NULL,
+    export_type TEXT,
+    version INTEGER,
+    exported_by INTEGER REFERENCES users(id),
+    exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    filename TEXT DEFAULT ''
+);
+"""
+
+SEED_CONTACTS = [
+    # Production
+    ('Allie Shidel',          'Production Manager',         'Production',     '239-898-4419', ''),
+    ('Alyssa Marinello',      'Production Manager',         'Production',     '860-707-0224', ''),
+    ('Ashley Kreischer',      'Production Manager',         'Production',     '832-527-1507', ''),
+    ('Cheyenne Young',        'Production Manager',         'Production',     '407-953-9686', ''),
+    ('Jeff Sturgis',          'Production Manager',         'Production',     '801-971-2240', ''),
+    ('John Gallagher',        'Production Manager',         'Production',     '732-770-1406', ''),
+    ('Noah Mencia',           'Production Manager',         'Production',     '407-269-0286', ''),
+    ('Troy Mitchell',         'Production Manager',         'Production',     '716-622-7675', ''),
+    ('Don Teer',              'Director, Production',       'Production',     '407-376-4149', ''),
+    ('Dw Phineas Perkins',    'Director, Production',       'Production',     '407-421-4331', ''),
+    ('Kevin Griffin',         'Technical Director',         'Production',     '407-921-4584', ''),
+    ('Rich Neu',              'Assoc Technical Director',   'Production',     '407-803-5153', ''),
+    # Programming
+    ('Andrew Birgensmith',    'Sr. Director, Programming',          'Programming',    '816-935-9120', ''),
+    ('Chris Belt',            "Manager, Judson's Programming",      'Programming',    '689-248-6768', ''),
+    ('Foster Cronin',         'VP, Programming',                    'Programming',    '267-438-4371', ''),
+    ('Geraldine Diaz',        'Programming Coordinator',            'Programming',    '352-942-4672', ''),
+    ('Jovanna Hernandez',     'Director, Regional Programming',     'Programming',    '407-430-8939', ''),
+    ('Mariah Roberts',        'Manager, Commercial Booking',        'Programming',    '352-634-0157', ''),
+    ('Melissa Hopkins',       'Programming Coordinator',            'Programming',    '407-839-0119', ''),
+    ('Toni Chandler',         'Manager, Regional Arts Programming', 'Programming',    '386-216-4493', ''),
+    ('Zachary Hines',         'Manager, Commercial Booking',        'Programming',    '609-413-1869', ''),
+    # Event Manager
+    ('Grace Smith',           'Sales Manager, Events',      'Event Manager',  '850-728-8183', ''),
+    ('Jenna Rogers',          'Director, Events',           'Event Manager',  '407-383-6008', ''),
+    ('Kelsie Taylor',         'Sr. Sales Manager, Events',  'Event Manager',  '407-739-5909', ''),
+    ('Robyn Pigozzi',         'Sr. Manager, Events',        'Event Manager',  '407-619-2609', ''),
+    ('Sarah-Lynn Sharpton',   'Event Manager',              'Event Manager',  '334-740-9042', ''),
+    ('Trevor Starr',          'Event Manager',              'Event Manager',  '321-289-6063', ''),
+    # Education Team
+    ('Brooke Saad',           'Manager, Education',         'Education Team', '407-409-1035', ''),
+    ('Gabrielle Lawlor',      'Supervisor, SoA Education',  'Education Team', '',             ''),
+    ('Khristy Chamberlain',   'Manager, Education',         'Education Team', '954-439-6620', ''),
+    ('Ryan Simpson',          'Director, Education',        'Education Team', '847-951-9439', ''),
+    ('Sara York',             'Sr. Manager, Education',     'Education Team', '334-618-8886', ''),
+    ('Tati Bello',            'SOA Manager, Education',     'Education Team', '321-263-8004', ''),
+    # Hospitality
+    ('Dana Desposito',        'Supervisor, Craft Services', 'Hospitality',    '772-349-1347', ''),
+    ('Jackie Einfeldt',       'Manager, Concession',        'Hospitality',    '321-304-0482', ''),
+    ('Jenna Wickens',         'Manager, Backstage Catering','Hospitality',    '772-521-5521', ''),
+    ('F&B Management',        'Management',                 'Hospitality',    '',             'foodbeveragemanagement@drphillipscenter.org'),
+    # Guest Services
+    ('Aaron Sandford-Wetherell','Sr. Manager, Guest Services','Guest Services','407-489-8620',''),
+    ('Diana Mattoni',         'Manager, Front of House',    'Guest Services', '',             ''),
+    ('Meghan Godber',         'Manager, Guest Services',    'Guest Services', '407-353-1593', ''),
+    ('Charlie Robuck',        'Manager, Front of House',    'Guest Services', '910-520-3668', ''),
+    ('Zakiya Smith-Dore',     'Director, Guest Services',   'Guest Services', '407-373-1949', ''),
+    # Security
+    ('Security Dept',         'Security',                   'Security',       '',             'security@drphillipscenter.org'),
+    # Runners
+    ('Anik Pariseleti',       'Runner', 'Runners', '', ''),
+    ('David Becker',          'Runner', 'Runners', '', ''),
+    ('Josh Cassady',          'Runner', 'Runners', '', ''),
+    ('Kathy Wiebe',           'Runner', 'Runners', '', ''),
+    ('Keith (KJ) Sales',      'Runner', 'Runners', '', ''),
+    ('Kenzie Smith',          'Runner', 'Runners', '', ''),
+    ("Kyle O'Toole",          'Runner', 'Runners', '', ''),
+    ('Luke St. Jean',         'Runner (no alcohol)', 'Runners', '', ''),
+    ('Matt McGregor',         'Runner (no people)',  'Runners', '', ''),
+    ('Rick Luciano',          'Runner', 'Runners', '', ''),
+    ('Sofia Rivera',          'Runner', 'Runners', '', ''),
+]
+
+def init_db(force=False):
+    if os.path.exists(DATABASE) and not force:
+        print(f"Database already exists at {DATABASE}")
+        print("Use --force flag to reinitialize (WARNING: destroys all data)")
+        return
+
+    conn = sqlite3.connect(DATABASE)
+    conn.executescript(SCHEMA)
+
+    # Admin user
+    conn.execute("""
+        INSERT OR REPLACE INTO users (username, password_hash, display_name, role)
+        VALUES (?, ?, ?, ?)
+    """, ('admin', generate_password_hash('admin123'), 'Administrator', 'admin'))
+
+    # Seed contacts
+    for row in SEED_CONTACTS:
+        conn.execute("""
+            INSERT INTO contacts (name, title, department, phone, email)
+            VALUES (?, ?, ?, ?, ?)
+        """, row)
+
+    conn.commit()
+    conn.close()
+
+    print("✓ Database created:", DATABASE)
+    print("✓ Admin account:   username=admin  password=admin123")
+    print("✓ Contacts seeded:", len(SEED_CONTACTS), "contacts imported")
+    print()
+    print("⚠  Change the admin password after first login via Settings → Users")
+
+
+if __name__ == '__main__':
+    import sys
+    force = '--force' in sys.argv
+    init_db(force=force)

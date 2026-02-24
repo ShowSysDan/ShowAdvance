@@ -1,0 +1,577 @@
+{% extends "base.html" %}
+{% block title %}{{ show.name }} — DPC Advance{% endblock %}
+
+{% block content %}
+
+{# ─── Macros ─────────────────────────────────────────────────────── #}
+{% macro adv(key, default='') %}{{ advance_data.get(key, default) }}{% endmacro %}
+{% macro meta(key, default='') %}{{ schedule_meta.get(key, default) }}{% endmacro %}
+{% macro note(key, default='') %}{{ notes_data.get(key, default) }}{% endmacro %}
+
+{% macro yes_no(key, label, notes_key=None) %}
+<div class="field-group">
+  <label class="field-label">{{ label }}</label>
+  <select name="{{ key }}" class="field-input adv-field" data-key="{{ key }}">
+    <option value="-" {% if adv(key) == '-' or not adv(key) %}selected{% endif %}>—</option>
+    <option value="Yes" {% if adv(key) == 'Yes' %}selected{% endif %}>Yes</option>
+    <option value="No" {% if adv(key) == 'No' %}selected{% endif %}>No</option>
+  </select>
+</div>
+{% if notes_key %}
+<div class="field-group conditional" data-show-when="{{ key }}=Yes">
+  <label class="field-label">DETAILS</label>
+  <textarea name="{{ notes_key }}" class="field-input field-textarea adv-field" data-key="{{ notes_key }}" rows="2">{{ adv(notes_key) }}</textarea>
+</div>
+{% endif %}
+{% endmacro %}
+
+{% macro contact_select(key, label, dept) %}
+<div class="field-group">
+  <label class="field-label">{{ label }}</label>
+  <select name="{{ key }}" class="field-input adv-field" data-key="{{ key }}">
+    <option value="">— Select —</option>
+    <option value="-" {% if adv(key) == '-' %}selected{% endif %}>N/A</option>
+    {% for c in contacts_by_dept.get(dept, []) %}
+    <option value="{{ c.name }}" {% if adv(key) == c.name %}selected{% endif %}>{{ c.name }}{% if c.title %} · {{ c.title }}{% endif %}</option>
+    {% endfor %}
+  </select>
+</div>
+{% endmacro %}
+
+{# ─── Page Header ─────────────────────────────────────────────────── #}
+<div class="page-header show-header">
+  <div>
+    <a href="{{ url_for('dashboard') }}" class="back-link">← All Shows</a>
+    <h1 class="page-title">{{ show.name }}</h1>
+    <p class="page-sub">
+      {% if show.show_date %}{{ show.show_date }}{% endif %}
+      {% if show.show_time %} · {{ show.show_time }}{% endif %}
+      {% if show.venue %} · {{ show.venue }}{% endif %}
+      {% if show.status == 'archived' %}<span class="badge-archived">ARCHIVED</span>{% endif %}
+    </p>
+  </div>
+  <div class="header-actions" id="save-indicator">
+    <span class="save-status" id="save-status"></span>
+    <button class="btn btn-primary" id="save-btn" onclick="saveActive()">Save</button>
+  </div>
+</div>
+
+{# ─── Tab Nav ──────────────────────────────────────────────────────── #}
+<div class="tab-nav">
+  <button class="tab-btn {% if tab == 'advance' %}active{% endif %}" onclick="switchTab('advance')">Advance Sheet</button>
+  <button class="tab-btn {% if tab == 'schedule' %}active{% endif %}" onclick="switchTab('schedule')">Production Schedule</button>
+  <button class="tab-btn {% if tab == 'postnotes' %}active{% endif %}" onclick="switchTab('postnotes')">Post-Show Notes</button>
+  <button class="tab-btn {% if tab == 'export' %}active{% endif %}" onclick="switchTab('export')">
+    Export PDFs
+    {% if show.advance_version > 0 or show.schedule_version > 0 %}
+    <span class="tab-badge">v{{ [show.advance_version, show.schedule_version]|max }}</span>
+    {% endif %}
+  </button>
+</div>
+
+{# ════════════════════════════════════════════════════════════════════ #}
+{#                        ADVANCE SHEET TAB                            #}
+{# ════════════════════════════════════════════════════════════════════ #}
+<div id="tab-advance" class="tab-pane {% if tab == 'advance' %}active{% endif %}">
+<form id="advance-form" autocomplete="off">
+
+  {# ── Show Info ──────────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> SHOW INFORMATION
+    </div>
+    <div class="form-section-body two-col">
+      <div class="col-left">
+        <div class="field-group">
+          <label class="field-label">SHOW NAME</label>
+          <input type="text" class="field-input adv-field" data-key="show_name" value="{{ adv('show_name', show.name) }}">
+        </div>
+        <div class="form-row cols-2">
+          <div class="field-group">
+            <label class="field-label">SHOW DATE</label>
+            <input type="date" class="field-input adv-field" data-key="show_date" value="{{ adv('show_date', show.show_date or '') }}">
+          </div>
+          <div class="field-group">
+            <label class="field-label">SHOW TIME(S)</label>
+            <input type="text" class="field-input adv-field" data-key="show_time" value="{{ adv('show_time', show.show_time) }}" placeholder="e.g. 7pm and 9pm">
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label">VENUE</label>
+          <input type="text" class="field-input adv-field" data-key="venue" value="{{ adv('venue', show.venue) }}">
+        </div>
+        {{ contact_select('production_manager', 'PRODUCTION MANAGER', 'Production') }}
+        <div class="field-group">
+          <label class="field-label">TOUR MANAGER</label>
+          <input type="text" class="field-input adv-field" data-key="tour_manager" value="{{ adv('tour_manager') }}" placeholder="Name · email / phone">
+        </div>
+        <div class="field-group">
+          <label class="field-label">PROMOTER</label>
+          <input type="text" class="field-input adv-field" data-key="promoter" value="{{ adv('promoter') }}">
+        </div>
+        <div class="field-group">
+          <label class="field-label">ADDITIONAL CONTACTS</label>
+          <textarea class="field-input field-textarea adv-field" data-key="additional_contacts" rows="3" placeholder="Name, role, phone/email...">{{ adv('additional_contacts') }}</textarea>
+        </div>
+      </div>
+
+      <div class="col-right">
+        {{ contact_select('programming', 'PROGRAMMING', 'Programming') }}
+        {{ contact_select('events', 'EVENTS', 'Event Manager') }}
+        {{ contact_select('hospitality_contact', 'HOSPITALITY', 'Hospitality') }}
+        {{ contact_select('guest_services', 'GUEST SERVICES', 'Guest Services') }}
+        <div class="field-group">
+          <label class="field-label">RADIO CHANNEL</label>
+          <input type="text" class="field-input adv-field" data-key="radio_channel" value="{{ adv('radio_channel') }}" placeholder="e.g. 16/Judson's">
+        </div>
+        {{ contact_select('runner', 'RUNNER', 'Runners') }}
+        <div class="field-group">
+          <label class="field-label">RENTAL WORKS?</label>
+          <select class="field-input adv-field" data-key="rental_works">
+            <option value="-" {% if adv('rental_works') in ['-',''] %}selected{% endif %}>—</option>
+            <option value="Yes" {% if adv('rental_works') == 'Yes' %}selected{% endif %}>Yes</option>
+            <option value="No" {% if adv('rental_works') == 'No' %}selected{% endif %}>No</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">BUDGET / ESTIMATE</label>
+          <div class="inline-fields">
+            <input type="text" class="field-input adv-field" data-key="budget_what" value="{{ adv('budget_what') }}" placeholder="What">
+            <input type="text" class="field-input adv-field" data-key="budget_amount" value="{{ adv('budget_amount') }}" placeholder="Amount">
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Arrival & Parking ──────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header collapsible" onclick="toggleSection(this)">
+      <span class="section-icon">◈</span> ARRIVAL &amp; PARKING
+      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="form-section-body">
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">ACCESS TIME TO BUILDING</label>
+          <input type="text" class="field-input adv-field" data-key="access_time" value="{{ adv('access_time') }}" placeholder="e.g. 3:30pm">
+        </div>
+        <div class="field-group">
+          <label class="field-label">LOADING DOCK — WHICH BAY(S)?</label>
+          <select class="field-input adv-field" data-key="loading_dock">
+            {% for opt in ['-', 'N/A', 'Bay 1', 'Bay 2', 'Bay 3', 'Bay 4', 'Bay 5', 'Bay 1+2', 'Bay 1+2+3', 'Other — See Notes'] %}
+            <option value="{{ opt }}" {% if adv('loading_dock') == opt %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label class="field-label">VEHICLES</label>
+        <div class="checkbox-row">
+          {% for v in ['DPC Van (15-passenger, back seat removed)', 'DPC Truck', 'Rental Vehicle', 'Other'] %}
+          {% set vkey = 'vehicle_' + v.split(' ')[0].split('(')[0].lower().replace(' ','_') %}
+          <label class="checkbox-label">
+            <input type="checkbox" class="adv-checkbox adv-field" data-key="{{ vkey }}" {% if adv(vkey) == 'true' %}checked{% endif %}>
+            {{ v }}
+          </label>
+          {% endfor %}
+        </div>
+        <input type="text" class="field-input adv-field mt-xs" data-key="vehicle_notes" value="{{ adv('vehicle_notes') }}" placeholder="Vehicle notes...">
+      </div>
+
+      <div class="form-row cols-3">
+        {{ yes_no('runner_needed', 'RUNNER NEEDED?') }}
+        {{ yes_no('rental_car_needed', 'RENTAL CAR NEEDED?') }}
+        {{ yes_no('rental_drop_offs', 'RENTAL DROP-OFFS?') }}
+      </div>
+
+      <div class="conditional-block" data-show-when="runner_needed=Yes">
+        <div class="form-row cols-2">
+          <div class="field-group">
+            <label class="field-label">RUNNER PICKUP TIME</label>
+            <input type="text" class="field-input adv-field" data-key="runner_time" value="{{ adv('runner_time') }}" placeholder="e.g. 2:00pm">
+          </div>
+          <div class="field-group">
+            <label class="field-label">RUNNER VEHICLE</label>
+            <select class="field-input adv-field" data-key="runner_vehicle">
+              {% for v in ['-', 'DPC Van', 'DPC Truck', 'Rental Vehicle', 'Other'] %}
+              <option value="{{ v }}" {% if adv('runner_vehicle') == v %}selected{% endif %}>{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row cols-2">
+        <div>
+          {{ yes_no('parking_validations', 'PARKING VALIDATIONS NEEDED?') }}
+          <div class="conditional-block" data-show-when="parking_validations=Yes">
+            <div class="field-group">
+              <label class="field-label">HOW MANY?</label>
+              <input type="number" class="field-input adv-field" data-key="parking_validations_count" value="{{ adv('parking_validations_count') }}" min="0">
+            </div>
+          </div>
+        </div>
+        <div>
+          {{ yes_no('special_accommodations', 'SPECIAL ACCOMMODATIONS NEEDED?', 'special_accommodations_details') }}
+        </div>
+      </div>
+
+      {{ yes_no('additional_space', 'ADDITIONAL HOLDING / REHEARSAL SPACE NEEDED?', 'additional_space_details') }}
+
+      <div class="notes-section">
+        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ Arrival &amp; Parking Notes</button>
+        <div class="notes-body hidden">
+          <textarea class="field-input field-textarea adv-field" data-key="arrival_notes" rows="3" placeholder="Additional arrival and parking notes...">{{ adv('arrival_notes') }}</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Security ───────────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header collapsible" onclick="toggleSection(this)">
+      <span class="section-icon">◈</span> SECURITY
+      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="form-section-body">
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">HOW MANY PEOPLE BACKSTAGE (Cast/Crew/Staff)?</label>
+          <input type="number" class="field-input adv-field" data-key="backstage_headcount" value="{{ adv('backstage_headcount') }}" min="0" placeholder="0">
+        </div>
+        <div class="field-group">
+          <label class="field-label">CREDENTIALS / BADGES?</label>
+          <select class="field-input adv-field" data-key="credentials_badges">
+            <option value="-" {% if adv('credentials_badges') in ['-',''] %}selected{% endif %}>—</option>
+            <option value="Yes - Tour Provided" {% if adv('credentials_badges') == 'Yes - Tour Provided' %}selected{% endif %}>Yes — Tour Provided</option>
+            <option value="No - Use DPC Lanyards" {% if adv('credentials_badges') == 'No - Use DPC Lanyards' %}selected{% endif %}>No — Use DPC Lanyards / Wristbands</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row cols-2">
+        {{ yes_no('extra_security', 'EXTRA SECURITY NEEDS?', 'extra_security_details') }}
+        {{ yes_no('security_meeting', 'SECURITY MEETING NEEDED?') }}
+      </div>
+      <div class="conditional-block" data-show-when="security_meeting=Yes">
+        <div class="field-group">
+          <label class="field-label">SECURITY MEETING TIME</label>
+          <input type="text" class="field-input adv-field" data-key="security_meeting_time" value="{{ adv('security_meeting_time') }}" placeholder="e.g. 5:30pm">
+        </div>
+      </div>
+      <div class="notes-section">
+        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ Security Notes</button>
+        <div class="notes-body hidden">
+          <textarea class="field-input field-textarea adv-field" data-key="security_notes" rows="3" placeholder="Security notes...">{{ adv('security_notes') }}</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Hospitality ────────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header collapsible" onclick="toggleSection(this)">
+      <span class="section-icon">◈</span> HOSPITALITY
+      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="form-section-body">
+      <div class="form-row cols-2">
+        {{ yes_no('food_beverage', 'SPECIFIC FOOD &amp; BEVERAGE NEEDS?', 'food_beverage_details') }}
+        {{ yes_no('allergies', 'ALLERGIES TO BE AWARE OF?', 'allergies_details') }}
+      </div>
+      <div class="notes-section">
+        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ Hospitality Notes</button>
+        <div class="notes-body hidden">
+          <textarea class="field-input field-textarea adv-field" data-key="hospitality_notes" rows="3" placeholder="Hospitality notes...">{{ adv('hospitality_notes') }}</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Front of House ─────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header collapsible" onclick="toggleSection(this)">
+      <span class="section-icon">◈</span> FRONT OF HOUSE
+      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="form-section-body">
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">FOH CONTACT</label>
+          <input type="text" class="field-input adv-field" data-key="foh_contact" value="{{ adv('foh_contact') }}" placeholder="Name / contact info">
+        </div>
+        {{ yes_no('foh_activations', 'SPECIAL FOH ACTIVATIONS?', 'foh_activations_details') }}
+      </div>
+      <div class="notes-section">
+        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ Front-of-House Notes</button>
+        <div class="notes-body hidden">
+          <textarea class="field-input field-textarea adv-field" data-key="foh_notes" rows="3" placeholder="FOH notes...">{{ adv('foh_notes') }}</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── General Info ───────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header collapsible" onclick="toggleSection(this)">
+      <span class="section-icon">◈</span> GENERAL INFORMATION
+      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="form-section-body">
+      {{ yes_no('load_in_needed', 'LOAD-IN TIME NEEDED?', 'load_in_details') }}
+      <div class="notes-section">
+        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ General Notes</button>
+        <div class="notes-body hidden">
+          <textarea class="field-input field-textarea adv-field" data-key="general_notes" rows="3" placeholder="General notes...">{{ adv('general_notes') }}</textarea>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</form>
+</div>{# end tab-advance #}
+
+
+{# ════════════════════════════════════════════════════════════════════ #}
+{#                     PRODUCTION SCHEDULE TAB                         #}
+{# ════════════════════════════════════════════════════════════════════ #}
+<div id="tab-schedule" class="tab-pane {% if tab == 'schedule' %}active{% endif %}">
+<form id="schedule-form" autocomplete="off">
+
+  {# ── Schedule Meta ─────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> VENUE & TECH INFO</div>
+    <div class="form-section-body">
+      <div class="form-row cols-4">
+        <div class="field-group">
+          <label class="field-label">WIFI NETWORK</label>
+          <input type="text" class="field-input sched-meta" data-key="wifi_network" value="{{ meta('wifi_network') }}" placeholder="Network name">
+        </div>
+        <div class="field-group">
+          <label class="field-label">WIFI CODE</label>
+          <input type="text" class="field-input sched-meta" data-key="wifi_code" value="{{ meta('wifi_code') }}" placeholder="Password">
+        </div>
+        <div class="field-group">
+          <label class="field-label">RADIO CHANNEL</label>
+          <input type="text" class="field-input sched-meta" data-key="radio_channel" value="{{ meta('radio_channel', advance_data.get('radio_channel','')) }}" placeholder="e.g. 16/Judson's">
+        </div>
+        <div class="field-group">
+          <label class="field-label">MIX POSITION</label>
+          <input type="text" class="field-input sched-meta" data-key="mix_position" value="{{ meta('mix_position') }}" placeholder="e.g. FOH">
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">PARKING & SECURITY INFO</label>
+        <input type="text" class="field-input sched-meta" data-key="parking_security" value="{{ meta('parking_security') }}" placeholder="e.g. Judson's Live gravel lot">
+      </div>
+    </div>
+  </div>
+
+  {# ── Timeline ──────────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> TIMELINE
+      <button type="button" class="btn btn-sm btn-ghost ml-auto" onclick="addScheduleRow()">+ Add Row</button>
+    </div>
+    <div class="form-section-body no-pad">
+      <table class="schedule-table" id="schedule-table">
+        <thead>
+          <tr>
+            <th style="width:110px">START</th>
+            <th style="width:110px">END</th>
+            <th>DESCRIPTION</th>
+            <th style="width:160px">NOTES</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+        <tbody id="schedule-rows">
+          {% if schedule_rows %}
+            {% for row in schedule_rows %}
+            <tr class="schedule-row" data-id="{{ row.id }}">
+              <td><input type="text" class="sched-cell" placeholder="3:00pm" value="{{ row.start_time }}"></td>
+              <td><input type="text" class="sched-cell" placeholder="4:00pm" value="{{ row.end_time }}"></td>
+              <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}"></td>
+              <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}"></td>
+              <td><button type="button" class="row-del-btn" onclick="removeRow(this)" title="Remove">×</button></td>
+            </tr>
+            {% endfor %}
+          {% else %}
+            <tr class="schedule-row">
+              <td><input type="text" class="sched-cell" placeholder="3:00pm" value=""></td>
+              <td><input type="text" class="sched-cell" placeholder="4:00pm" value=""></td>
+              <td><input type="text" class="sched-cell" placeholder="Crew Called" value=""></td>
+              <td><input type="text" class="sched-cell" placeholder="" value=""></td>
+              <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
+            </tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+    <div class="form-section-footer">
+      <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow()">+ Add Row</button>
+    </div>
+  </div>
+
+  {# ── Contacts ──────────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> SHOW CONTACTS</div>
+    <div class="form-section-body">
+      <h3 class="sub-section-label">ARTIST / TOUR CONTACTS</h3>
+      <div class="field-group">
+        <textarea class="field-input field-textarea sched-meta" data-key="artist_contacts" rows="4" placeholder="Name · Role · Phone / Email (one per line)">{{ meta('artist_contacts') }}</textarea>
+      </div>
+
+      <h3 class="sub-section-label mt-md">DPC CONTACTS</h3>
+      <div class="form-row cols-2">
+        {% for role, dept in [
+          ('Production Manager', 'Production'),
+          ('Programming', 'Programming'),
+          ('Event Manager', 'Event Manager'),
+          ('Education', 'Education Team'),
+          ('Hospitality', 'Hospitality'),
+          ('Guest Services', 'Guest Services'),
+          ('Runner', 'Runners')
+        ] %}
+        <div class="field-group">
+          <label class="field-label">{{ role.upper() }}</label>
+          <select class="field-input sched-meta" data-key="contact_{{ role.lower().replace(' ','_') }}">
+            <option value="">— Select —</option>
+            <option value="-">N/A</option>
+            {% for c in contacts_by_dept.get(dept, []) %}
+            <option value="{{ c.name }}" data-phone="{{ c.phone }}" data-email="{{ c.email }}"
+              {% if meta('contact_'+role.lower().replace(' ','_')) == c.name %}selected{% endif %}>
+              {{ c.name }}{% if c.phone %} · {{ c.phone }}{% endif %}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+        {% endfor %}
+        <div class="field-group">
+          <label class="field-label">SECURITY EMAIL</label>
+          <input type="text" class="field-input sched-meta" data-key="security_email" value="{{ meta('security_email', 'security@drphillipscenter.org') }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+</form>
+</div>{# end tab-schedule #}
+
+
+{# ════════════════════════════════════════════════════════════════════ #}
+{#                      POST-SHOW NOTES TAB                            #}
+{# ════════════════════════════════════════════════════════════════════ #}
+<div id="tab-postnotes" class="tab-pane {% if tab == 'postnotes' %}active{% endif %}">
+<form id="postnotes-form" autocomplete="off">
+
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> POST-SHOW NOTES</div>
+    <div class="form-section-body">
+      <div class="show-info-readonly">
+        <span>{{ show.name }}</span> · <span>{{ show.show_date or '—' }}</span> · <span>{{ show.show_time or '—' }}</span> · <span>{{ show.venue or '—' }}</span>
+      </div>
+
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">PRODUCTION MANAGER</label>
+          <input type="text" class="field-input notes-field" data-key="pm" value="{{ note('pm', advance_data.get('production_manager','')) }}">
+        </div>
+        <div class="field-group">
+          <label class="field-label">CREW CALLED</label>
+          <input type="text" class="field-input notes-field" data-key="crew_called" value="{{ note('crew_called') }}" placeholder="e.g. 3:00pm">
+        </div>
+      </div>
+
+      {% for label, key, placeholder in [
+        ('SHOW NOTES (Tour/Client)', 'show_notes_tour', 'Notes from artist / tour manager perspective...'),
+        ('HOUSE NOTES', 'house_notes', 'Notes about the venue, audience, house-related issues...'),
+        ('EQUIPMENT / MAINTENANCE ISSUES', 'equipment_issues', 'Any technical or equipment issues that arose...'),
+        ('MISCELLANEOUS', 'miscellaneous', 'Anything else worth noting...')
+      ] %}
+      <div class="field-group">
+        <label class="field-label">{{ label }}</label>
+        <textarea class="field-input field-textarea notes-field" data-key="{{ key }}" rows="4" placeholder="{{ placeholder }}">{{ note(key) }}</textarea>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+</form>
+</div>{# end tab-postnotes #}
+
+
+{# ════════════════════════════════════════════════════════════════════ #}
+{#                         EXPORT TAB                                  #}
+{# ════════════════════════════════════════════════════════════════════ #}
+<div id="tab-export" class="tab-pane {% if tab == 'export' %}active{% endif %}">
+
+  <div class="export-grid">
+    <!-- Advance PDF -->
+    <div class="export-card">
+      <div class="export-card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      </div>
+      <div class="export-card-info">
+        <h3>Advance Sheet PDF</h3>
+        <p>Full advance form with all filled-in fields. Empty fields are omitted.</p>
+        {% if show.advance_version > 0 %}
+        <span class="version-badge">Current: v{{ show.advance_version }}</span>
+        {% endif %}
+      </div>
+      <a href="{{ url_for('export_advance', show_id=show.id) }}" class="btn btn-primary" target="_blank">
+        Export → v{{ (show.advance_version or 0) + 1 }}
+      </a>
+    </div>
+
+    <!-- Schedule PDF -->
+    <div class="export-card">
+      <div class="export-card-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      </div>
+      <div class="export-card-info">
+        <h3>Production Schedule PDF</h3>
+        <p>Day-of schedule with timeline, contacts, and venue info.</p>
+        {% if show.schedule_version > 0 %}
+        <span class="version-badge">Current: v{{ show.schedule_version }}</span>
+        {% endif %}
+      </div>
+      <a href="{{ url_for('export_schedule', show_id=show.id) }}" class="btn btn-primary" target="_blank">
+        Export → v{{ (show.schedule_version or 0) + 1 }}
+      </a>
+    </div>
+  </div>
+
+  <!-- Export History -->
+  {% if exports %}
+  <div class="form-section mt-lg">
+    <div class="form-section-header"><span class="section-icon">◈</span> EXPORT HISTORY</div>
+    <div class="form-section-body no-pad">
+      <table class="data-table">
+        <thead><tr><th>TYPE</th><th>VERSION</th><th>EXPORTED BY</th><th>DATE</th></tr></thead>
+        <tbody>
+          {% for e in exports %}
+          <tr>
+            <td><span class="type-badge type-{{ e.export_type }}">{{ e.export_type.upper() }}</span></td>
+            <td><span class="mono">v{{ e.version }}</span></td>
+            <td>{{ e.exporter or '—' }}</td>
+            <td class="text-dim">{{ e.exported_at[:16].replace('T',' ') }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+</div>{# end tab-export #}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  const SHOW_ID = {{ show.id }};
+  const INITIAL_TAB = '{{ tab }}';
+  initShow(SHOW_ID, INITIAL_TAB);
+</script>
+{% endblock %}
