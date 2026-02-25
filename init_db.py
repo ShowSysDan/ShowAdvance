@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     display_name TEXT,
     role TEXT DEFAULT 'user',
+    theme TEXT DEFAULT 'dark',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -160,6 +161,34 @@ CREATE TABLE IF NOT EXISTS active_sessions (
     focused_field TEXT,           -- field_key the user currently has focused
     last_seen     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id, show_id)
+);
+
+CREATE TABLE IF NOT EXISTS show_comments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id     INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body        TEXT NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS show_attachments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id      INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    uploaded_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    filename     TEXT NOT NULL,
+    mime_type    TEXT DEFAULT 'application/octet-stream',
+    file_data    BLOB NOT NULL,
+    file_size    INTEGER DEFAULT 0,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS advance_reads (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id      INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    version_read INTEGER DEFAULT 0,
+    read_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(show_id, user_id)
 );
 """
 
@@ -454,10 +483,42 @@ def migrate_db():
         );
     """)
 
+    # New feature tables (safe to rerun)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS show_comments (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id    INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            body       TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS show_attachments (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id     INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            filename    TEXT NOT NULL,
+            mime_type   TEXT DEFAULT 'application/octet-stream',
+            file_data   BLOB NOT NULL,
+            file_size   INTEGER DEFAULT 0,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS advance_reads (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id      INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            version_read INTEGER DEFAULT 0,
+            read_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(show_id, user_id)
+        );
+    """)
+
     # ALTER TABLE for new columns (SQLite errors if column already exists)
     for alter_sql in [
         'ALTER TABLE shows ADD COLUMN last_saved_by INTEGER REFERENCES users(id)',
         'ALTER TABLE shows ADD COLUMN last_saved_at TIMESTAMP',
+        "ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'dark'",
     ]:
         try:
             conn.execute(alter_sql)

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ show.name }} — DPC Advance{% endblock %}
+{% block title %}{{ show.name }} — ShowAdvance{% endblock %}
 
 {% block content %}
 
@@ -129,8 +129,12 @@
   <button class="tab-btn {% if tab == 'advance' %}active{% endif %}" onclick="switchTab('advance')">Advance Sheet</button>
   <button class="tab-btn {% if tab == 'schedule' %}active{% endif %}" onclick="switchTab('schedule')">Production Schedule</button>
   <button class="tab-btn {% if tab == 'postnotes' %}active{% endif %}" onclick="switchTab('postnotes')">Post-Show Notes</button>
+  <button class="tab-btn {% if tab == 'comments' %}active{% endif %}" onclick="switchTab('comments')">
+    Comments
+    <span id="comments-count-badge" class="tab-badge" hidden></span>
+  </button>
   <button class="tab-btn {% if tab == 'export' %}active{% endif %}" onclick="switchTab('export')">
-    Export PDFs
+    Export &amp; Files
     {% if show.advance_version > 0 or show.schedule_version > 0 %}
     <span class="tab-badge">v{{ [show.advance_version, show.schedule_version]|max }}</span>
     {% endif %}
@@ -342,6 +346,31 @@
 
 
 {# ════════════════════════════════════════════════════════════════════════════ #}
+{#                           COMMENTS TAB                                       #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
+<div id="tab-comments" class="tab-pane {% if tab == 'comments' %}active{% endif %}">
+  <div class="comments-container">
+    <div id="comments-list" class="comments-list">
+      <p class="text-dim" style="padding:20px;text-align:center;margin:0">Loading comments...</p>
+    </div>
+    {% if not restricted %}
+    <div class="comment-input-area">
+      <div class="comment-input-wrapper">
+        <div class="user-avatar-sm">{{ user.display_name[0].upper() }}</div>
+        <div style="flex:1;position:relative">
+          <textarea id="comment-input" class="field-input field-textarea"
+                    rows="2" placeholder="Add a comment… type @name to mention someone"></textarea>
+          <div id="mention-dropdown" class="mention-dropdown" hidden></div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="submitComment()">Post</button>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+</div>{# end tab-comments #}
+
+
+{# ════════════════════════════════════════════════════════════════════════════ #}
 {#                           EXPORT TAB                                         #}
 {# ════════════════════════════════════════════════════════════════════════════ #}
 <div id="tab-export" class="tab-pane {% if tab == 'export' %}active{% endif %}">
@@ -404,6 +433,36 @@
   </div>
   {% endif %}
 
+  {# ── File Attachments ─────────────────────────────────────────────────── #}
+  <div class="form-section mt-lg">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> ATTACHMENTS
+      {% if not restricted %}
+      <label class="btn btn-sm btn-ghost ml-auto" for="file-upload-input" style="cursor:pointer">+ Attach File</label>
+      <input type="file" id="file-upload-input" style="display:none" onchange="handleFileSelect(this)">
+      {% endif %}
+    </div>
+    <div class="form-section-body">
+      <div id="upload-zone" class="upload-zone"
+           ondrop="handleFileDrop(event)" ondragover="handleFileDragOver(event)" ondragleave="handleFileDragLeave(event)">
+        <span class="upload-zone-hint">Drop a file here to attach it to this show</span>
+      </div>
+      <div id="attachments-list">
+        <p class="text-dim" style="font-size:12px;margin:0">Loading...</p>
+      </div>
+    </div>
+  </div>
+
+  {# ── Read Receipts ─────────────────────────────────────────────────────── #}
+  <div class="form-section mt-lg">
+    <div class="form-section-header"><span class="section-icon">◈</span> ADVANCE READ BY</div>
+    <div class="form-section-body" style="padding-top:12px;padding-bottom:12px">
+      <div id="read-receipts-list" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+        <span class="text-dim" style="font-size:12px">Loading...</span>
+      </div>
+    </div>
+  </div>
+
 </div>{# end tab-export #}
 
 {# ─── Version History Drawer ──────────────────────────────────────────────── #}
@@ -452,6 +511,7 @@
   const SHOW_ID = {{ show.id }};
   const RESTRICTED = {{ 'true' if restricted else 'false' }};
   const INITIAL_TAB = '{{ tab }}';
+  const ALL_USERS = {{ all_users | tojson }};
   let _currentHistId = null;
   initShow(SHOW_ID, INITIAL_TAB);
 
@@ -564,5 +624,6 @@
       document.getElementById('snapshot-modal').style.display = '';
     });
   }
+
 </script>
 {% endblock %}

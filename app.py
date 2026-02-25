@@ -18,6 +18,9 @@ from io import BytesIO
 from flask import (Flask, render_template, request, redirect, url_for,
                    flash, session, jsonify, make_response, abort)
 from werkzeug.security import generate_password_hash, check_password_hash
+from werkzeug.utils import secure_filename
+
+MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dpc-advance-secret-change-in-production')
@@ -132,6 +135,7 @@ def get_current_user():
             'username': session['username'],
             'display_name': session.get('display_name', session['username']),
             'role': session.get('user_role', 'user'),
+            'theme': session.get('theme', 'dark'),
             'is_restricted': session.get('is_restricted', False),
             'is_content_admin': session.get('is_content_admin', False),
         }
@@ -363,6 +367,7 @@ def login():
             session['username']       = user['username']
             session['display_name']   = user['display_name'] or user['username']
             session['user_role']      = user['role']
+            session['theme']          = user['theme'] or 'dark'
             session['is_restricted']  = is_restricted_user(user['id'])
             session['is_content_admin'] = is_content_admin(user['id'])
             syslog_logger.info(f"LOGIN user={username} ip={request.remote_addr}")
@@ -542,6 +547,13 @@ def show_page(show_id):
         dept = c['department'] or 'Other'
         contacts_by_dept.setdefault(dept, []).append(dict(c))
 
+    # All users — for @mention autocomplete in comments
+    all_users_rows = db.execute(
+        'SELECT id, username, display_name FROM users ORDER BY display_name'
+    ).fetchall()
+    all_users = [{'id': u['id'], 'username': u['username'],
+                  'display_name': u['display_name'] or u['username']} for u in all_users_rows]
+
     db.close()
 
     form_sections = get_form_fields_for_template()
@@ -561,6 +573,7 @@ def show_page(show_id):
                            last_saved_display_name=last_saved_display_name,
                            last_saved_at=last_saved_at,
                            restricted=restricted,
+                           all_users=all_users,
                            user=get_current_user())
 
 
@@ -783,6 +796,256 @@ def restore_history(show_id, hist_id):
         f"HISTORY_RESTORE show_id={show_id} hist_id={hist_id} type={form_type} by={session.get('username')}"
     )
     return jsonify({'success': True})
+
+
+# ─── Comments ─────────────────────────────────────────────────────────────────
+
+@app.route('/shows/<int:show_id>/comments', methods=['GET'])
+@login_required
+def get_comments(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    rows = db.execute("""
+        SELECT sc.id, sc.body, sc.created_at,
+               u.display_name, u.username, u.id as uid
+        FROM show_comments sc
+        JOIN users u ON sc.user_id = u.id
+        WHERE sc.show_id = ?
+        ORDER BY sc.created_at ASC
+    """, (show_id,)).fetchall()
+    db.close()
+    return jsonify([{
+        'id':        r['id'],
+        'body':      r['body'],
+        'created_at': r['created_at'],
+        'author':    r['display_name'] or r['username'],
+        'author_id': r['uid'],
+        'initials':  ''.join(w[0].upper() for w in (r['display_name'] or r['username']).split()[:2]),
+        'is_own':    r['uid'] == session['user_id'],
+    } for r in rows])
+
+
+@app.route('/shows/<int:show_id>/comments', methods=['POST'])
+@login_required
+def post_comment(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    data = request.get_json(force=True) or {}
+    body = data.get('body', '').strip()
+    if not body:
+        return jsonify({'success': False, 'error': 'Comment cannot be empty.'}), 400
+    if len(body) > 2000:
+        return jsonify({'success': False, 'error': 'Comment too long (max 2000 chars).'}), 400
+    db = get_db()
+    cur = db.execute(
+        'INSERT INTO show_comments (show_id, user_id, body) VALUES (?, ?, ?)',
+        (show_id, session['user_id'], body)
+    )
+    cid = cur.lastrowid
+    db.commit()
+    row = db.execute("""
+        SELECT sc.id, sc.body, sc.created_at,
+               u.display_name, u.username, u.id as uid
+        FROM show_comments sc JOIN users u ON sc.user_id = u.id
+        WHERE sc.id = ?
+    """, (cid,)).fetchone()
+    db.close()
+    syslog_logger.info(f"COMMENT_POST show_id={show_id} by={session.get('username')}")
+    return jsonify({
+        'success': True,
+        'comment': {
+            'id':        row['id'],
+            'body':      row['body'],
+            'created_at': row['created_at'],
+            'author':    row['display_name'] or row['username'],
+            'author_id': row['uid'],
+            'initials':  ''.join(w[0].upper() for w in (row['display_name'] or row['username']).split()[:2]),
+            'is_own':    True,
+        }
+    })
+
+
+@app.route('/shows/<int:show_id>/comments/<int:cid>/delete', methods=['POST'])
+@login_required
+def delete_comment(show_id, cid):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    comment = db.execute(
+        'SELECT * FROM show_comments WHERE id=? AND show_id=?', (cid, show_id)
+    ).fetchone()
+    if not comment:
+        db.close()
+        abort(404)
+    if comment['user_id'] != session['user_id'] and session.get('user_role') != 'admin':
+        db.close()
+        abort(403)
+    db.execute('DELETE FROM show_comments WHERE id=?', (cid,))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+# ─── File Attachments ──────────────────────────────────────────────────────────
+
+@app.route('/shows/<int:show_id>/attachments', methods=['GET'])
+@login_required
+def get_attachments(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    rows = db.execute("""
+        SELECT sa.id, sa.filename, sa.mime_type, sa.file_size, sa.created_at,
+               u.display_name, u.username
+        FROM show_attachments sa
+        LEFT JOIN users u ON sa.uploaded_by = u.id
+        WHERE sa.show_id = ?
+        ORDER BY sa.created_at ASC
+    """, (show_id,)).fetchall()
+    db.close()
+    return jsonify([{
+        'id':         r['id'],
+        'filename':   r['filename'],
+        'mime_type':  r['mime_type'],
+        'file_size':  r['file_size'],
+        'created_at': r['created_at'],
+        'uploader':   r['display_name'] or r['username'] or 'Unknown',
+    } for r in rows])
+
+
+@app.route('/shows/<int:show_id>/attachments', methods=['POST'])
+@login_required
+def upload_attachment(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    f = request.files.get('file')
+    if not f or not f.filename:
+        return jsonify({'success': False, 'error': 'No file provided.'}), 400
+    data = f.read()
+    if len(data) > MAX_UPLOAD_SIZE:
+        return jsonify({'success': False, 'error': 'File too large (max 20 MB).'}), 413
+    filename  = secure_filename(f.filename) or 'file'
+    mime_type = f.content_type or 'application/octet-stream'
+    db = get_db()
+    cur = db.execute("""
+        INSERT INTO show_attachments (show_id, uploaded_by, filename, mime_type, file_data, file_size)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (show_id, session['user_id'], filename, mime_type, data, len(data)))
+    aid = cur.lastrowid
+    db.commit()
+    row = db.execute("""
+        SELECT sa.id, sa.filename, sa.mime_type, sa.file_size, sa.created_at,
+               u.display_name, u.username
+        FROM show_attachments sa LEFT JOIN users u ON sa.uploaded_by = u.id
+        WHERE sa.id = ?
+    """, (aid,)).fetchone()
+    db.close()
+    syslog_logger.info(f"FILE_UPLOAD show_id={show_id} filename={filename} by={session.get('username')}")
+    return jsonify({
+        'success': True,
+        'attachment': {
+            'id':         row['id'],
+            'filename':   row['filename'],
+            'mime_type':  row['mime_type'],
+            'file_size':  row['file_size'],
+            'created_at': row['created_at'],
+            'uploader':   row['display_name'] or row['username'] or 'Unknown',
+        }
+    })
+
+
+@app.route('/shows/<int:show_id>/attachments/<int:aid>/download')
+@login_required
+def download_attachment(show_id, aid):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    row = db.execute(
+        'SELECT * FROM show_attachments WHERE id=? AND show_id=?', (aid, show_id)
+    ).fetchone()
+    db.close()
+    if not row:
+        abort(404)
+    resp = make_response(bytes(row['file_data']))
+    resp.headers['Content-Type'] = row['mime_type']
+    resp.headers['Content-Disposition'] = f'attachment; filename="{row["filename"]}"'
+    return resp
+
+
+@app.route('/shows/<int:show_id>/attachments/<int:aid>/delete', methods=['POST'])
+@login_required
+def delete_attachment(show_id, aid):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    row = db.execute(
+        'SELECT * FROM show_attachments WHERE id=? AND show_id=?', (aid, show_id)
+    ).fetchone()
+    if not row:
+        db.close()
+        abort(404)
+    if row['uploaded_by'] != session['user_id'] and session.get('user_role') != 'admin':
+        db.close()
+        abort(403)
+    db.execute('DELETE FROM show_attachments WHERE id=?', (aid,))
+    db.commit()
+    db.close()
+    syslog_logger.info(f"FILE_DELETE show_id={show_id} aid={aid} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+# ─── Read Receipts ─────────────────────────────────────────────────────────────
+
+@app.route('/shows/<int:show_id>/read', methods=['POST'])
+@login_required
+def mark_advance_read(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    show = db.execute('SELECT advance_version FROM shows WHERE id=?', (show_id,)).fetchone()
+    if not show:
+        db.close()
+        abort(404)
+    version = show['advance_version'] or 0
+    db.execute("""
+        INSERT INTO advance_reads (show_id, user_id, version_read, read_at)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(show_id, user_id) DO UPDATE SET
+            version_read = excluded.version_read,
+            read_at      = excluded.read_at
+    """, (show_id, session['user_id'], version))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/shows/<int:show_id>/reads')
+@login_required
+def get_advance_reads(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    rows = db.execute("""
+        SELECT ar.version_read, ar.read_at,
+               u.display_name, u.username, u.id as uid
+        FROM advance_reads ar
+        JOIN users u ON ar.user_id = u.id
+        WHERE ar.show_id = ?
+        ORDER BY ar.read_at DESC
+    """, (show_id,)).fetchall()
+    db.close()
+    return jsonify([{
+        'version_read':     r['version_read'],
+        'read_at':          r['read_at'],
+        'author':           r['display_name'] or r['username'],
+        'initials':         ''.join(w[0].upper() for w in (r['display_name'] or r['username']).split()[:2]),
+        'is_current_user':  r['uid'] == session['user_id'],
+    } for r in rows])
 
 
 # ─── Real-time Sync ───────────────────────────────────────────────────────────
@@ -1259,6 +1522,21 @@ def reset_password(uid):
     db.execute('UPDATE users SET password_hash=? WHERE id=?', (generate_password_hash(pw), uid))
     db.commit(); db.close()
     syslog_logger.info(f"PASSWORD_CHANGE user_id={uid} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/account/theme', methods=['POST'])
+@login_required
+def set_theme():
+    data = request.get_json(force=True) or {}
+    theme = data.get('theme', 'dark')
+    if theme not in ('dark', 'light'):
+        theme = 'dark'
+    db = get_db()
+    db.execute('UPDATE users SET theme=? WHERE id=?', (theme, session['user_id']))
+    db.commit()
+    db.close()
+    session['theme'] = theme
     return jsonify({'success': True})
 
 

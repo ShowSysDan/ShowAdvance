@@ -195,10 +195,16 @@ function switchTab(name) {
   const url = new URL(window.location);
   url.searchParams.set('tab', name);
   history.replaceState({}, '', url);
-  // Immediately update presence when the user switches tabs
+  // Immediately update presence and load tab-specific data
   if (SHOW_ID) {
-    if (name === 'advance') _pollAdvanceSync();
-    else _pollHeartbeat();
+    if (name === 'advance') {
+      _pollAdvanceSync();
+      markAdvanceRead();
+    } else {
+      _pollHeartbeat();
+      if (name === 'comments') loadComments();
+      if (name === 'export')   { loadAttachments(); loadReadReceipts(); }
+    }
   }
 }
 
@@ -208,6 +214,7 @@ function initShow(showId, initialTab) {
   bindAdvanceForm();
   bindScheduleForm();
   bindPostNotesForm();
+  initComments();
   evaluateAllConditionals();
 
   // 30-second safety-net: flush any unsaved changes that the debounce
@@ -850,4 +857,360 @@ async function loadBackupStatus() {
       </div>
     `).join('');
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DARK / LIGHT MODE TOGGLE
+═══════════════════════════════════════════════════════════════ */
+const _SUN_SVG  = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>`;
+const _MOON_SVG = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>`;
+
+function toggleTheme() {
+  const html    = document.documentElement;
+  const current = html.getAttribute('data-theme') || 'dark';
+  const next    = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  const btn = document.getElementById('theme-toggle-btn');
+  if (btn) btn.innerHTML = next === 'dark' ? _SUN_SVG : _MOON_SVG;
+  fetch('/account/theme', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({theme: next}),
+  }).catch(() => {});
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   COMMENTS
+═══════════════════════════════════════════════════════════════ */
+
+function initComments() {
+  const input = document.getElementById('comment-input');
+  if (!input) return;
+  input.addEventListener('input',   handleCommentInput);
+  input.addEventListener('keydown', handleCommentKeydown);
+  // Close mention dropdown when clicking outside
+  document.addEventListener('click', e => {
+    if (!e.target.closest('#mention-dropdown') && !e.target.closest('#comment-input')) {
+      hideMentionDropdown();
+    }
+  });
+}
+
+async function loadComments() {
+  if (!SHOW_ID) return;
+  const list = document.getElementById('comments-list');
+  if (!list) return;
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/comments`);
+    const comments = await resp.json();
+    renderComments(comments);
+    const badge = document.getElementById('comments-count-badge');
+    if (badge) {
+      badge.textContent = comments.length;
+      badge.hidden = comments.length === 0;
+    }
+  } catch(_) {}
+}
+
+function renderComments(comments) {
+  const list = document.getElementById('comments-list');
+  if (!list) return;
+  if (!comments.length) {
+    list.innerHTML = '<p class="text-dim" style="padding:28px;text-align:center;margin:0">No comments yet. Start the conversation!</p>';
+    return;
+  }
+  list.innerHTML = comments.map(c => {
+    const color = _userColor(c.author);
+    const dt = c.created_at
+      ? new Date((c.created_at.includes('T') ? c.created_at : c.created_at + 'Z'))
+          .toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})
+      : '';
+    const bodyHtml = _renderCommentBody(c.body);
+    return `
+      <div class="comment-item" data-id="${c.id}">
+        <div class="comment-avatar" style="background:${color}">${c.initials}</div>
+        <div class="comment-bubble">
+          <div class="comment-header">
+            <strong>${_esc(c.author)}</strong>
+            <span class="comment-time">${dt}</span>
+            ${c.is_own ? `<button class="comment-delete-btn" onclick="deleteComment(${c.id})" title="Delete">×</button>` : ''}
+          </div>
+          <div class="comment-body">${bodyHtml}</div>
+        </div>
+      </div>`;
+  }).join('');
+  list.scrollTop = list.scrollHeight;
+}
+
+function _esc(str) {
+  return String(str)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _renderCommentBody(text) {
+  const escaped = _esc(text).replace(/\n/g,'<br>');
+  // Highlight @mentions
+  return escaped.replace(/@([\w][\w .'-]*?)(?=\s|$|<br>)/g,
+    '<span class="comment-mention">@$1</span>');
+}
+
+async function submitComment() {
+  const input = document.getElementById('comment-input');
+  if (!input) return;
+  const body = input.value.trim();
+  if (!body) return;
+  const btn = document.querySelector('.comment-input-area .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Posting…'; }
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/comments`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({body}),
+    });
+    const d = await resp.json();
+    if (d.success) {
+      input.value = '';
+      hideMentionDropdown();
+      await loadComments();
+    } else {
+      alert(d.error || 'Failed to post comment.');
+    }
+  } catch(_) {
+    alert('Network error.');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Post'; }
+  }
+}
+
+async function deleteComment(cid) {
+  if (!confirm('Delete this comment?')) return;
+  const resp = await fetch(`/shows/${SHOW_ID}/comments/${cid}/delete`, {method:'POST'});
+  const d = await resp.json();
+  if (d.success) loadComments();
+  else alert(d.error || 'Delete failed.');
+}
+
+/* @mention autocomplete ───────────────────────────────────────── */
+function handleCommentInput(e) {
+  const input = e.target;
+  const text  = input.value.substring(0, input.selectionStart);
+  const match = text.match(/@(\w*)$/);
+  if (match) {
+    showMentionDropdown(match[1].toLowerCase());
+  } else {
+    hideMentionDropdown();
+  }
+}
+
+function handleCommentKeydown(e) {
+  const dropdown = document.getElementById('mention-dropdown');
+  if (dropdown && !dropdown.hidden) {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      const items = dropdown.querySelectorAll('.mention-item');
+      const focused = dropdown.querySelector('.mention-item.focused');
+      const next = focused ? focused.nextElementSibling : items[0];
+      focused?.classList.remove('focused');
+      if (next) next.classList.add('focused');
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      const items = dropdown.querySelectorAll('.mention-item');
+      const focused = dropdown.querySelector('.mention-item.focused');
+      const prev = focused ? focused.previousElementSibling : items[items.length - 1];
+      focused?.classList.remove('focused');
+      if (prev) prev.classList.add('focused');
+      return;
+    }
+    if (e.key === 'Enter' || e.key === 'Tab') {
+      const focused = dropdown.querySelector('.mention-item.focused') || dropdown.querySelector('.mention-item');
+      if (focused) { e.preventDefault(); focused.click(); return; }
+    }
+    if (e.key === 'Escape') { hideMentionDropdown(); return; }
+  }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault();
+    submitComment();
+  }
+}
+
+function showMentionDropdown(query) {
+  const dropdown = document.getElementById('mention-dropdown');
+  if (!dropdown) return;
+  const all = typeof ALL_USERS !== 'undefined' ? ALL_USERS : [];
+  const matches = all.filter(u => {
+    const name  = (u.display_name || '').toLowerCase();
+    const uname = (u.username || '').toLowerCase();
+    return name.startsWith(query) || uname.startsWith(query) ||
+           name.includes(query)   || uname.includes(query);
+  }).slice(0, 6);
+  if (!matches.length) { hideMentionDropdown(); return; }
+  dropdown.innerHTML = matches.map(u => {
+    const color = _userColor(u.display_name || u.username);
+    return `<div class="mention-item" onclick="insertMention('${_esc(u.display_name || u.username)}')">
+      <span class="mention-avatar" style="background:${color}">${_initials(u.display_name || u.username)}</span>
+      <span>${_esc(u.display_name || u.username)}</span>
+    </div>`;
+  }).join('');
+  dropdown.hidden = false;
+}
+
+function hideMentionDropdown() {
+  const d = document.getElementById('mention-dropdown');
+  if (d) d.hidden = true;
+}
+
+function insertMention(name) {
+  const input = document.getElementById('comment-input');
+  if (!input) return;
+  const pos    = input.selectionStart;
+  const before = input.value.substring(0, pos).replace(/@\w*$/, '@' + name + ' ');
+  const after  = input.value.substring(pos);
+  input.value  = before + after;
+  input.setSelectionRange(before.length, before.length);
+  input.focus();
+  hideMentionDropdown();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   FILE ATTACHMENTS
+═══════════════════════════════════════════════════════════════ */
+
+async function loadAttachments() {
+  if (!SHOW_ID) return;
+  const list = document.getElementById('attachments-list');
+  if (!list) return;
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/attachments`);
+    const files = await resp.json();
+    renderAttachments(files);
+  } catch(_) {}
+}
+
+function renderAttachments(files) {
+  const list = document.getElementById('attachments-list');
+  if (!list) return;
+  if (!files.length) {
+    list.innerHTML = '<p class="text-dim" style="font-size:12px;margin:0">No files attached yet.</p>';
+    return;
+  }
+  list.innerHTML = files.map(f => {
+    const size = f.file_size > 1048576
+      ? (f.file_size / 1048576).toFixed(1) + ' MB'
+      : f.file_size > 1024
+      ? Math.round(f.file_size / 1024) + ' KB'
+      : f.file_size + ' B';
+    const time = f.created_at ? f.created_at.substring(0, 16).replace('T', ' ') : '';
+    return `
+      <div class="attachment-item">
+        <div class="attachment-icon">${_fileIcon(f.mime_type)}</div>
+        <div class="attachment-info">
+          <a href="/shows/${SHOW_ID}/attachments/${f.id}/download" class="attachment-name">${_esc(f.filename)}</a>
+          <span class="attachment-meta">${size} · ${_esc(f.uploader)} · ${time}</span>
+        </div>
+        <button class="btn btn-xs btn-danger-ghost" onclick="deleteAttachment(${f.id})" title="Remove">×</button>
+      </div>`;
+  }).join('');
+}
+
+function _fileIcon(mime) {
+  if (!mime) return '📎';
+  if (mime.includes('pdf'))                             return '📄';
+  if (mime.includes('image'))                           return '🖼';
+  if (mime.includes('audio'))                           return '🎵';
+  if (mime.includes('video'))                           return '🎬';
+  if (mime.includes('word') || mime.includes('document')) return '📝';
+  if (mime.includes('sheet') || mime.includes('excel')) return '📊';
+  if (mime.includes('zip') || mime.includes('compressed')) return '🗜';
+  return '📎';
+}
+
+function handleFileSelect(input) {
+  const file = input.files[0];
+  if (file) uploadFile(file);
+  input.value = '';  // reset so same file can be re-selected
+}
+
+function handleFileDrop(e) {
+  e.preventDefault();
+  e.currentTarget.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadFile(file);
+}
+
+function handleFileDragOver(e) {
+  e.preventDefault();
+  e.currentTarget.classList.add('drag-over');
+}
+
+function handleFileDragLeave(e) {
+  e.currentTarget.classList.remove('drag-over');
+}
+
+async function uploadFile(file) {
+  if (file.size > 20 * 1024 * 1024) {
+    alert('File too large (max 20 MB).');
+    return;
+  }
+  const zone = document.getElementById('upload-zone');
+  if (zone) zone.classList.add('uploading');
+  const formData = new FormData();
+  formData.append('file', file);
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/attachments`, {method:'POST', body: formData});
+    const d = await resp.json();
+    if (d.success) {
+      await loadAttachments();
+      showSaveToast('✓ File attached');
+    } else {
+      alert(d.error || 'Upload failed.');
+    }
+  } catch(_) {
+    alert('Network error during upload.');
+  } finally {
+    if (zone) zone.classList.remove('uploading');
+  }
+}
+
+async function deleteAttachment(aid) {
+  if (!confirm('Remove this attachment?')) return;
+  const resp = await fetch(`/shows/${SHOW_ID}/attachments/${aid}/delete`, {method:'POST'});
+  const d = await resp.json();
+  if (d.success) loadAttachments();
+  else alert(d.error || 'Delete failed.');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   READ RECEIPTS
+═══════════════════════════════════════════════════════════════ */
+
+function markAdvanceRead() {
+  if (!SHOW_ID) return;
+  fetch(`/shows/${SHOW_ID}/read`, {method:'POST'}).catch(() => {});
+}
+
+async function loadReadReceipts() {
+  if (!SHOW_ID) return;
+  const container = document.getElementById('read-receipts-list');
+  if (!container) return;
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/reads`);
+    const reads = await resp.json();
+    if (!reads.length) {
+      container.innerHTML = '<span class="text-dim" style="font-size:12px">No one has opened the advance sheet yet.</span>';
+      return;
+    }
+    container.innerHTML = reads.map(r => {
+      const color = _userColor(r.author);
+      const time  = r.read_at ? r.read_at.substring(0, 16).replace('T', ' ') : '';
+      return `<span class="read-receipt-chip"
+                    style="border-color:${color}33;background:${color}11"
+                    title="${_esc(r.author)} · v${r.version_read} · ${time}">
+        <span class="read-receipt-avatar" style="background:${color}">${r.initials}</span>
+        ${_esc(r.author.split(' ')[0])} <span class="read-version">v${r.version_read}</span>
+      </span>`;
+    }).join('');
+  } catch(_) {}
 }
