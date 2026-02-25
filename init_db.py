@@ -308,6 +308,9 @@ FORM_FIELDS_SEED = [
 ]
 
 APP_SETTINGS_SEED = [
+    # Server
+    ('app_port',        '5400'),
+    # Syslog
     ('syslog_enabled',  '0'),
     ('syslog_host',     '127.0.0.1'),
     ('syslog_port',     '514'),

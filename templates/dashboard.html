@@ -7,10 +7,12 @@
     <h1 class="page-title">Shows</h1>
     <p class="page-sub">{{ active_shows|length }} active · {{ archived_shows|length }} archived</p>
   </div>
+  {% if not restricted %}
   <a href="{{ url_for('new_show') }}" class="btn btn-primary">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" width="16" height="16"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
     New Show
   </a>
+  {% endif %}
 </div>
 
 <!-- Active Shows -->
@@ -39,11 +41,13 @@
         <a href="{{ url_for('show_page', show_id=s.id, tab='advance') }}" class="btn btn-sm btn-ghost">Advance</a>
         <a href="{{ url_for('show_page', show_id=s.id, tab='schedule') }}" class="btn btn-sm btn-ghost">Schedule</a>
         <a href="{{ url_for('show_page', show_id=s.id, tab='export') }}" class="btn btn-sm btn-accent">Export</a>
+        {% if not restricted %}
         <form method="post" action="{{ url_for('archive_show', show_id=s.id) }}" style="display:inline" onsubmit="return confirm('Archive this show?')">
           <button type="submit" class="btn btn-sm btn-danger-ghost" title="Archive">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
           </button>
         </form>
+        {% endif %}
       </div>
     </div>
     {% endfor %}

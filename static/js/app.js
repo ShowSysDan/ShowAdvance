@@ -231,3 +231,325 @@ window.addEventListener('beforeunload', e => {
     e.returnValue = '';
   }
 });
+
+/* ═══════════════════════════════════════════════════════════════
+   SETTINGS PAGE — Form Field Editor
+═══════════════════════════════════════════════════════════════ */
+
+/* ── Drag-to-reorder for form fields ────────────────────────── */
+let _dragSrc = null;
+
+function initFieldDrag() {
+  document.querySelectorAll('.field-row[draggable]').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      _dragSrc = row;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (!_dragSrc || _dragSrc === row) return;
+      const rect = row.getBoundingClientRect();
+      const mid  = rect.top + rect.height / 2;
+      row.parentNode.insertBefore(_dragSrc, e.clientY < mid ? row : row.nextSibling);
+    });
+    row.addEventListener('dragend', () => {
+      if (_dragSrc) _dragSrc.classList.remove('dragging');
+      _dragSrc = null;
+      _saveFieldOrder();
+    });
+  });
+}
+
+async function _saveFieldOrder() {
+  const ids = [...document.querySelectorAll('.field-row[draggable]')].map(r => Number(r.dataset.id));
+  const sectionId = document.querySelector('.field-row[draggable]')?.closest('[data-section-id]')?.dataset.sectionId;
+  const url = sectionId ? `/settings/form-fields/reorder` : `/settings/form-sections/reorder`;
+  const body = sectionId ? {field_ids: ids} : {section_ids: ids};
+  await fetch(url, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+}
+
+/* ── Field Add/Edit Modal ─────────────────────────────────────── */
+let _editFieldId = null;
+
+function openFieldModal(fid, sectionId) {
+  _editFieldId = fid || null;
+  const modal = document.getElementById('field-modal');
+  if (!modal) return;
+  const form = modal.querySelector('#field-modal-form');
+  if (form) form.reset();
+
+  if (fid) {
+    // Load existing field data
+    fetch(`/api/form-fields`).then(r => r.json()).then(sections => {
+      for (const sec of sections) {
+        const field = sec.fields.find(f => f.id === fid);
+        if (field) { _populateFieldModal(field); break; }
+      }
+    });
+  } else {
+    if (sectionId) {
+      const sel = modal.querySelector('[name="section_id"]');
+      if (sel) sel.value = sectionId;
+    }
+  }
+  modal.style.display = '';
+  _toggleFieldTypeOptions(modal.querySelector('[name="field_type"]')?.value);
+}
+
+function _populateFieldModal(field) {
+  const modal = document.getElementById('field-modal');
+  if (!modal) return;
+  for (const [k, v] of Object.entries(field)) {
+    const el = modal.querySelector(`[name="${k}"]`);
+    if (!el) continue;
+    if (el.type === 'checkbox') el.checked = !!v;
+    else el.value = v ?? '';
+  }
+  if (field.options && field.options.length) {
+    const optEl = modal.querySelector('[name="options_text"]');
+    if (optEl) optEl.value = field.options.join('\n');
+  }
+  _toggleFieldTypeOptions(field.field_type);
+}
+
+function _toggleFieldTypeOptions(type) {
+  const modal = document.getElementById('field-modal');
+  if (!modal) return;
+  const optGroup = modal.querySelector('.options-group');
+  const deptGroup = modal.querySelector('.contact-dept-group');
+  if (optGroup) optGroup.style.display = (type === 'select') ? '' : 'none';
+  if (deptGroup) deptGroup.style.display = (type === 'contact_dropdown') ? '' : 'none';
+}
+
+function closeFieldModal() {
+  const modal = document.getElementById('field-modal');
+  if (modal) modal.style.display = 'none';
+  _editFieldId = null;
+}
+
+async function saveField() {
+  const modal = document.getElementById('field-modal');
+  if (!modal) return;
+  const data = {};
+  modal.querySelectorAll('[name]').forEach(el => {
+    if (el.name === 'options_text') return;
+    if (el.type === 'checkbox') data[el.name] = el.checked;
+    else data[el.name] = el.value;
+  });
+  // Parse options
+  const optText = modal.querySelector('[name="options_text"]')?.value || '';
+  data.options = optText.split('\n').map(s => s.trim()).filter(Boolean);
+  if (data.section_id) data.section_id = Number(data.section_id);
+
+  const url = _editFieldId
+    ? `/settings/form-fields/${_editFieldId}/edit`
+    : `/settings/form-fields/add`;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    const d = await resp.json();
+    if (d.success) { closeFieldModal(); location.reload(); }
+    else { alert(d.error || 'Save failed.'); }
+  } catch(e) { alert('Network error.'); }
+}
+
+async function deleteField(fid) {
+  if (!confirm('Delete this field? Saved values for this field will remain in existing shows but the field will no longer appear in the form.')) return;
+  const resp = await fetch(`/settings/form-fields/${fid}/delete`, {method:'POST'});
+  const d = await resp.json();
+  if (d.success) location.reload();
+  else alert(d.error || 'Delete failed.');
+}
+
+/* ── Section Add/Edit Modal ──────────────────────────────────── */
+let _editSectionId = null;
+
+function openSectionModal(sid) {
+  _editSectionId = sid || null;
+  const modal = document.getElementById('section-modal');
+  if (!modal) return;
+  if (sid) {
+    const row = document.querySelector(`.section-row[data-id="${sid}"]`);
+    if (row) {
+      modal.querySelector('[name="label"]').value = row.dataset.label || '';
+      modal.querySelector('[name="icon"]').value  = row.dataset.icon  || '◈';
+      const collEl = modal.querySelector('[name="collapsible"]');
+      if (collEl) collEl.checked = (row.dataset.collapsible === '1');
+    }
+  } else {
+    modal.querySelector('#section-modal-form')?.reset();
+  }
+  modal.style.display = '';
+}
+
+function closeSectionModal() {
+  const modal = document.getElementById('section-modal');
+  if (modal) modal.style.display = 'none';
+  _editSectionId = null;
+}
+
+async function saveSection() {
+  const modal = document.getElementById('section-modal');
+  if (!modal) return;
+  const data = {};
+  modal.querySelectorAll('[name]').forEach(el => {
+    if (el.type === 'checkbox') data[el.name] = el.checked;
+    else data[el.name] = el.value;
+  });
+  const url = _editSectionId
+    ? `/settings/form-sections/${_editSectionId}/edit`
+    : `/settings/form-sections/add`;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    const d = await resp.json();
+    if (d.success) { closeSectionModal(); location.reload(); }
+    else alert(d.error || 'Save failed.');
+  } catch(e) { alert('Network error.'); }
+}
+
+async function deleteSection(sid) {
+  if (!confirm('Delete this section and ALL its fields? This cannot be undone.')) return;
+  const resp = await fetch(`/settings/form-sections/${sid}/delete`, {method:'POST'});
+  const d = await resp.json();
+  if (d.success) location.reload();
+  else alert(d.error || 'Delete failed.');
+}
+
+/* ── Group Management ────────────────────────────────────────── */
+async function addGroupMember(gid, userId) {
+  if (!userId) return;
+  const resp = await fetch(`/settings/groups/${gid}/members/add`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({user_id: Number(userId)})
+  });
+  const d = await resp.json();
+  if (d.success) location.reload();
+  else alert(d.error || 'Failed to add member.');
+}
+
+async function removeGroupMember(gid, userId) {
+  const resp = await fetch(`/settings/groups/${gid}/members/remove`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({user_id: userId})
+  });
+  const d = await resp.json();
+  if (d.success) location.reload();
+  else alert(d.error || 'Failed to remove member.');
+}
+
+async function addGroupShowAccess(showId, groupId) {
+  const resp = await fetch(`/shows/${showId}/access/add`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({group_id: Number(groupId)})
+  });
+  const d = await resp.json();
+  if (d.success) location.reload();
+  else alert(d.error || 'Failed.');
+}
+
+async function removeGroupShowAccess(showId, groupId) {
+  const resp = await fetch(`/shows/${showId}/access/remove`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({group_id: groupId})
+  });
+  const d = await resp.json();
+  if (d.success) location.reload();
+  else alert(d.error || 'Failed.');
+}
+
+async function deleteGroup(gid) {
+  if (!confirm('Delete this group? Members will lose their restricted access assignments.')) return;
+  const resp = await fetch(`/settings/groups/${gid}/delete`, {method:'POST'});
+  const d = await resp.json();
+  if (d.success) location.reload();
+  else alert(d.error || 'Delete failed.');
+}
+
+/* ── Server Settings ─────────────────────────────────────────── */
+async function saveServerSettings(form) {
+  const data = { app_port: parseInt(form.querySelector('[name="app_port"]').value, 10) };
+  const resp = await fetch('/settings/server', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  });
+  const d = await resp.json();
+  const msg = form.querySelector('.server-save-msg');
+  if (msg) {
+    msg.textContent = d.success ? ('✓ ' + (d.message || 'Saved')) : ('Error: ' + (d.error||'Unknown'));
+    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
+    setTimeout(() => { msg.textContent=''; msg.className='field-msg'; }, 5000);
+  }
+}
+
+/* ── Syslog Settings ─────────────────────────────────────────── */
+async function saveSyslogSettings(form) {
+  const fd = new FormData(form);
+  const data = Object.fromEntries(fd.entries());
+  data.syslog_enabled = form.querySelector('[name="syslog_enabled"]')?.checked ? '1' : '0';
+  const resp = await fetch('/settings/syslog', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(data)
+  });
+  const d = await resp.json();
+  const msg = form.querySelector('.syslog-save-msg');
+  if (msg) {
+    msg.textContent = d.success ? '✓ Saved' : ('Error: ' + (d.error||'Unknown'));
+    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
+    setTimeout(() => { msg.textContent=''; msg.className='field-msg'; }, 3000);
+  }
+}
+
+/* ── Backup Controls ─────────────────────────────────────────── */
+async function runManualBackup(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Running...';
+  const resp = await fetch('/settings/backups/run', {method:'POST'});
+  const d = await resp.json();
+  btn.disabled = false;
+  btn.textContent = 'Run Backup Now';
+  if (d.success) {
+    loadBackupStatus();
+    alert('Backup created successfully.');
+  } else {
+    alert('Backup failed: ' + (d.error||'Unknown error'));
+  }
+}
+
+async function loadBackupStatus() {
+  const resp = await fetch('/settings/backups');
+  const data = await resp.json();
+  for (const kind of ['hourly', 'daily']) {
+    const container = document.getElementById(`backup-list-${kind}`);
+    if (!container) continue;
+    if (!data[kind] || !data[kind].length) {
+      container.innerHTML = '<p class="text-dim" style="padding:10px">No backups yet.</p>';
+      continue;
+    }
+    container.innerHTML = data[kind].map(f => `
+      <div class="settings-info-row">
+        <span class="backup-filename">${f.filename}</span>
+        <span class="backup-size">${f.size_kb} KB</span>
+        <span class="backup-mtime">${f.mtime}</span>
+      </div>
+    `).join('');
+  }
+}

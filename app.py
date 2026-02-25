@@ -108,6 +108,20 @@ def admin_required(f):
     return decorated
 
 
+def content_admin_required(f):
+    """Allow system admins AND users in an 'admin_group' type group."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('user_role') == 'admin':
+            return f(*args, **kwargs)
+        if session.get('is_content_admin'):
+            return f(*args, **kwargs)
+        abort(403)
+    return decorated
+
+
 def get_current_user():
     if 'user_id' in session:
         return {
@@ -116,11 +130,36 @@ def get_current_user():
             'display_name': session.get('display_name', session['username']),
             'role': session.get('user_role', 'user'),
             'is_restricted': session.get('is_restricted', False),
+            'is_content_admin': session.get('is_content_admin', False),
         }
     return None
 
 
 # ─── Access Control Helpers ───────────────────────────────────────────────────
+
+def _get_user_group_types(user_id):
+    """Returns a list of group_type strings for the user's groups."""
+    db = get_db()
+    rows = db.execute("""
+        SELECT ug.group_type FROM user_groups ug
+        JOIN user_group_members ugm ON ug.id = ugm.group_id
+        WHERE ugm.user_id = ?
+    """, (user_id,)).fetchall()
+    db.close()
+    return [r['group_type'] for r in rows]
+
+
+def is_content_admin(user_id):
+    """True if the user is a system admin OR is in an 'admin_group' type group."""
+    db = get_db()
+    user = db.execute('SELECT role FROM users WHERE id=?', (user_id,)).fetchone()
+    db.close()
+    if not user:
+        return False
+    if user['role'] == 'admin':
+        return True
+    return 'admin_group' in _get_user_group_types(user_id)
+
 
 def get_accessible_shows(user_id):
     """Returns None (all shows) or a list of accessible show IDs."""
@@ -130,14 +169,10 @@ def get_accessible_shows(user_id):
         db.close()
         return None
 
-    groups = db.execute("""
-        SELECT ug.group_type FROM user_groups ug
-        JOIN user_group_members ugm ON ug.id = ugm.group_id
-        WHERE ugm.user_id = ?
-    """, (user_id,)).fetchall()
+    group_types = _get_user_group_types(user_id)
 
-    if not groups or any(g['group_type'] == 'all_access' for g in groups):
-        db.close()
+    # admin_group and all_access both get unrestricted show access
+    if not group_types or any(t in ('all_access', 'admin_group') for t in group_types):
         return None
 
     rows = db.execute("""
@@ -158,21 +193,17 @@ def can_access_show(user_id, show_id):
 
 
 def is_restricted_user(user_id):
-    """True if the user is only in restricted groups (read-only, assigned shows)."""
+    """True if the user is ONLY in restricted groups (read-only, assigned shows only)."""
     db = get_db()
     user = db.execute('SELECT role FROM users WHERE id=?', (user_id,)).fetchone()
     if not user or user['role'] == 'admin':
         db.close()
         return False
-    groups = db.execute("""
-        SELECT ug.group_type FROM user_groups ug
-        JOIN user_group_members ugm ON ug.id = ugm.group_id
-        WHERE ugm.user_id = ?
-    """, (user_id,)).fetchall()
-    db.close()
-    if not groups:
+    group_types = _get_user_group_types(user_id)
+    if not group_types:
         return False
-    return all(g['group_type'] == 'restricted' for g in groups)
+    # Restricted only if ALL groups are 'restricted' (no all_access or admin_group)
+    return all(t == 'restricted' for t in group_types)
 
 
 # ─── Form Fields Helper ───────────────────────────────────────────────────────
@@ -325,11 +356,12 @@ def login():
         user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
         db.close()
         if user and check_password_hash(user['password_hash'], password):
-            session['user_id']      = user['id']
-            session['username']     = user['username']
-            session['display_name'] = user['display_name'] or user['username']
-            session['user_role']    = user['role']
-            session['is_restricted'] = is_restricted_user(user['id'])
+            session['user_id']        = user['id']
+            session['username']       = user['username']
+            session['display_name']   = user['display_name'] or user['username']
+            session['user_role']      = user['role']
+            session['is_restricted']  = is_restricted_user(user['id'])
+            session['is_content_admin'] = is_content_admin(user['id'])
             syslog_logger.info(f"LOGIN user={username} ip={request.remote_addr}")
             next_url = request.form.get('next') or url_for('dashboard')
             return redirect(next_url)
@@ -769,14 +801,30 @@ def _build_advance_pdf(show_id):
     db.commit()
     db.close()
 
-    form_sections = get_form_fields_for_template()
+    # Fetch form sections; if fetch fails, PDF falls back to generic rendering
+    try:
+        form_sections = get_form_fields_for_template()
+    except Exception as e:
+        app.logger.warning(f'Could not load form_sections for PDF: {e}')
+        form_sections = []
 
-    html = render_template('pdf/advance_pdf.html',
-                           show=show, advance_data=advance_data,
-                           contact_map=contact_map,
-                           form_sections=form_sections,
-                           version=new_v,
-                           export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
+    try:
+        html = render_template('pdf/advance_pdf.html',
+                               show=show, advance_data=advance_data,
+                               contact_map=contact_map,
+                               form_sections=form_sections,
+                               version=new_v,
+                               export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
+    except Exception as e:
+        # Fall back to a minimal safe render if the template fails
+        app.logger.error(f'advance_pdf template error for show {show_id}: {e}')
+        html = render_template('pdf/advance_pdf.html',
+                               show=show, advance_data=advance_data,
+                               contact_map=contact_map,
+                               form_sections=[],   # trigger hardcoded fallback
+                               version=new_v,
+                               export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
+
     syslog_logger.info(
         f"PDF_EXPORT show_id={show_id} type=advance v={new_v} by={session.get('username')}"
     )
@@ -980,20 +1028,25 @@ def settings():
         groups_data.append(gd)
 
     syslog_settings = {r['key']: r['value'] for r in
-                       db.execute("SELECT key, value FROM app_settings WHERE key LIKE 'syslog_%'").fetchall()}
+                       db.execute("SELECT key, value FROM app_settings").fetchall()}
 
     db.close()
+    _is_ca = session.get('is_content_admin', False) or session.get('user_role') == 'admin'
+    form_sections = get_form_fields_for_template() if _is_ca else []
+
     return render_template('settings.html',
                            contacts=contacts,
                            users=users,
                            groups=groups_data,
+                           form_sections=form_sections,
                            syslog_settings=syslog_settings,
                            departments=DEPARTMENTS,
+                           is_content_admin=_is_ca,
                            user=get_current_user())
 
 
 @app.route('/settings/contacts/add', methods=['POST'])
-@login_required
+@content_admin_required
 def add_contact():
     db = get_db()
     db.execute("""
@@ -1010,7 +1063,7 @@ def add_contact():
 
 
 @app.route('/settings/contacts/<int:cid>/edit', methods=['POST'])
-@login_required
+@content_admin_required
 def edit_contact(cid):
     data = request.get_json(force=True) or {}
     db = get_db()
@@ -1024,7 +1077,7 @@ def edit_contact(cid):
 
 
 @app.route('/settings/contacts/<int:cid>/delete', methods=['POST'])
-@login_required
+@content_admin_required
 def delete_contact(cid):
     db = get_db()
     db.execute('DELETE FROM contacts WHERE id=?', (cid,))
@@ -1200,7 +1253,7 @@ def api_groups():
 # ─── Form Field Editor ────────────────────────────────────────────────────────
 
 @app.route('/settings/form-fields')
-@admin_required
+@content_admin_required
 def form_fields_settings():
     form_sections = get_form_fields_for_template()
     db = get_db()
@@ -1229,9 +1282,10 @@ def form_fields_settings():
         groups_data.append(gd)
 
     syslog_settings = {r['key']: r['value'] for r in
-                       db.execute("SELECT key, value FROM app_settings WHERE key LIKE 'syslog_%'").fetchall()}
+                       db.execute("SELECT key, value FROM app_settings").fetchall()}
     db.close()
 
+    _is_ca = session.get('is_content_admin', False) or session.get('user_role') == 'admin'
     return render_template('settings.html',
                            contacts=contacts,
                            users=users,
@@ -1240,11 +1294,12 @@ def form_fields_settings():
                            syslog_settings=syslog_settings,
                            departments=DEPARTMENTS,
                            active_tab='fields',
+                           is_content_admin=_is_ca,
                            user=get_current_user())
 
 
 @app.route('/settings/form-fields/add', methods=['POST'])
-@admin_required
+@content_admin_required
 def add_form_field():
     data = request.get_json(force=True) or {}
     section_id = data.get('section_id')
@@ -1288,7 +1343,7 @@ def add_form_field():
 
 
 @app.route('/settings/form-fields/<int:fid>/edit', methods=['POST'])
-@admin_required
+@content_admin_required
 def edit_form_field(fid):
     data = request.get_json(force=True) or {}
     options = data.get('options', [])
@@ -1312,7 +1367,7 @@ def edit_form_field(fid):
 
 
 @app.route('/settings/form-fields/<int:fid>/delete', methods=['POST'])
-@admin_required
+@content_admin_required
 def delete_form_field(fid):
     db = get_db()
     db.execute('DELETE FROM form_fields WHERE id=?', (fid,))
@@ -1322,7 +1377,7 @@ def delete_form_field(fid):
 
 
 @app.route('/settings/form-fields/reorder', methods=['POST'])
-@admin_required
+@content_admin_required
 def reorder_form_fields():
     data = request.get_json(force=True) or {}
     field_ids = data.get('field_ids', [])
@@ -1334,7 +1389,7 @@ def reorder_form_fields():
 
 
 @app.route('/settings/form-sections/add', methods=['POST'])
-@admin_required
+@content_admin_required
 def add_form_section():
     data = request.get_json(force=True) or {}
     section_key = data.get('section_key','').strip().lower().replace(' ','_')
@@ -1360,7 +1415,7 @@ def add_form_section():
 
 
 @app.route('/settings/form-sections/<int:sid>/edit', methods=['POST'])
-@admin_required
+@content_admin_required
 def edit_form_section(sid):
     data = request.get_json(force=True) or {}
     db = get_db()
@@ -1374,7 +1429,7 @@ def edit_form_section(sid):
 
 
 @app.route('/settings/form-sections/<int:sid>/delete', methods=['POST'])
-@admin_required
+@content_admin_required
 def delete_form_section(sid):
     db = get_db()
     db.execute('DELETE FROM form_sections WHERE id=?', (sid,))
@@ -1383,7 +1438,7 @@ def delete_form_section(sid):
 
 
 @app.route('/settings/form-sections/reorder', methods=['POST'])
-@admin_required
+@content_admin_required
 def reorder_form_sections():
     data = request.get_json(force=True) or {}
     section_ids = data.get('section_ids', [])
@@ -1401,6 +1456,25 @@ def api_form_fields():
 
 
 # ─── Syslog Settings ──────────────────────────────────────────────────────────
+
+@app.route('/settings/server', methods=['POST'])
+@admin_required
+def save_server_settings():
+    data = request.get_json(force=True) or {}
+    port_str = str(data.get('app_port', '5400')).strip()
+    try:
+        port_val = int(port_str)
+        if not (1024 <= port_val <= 65535):
+            return jsonify({'success': False, 'error': 'Port must be between 1024 and 65535.'}), 400
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Invalid port number.'}), 400
+    db = get_db()
+    db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+               ('app_port', str(port_val)))
+    db.commit(); db.close()
+    syslog_logger.info(f"SETTINGS_CHANGE key=app_port value={port_val} by={session.get('username')}")
+    return jsonify({'success': True, 'message': f'Port set to {port_val}. Restart the service to apply.'})
+
 
 @app.route('/settings/syslog', methods=['POST'])
 @admin_required
@@ -1514,4 +1588,15 @@ if not (os.environ.get('WERKZEUG_RUN_MAIN') == 'false'):
 if __name__ == '__main__':
     if not os.path.exists(DATABASE):
         print("Database not found. Run: python init_db.py")
-    app.run(debug=True, port=5400)
+        run_port = 5400
+    else:
+        try:
+            _db = get_db()
+            _row = _db.execute(
+                "SELECT value FROM app_settings WHERE key='app_port'"
+            ).fetchone()
+            _db.close()
+            run_port = int(_row['value']) if _row else 5400
+        except Exception:
+            run_port = 5400
+    app.run(debug=True, port=run_port)

@@ -3,32 +3,15 @@
 
 {% block content %}
 
-{# ─── Macros ─────────────────────────────────────────────────────── #}
+{# ─── Macros ─────────────────────────────────────────────────────────────── #}
 {% macro adv(key, default='') %}{{ advance_data.get(key, default) }}{% endmacro %}
 {% macro meta(key, default='') %}{{ schedule_meta.get(key, default) }}{% endmacro %}
 {% macro note(key, default='') %}{{ notes_data.get(key, default) }}{% endmacro %}
 
-{% macro yes_no(key, label, notes_key=None) %}
-<div class="field-group">
-  <label class="field-label">{{ label }}</label>
-  <select name="{{ key }}" class="field-input adv-field" data-key="{{ key }}">
-    <option value="-" {% if adv(key) == '-' or not adv(key) %}selected{% endif %}>—</option>
-    <option value="Yes" {% if adv(key) == 'Yes' %}selected{% endif %}>Yes</option>
-    <option value="No" {% if adv(key) == 'No' %}selected{% endif %}>No</option>
-  </select>
-</div>
-{% if notes_key %}
-<div class="field-group conditional" data-show-when="{{ key }}=Yes">
-  <label class="field-label">DETAILS</label>
-  <textarea name="{{ notes_key }}" class="field-input field-textarea adv-field" data-key="{{ notes_key }}" rows="2">{{ adv(notes_key) }}</textarea>
-</div>
-{% endif %}
-{% endmacro %}
-
 {% macro contact_select(key, label, dept) %}
 <div class="field-group">
   <label class="field-label">{{ label }}</label>
-  <select name="{{ key }}" class="field-input adv-field" data-key="{{ key }}">
+  <select name="{{ key }}" class="field-input adv-field" data-key="{{ key }}" {% if restricted %}disabled{% endif %}>
     <option value="">— Select —</option>
     <option value="-" {% if adv(key) == '-' %}selected{% endif %}>N/A</option>
     {% for c in contacts_by_dept.get(dept, []) %}
@@ -38,7 +21,81 @@
 </div>
 {% endmacro %}
 
-{# ─── Page Header ─────────────────────────────────────────────────── #}
+{# ─── Dynamic field renderer ─────────────────────────────────────────────── #}
+{% macro render_adv_field(field) %}
+{% set span = 'span 6' if field.width_hint == 'full' else ('span 2' if field.width_hint == 'third' else 'span 3') %}
+{% set cur = adv(field.field_key) %}
+
+{% if field.field_type == 'checkbox' %}
+  <label class="checkbox-label adv-field-wrapper" style="grid-column:{{ span }}" {% if field.conditional_show_when %}data-show-when="{{ field.conditional_show_when }}"{% endif %}>
+    <input type="checkbox" class="adv-checkbox adv-field" data-key="{{ field.field_key }}"
+           {% if cur == 'true' %}checked{% endif %} {% if restricted %}disabled{% endif %}>
+    {{ field.label }}
+  </label>
+
+{% elif field.is_notes_field %}
+  <div class="notes-section" style="grid-column:span 6">
+    <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ {{ field.label }}</button>
+    <div class="notes-body hidden">
+      <textarea class="field-input field-textarea adv-field" data-key="{{ field.field_key }}"
+                rows="3" placeholder="{{ field.placeholder }}" {% if restricted %}disabled{% endif %}>{{ cur }}</textarea>
+    </div>
+  </div>
+
+{% else %}
+  {# Wrap in conditional div if needed #}
+  {% if field.conditional_show_when %}
+  <div class="conditional-block adv-field-wrapper" style="grid-column:{{ span }}" data-show-when="{{ field.conditional_show_when }}">
+  {% endif %}
+
+  <div class="field-group{% if not field.conditional_show_when %} adv-field-wrapper{% endif %}"
+       {% if not field.conditional_show_when %}style="grid-column:{{ span }}"{% endif %}>
+    <label class="field-label">{{ field.label }}</label>
+
+    {% if field.field_type == 'yes_no' %}
+      <select class="field-input adv-field" data-key="{{ field.field_key }}" {% if restricted %}disabled{% endif %}>
+        <option value="-" {% if cur in ['-',''] %}selected{% endif %}>—</option>
+        <option value="Yes" {% if cur == 'Yes' %}selected{% endif %}>Yes</option>
+        <option value="No" {% if cur == 'No' %}selected{% endif %}>No</option>
+      </select>
+
+    {% elif field.field_type == 'select' %}
+      <select class="field-input adv-field" data-key="{{ field.field_key }}" {% if restricted %}disabled{% endif %}>
+        {% for opt in field.options %}
+        <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
+        {% endfor %}
+      </select>
+
+    {% elif field.field_type == 'contact_dropdown' %}
+      <select class="field-input adv-field" data-key="{{ field.field_key }}" {% if restricted %}disabled{% endif %}>
+        <option value="">— Select —</option>
+        <option value="-" {% if cur == '-' %}selected{% endif %}>N/A</option>
+        {% for c in contacts_by_dept.get(field.contact_dept, []) %}
+        <option value="{{ c.name }}" {% if cur == c.name %}selected{% endif %}>{{ c.name }}{% if c.title %} · {{ c.title }}{% endif %}</option>
+        {% endfor %}
+      </select>
+
+    {% elif field.field_type == 'textarea' %}
+      <textarea class="field-input field-textarea adv-field" data-key="{{ field.field_key }}"
+                rows="3" placeholder="{{ field.placeholder }}" {% if restricted %}disabled{% endif %}>{{ cur }}</textarea>
+
+    {% else %}
+      {# text / date / time / number #}
+      <input type="{{ field.field_type }}" class="field-input adv-field"
+             data-key="{{ field.field_key }}"
+             value="{{ cur }}"
+             placeholder="{{ field.placeholder }}"
+             {% if restricted %}disabled{% endif %}>
+    {% endif %}
+  </div>
+
+  {% if field.conditional_show_when %}
+  </div>
+  {% endif %}
+{% endif %}
+{% endmacro %}
+
+{# ─── Page Header ─────────────────────────────────────────────────────────── #}
 <div class="page-header show-header">
   <div>
     <a href="{{ url_for('dashboard') }}" class="back-link">← All Shows</a>
@@ -48,15 +105,24 @@
       {% if show.show_time %} · {{ show.show_time }}{% endif %}
       {% if show.venue %} · {{ show.venue }}{% endif %}
       {% if show.status == 'archived' %}<span class="badge-archived">ARCHIVED</span>{% endif %}
+      {% if restricted %}<span class="badge-archived" style="background:#4A5568">VIEW ONLY</span>{% endif %}
     </p>
+    {% if last_saved_display_name %}
+    <p class="last-saved-hint">Last saved by <strong>{{ last_saved_display_name }}</strong>
+      {% if last_saved_at %} · {{ last_saved_at[:16].replace('T',' ') }}{% endif %}
+    </p>
+    {% endif %}
   </div>
   <div class="header-actions" id="save-indicator">
     <span class="save-status" id="save-status"></span>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="openHistory()" title="Version history">History</button>
+    {% if not restricted %}
     <button class="btn btn-primary" id="save-btn" onclick="saveActive()">Save</button>
+    {% endif %}
   </div>
 </div>
 
-{# ─── Tab Nav ──────────────────────────────────────────────────────── #}
+{# ─── Tab Nav ──────────────────────────────────────────────────────────────── #}
 <div class="tab-nav">
   <button class="tab-btn {% if tab == 'advance' %}active{% endif %}" onclick="switchTab('advance')">Advance Sheet</button>
   <button class="tab-btn {% if tab == 'schedule' %}active{% endif %}" onclick="switchTab('schedule')">Production Schedule</button>
@@ -69,310 +135,75 @@
   </button>
 </div>
 
-{# ════════════════════════════════════════════════════════════════════ #}
-{#                        ADVANCE SHEET TAB                            #}
-{# ════════════════════════════════════════════════════════════════════ #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
+{#                          ADVANCE SHEET TAB                                   #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
 <div id="tab-advance" class="tab-pane {% if tab == 'advance' %}active{% endif %}">
 <form id="advance-form" autocomplete="off">
 
-  {# ── Show Info ──────────────────────────────────────────────────── #}
+  {% for section in form_sections %}
   <div class="form-section">
-    <div class="form-section-header">
-      <span class="section-icon">◈</span> SHOW INFORMATION
-    </div>
-    <div class="form-section-body two-col">
-      <div class="col-left">
-        <div class="field-group">
-          <label class="field-label">SHOW NAME</label>
-          <input type="text" class="field-input adv-field" data-key="show_name" value="{{ adv('show_name', show.name) }}">
-        </div>
-        <div class="form-row cols-2">
-          <div class="field-group">
-            <label class="field-label">SHOW DATE</label>
-            <input type="date" class="field-input adv-field" data-key="show_date" value="{{ adv('show_date', show.show_date or '') }}">
-          </div>
-          <div class="field-group">
-            <label class="field-label">SHOW TIME(S)</label>
-            <input type="text" class="field-input adv-field" data-key="show_time" value="{{ adv('show_time', show.show_time) }}" placeholder="e.g. 7pm and 9pm">
-          </div>
-        </div>
-        <div class="field-group">
-          <label class="field-label">VENUE</label>
-          <input type="text" class="field-input adv-field" data-key="venue" value="{{ adv('venue', show.venue) }}">
-        </div>
-        {{ contact_select('production_manager', 'PRODUCTION MANAGER', 'Production') }}
-        <div class="field-group">
-          <label class="field-label">TOUR MANAGER</label>
-          <input type="text" class="field-input adv-field" data-key="tour_manager" value="{{ adv('tour_manager') }}" placeholder="Name · email / phone">
-        </div>
-        <div class="field-group">
-          <label class="field-label">PROMOTER</label>
-          <input type="text" class="field-input adv-field" data-key="promoter" value="{{ adv('promoter') }}">
-        </div>
-        <div class="field-group">
-          <label class="field-label">ADDITIONAL CONTACTS</label>
-          <textarea class="field-input field-textarea adv-field" data-key="additional_contacts" rows="3" placeholder="Name, role, phone/email...">{{ adv('additional_contacts') }}</textarea>
-        </div>
-      </div>
-
-      <div class="col-right">
-        {{ contact_select('programming', 'PROGRAMMING', 'Programming') }}
-        {{ contact_select('events', 'EVENTS', 'Event Manager') }}
-        {{ contact_select('hospitality_contact', 'HOSPITALITY', 'Hospitality') }}
-        {{ contact_select('guest_services', 'GUEST SERVICES', 'Guest Services') }}
-        <div class="field-group">
-          <label class="field-label">RADIO CHANNEL</label>
-          <input type="text" class="field-input adv-field" data-key="radio_channel" value="{{ adv('radio_channel') }}" placeholder="e.g. 16/Judson's">
-        </div>
-        {{ contact_select('runner', 'RUNNER', 'Runners') }}
-        <div class="field-group">
-          <label class="field-label">RENTAL WORKS?</label>
-          <select class="field-input adv-field" data-key="rental_works">
-            <option value="-" {% if adv('rental_works') in ['-',''] %}selected{% endif %}>—</option>
-            <option value="Yes" {% if adv('rental_works') == 'Yes' %}selected{% endif %}>Yes</option>
-            <option value="No" {% if adv('rental_works') == 'No' %}selected{% endif %}>No</option>
-          </select>
-        </div>
-        <div class="field-group">
-          <label class="field-label">BUDGET / ESTIMATE</label>
-          <div class="inline-fields">
-            <input type="text" class="field-input adv-field" data-key="budget_what" value="{{ adv('budget_what') }}" placeholder="What">
-            <input type="text" class="field-input adv-field" data-key="budget_amount" value="{{ adv('budget_amount') }}" placeholder="Amount">
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  {# ── Arrival & Parking ──────────────────────────────────────────── #}
-  <div class="form-section">
-    <div class="form-section-header collapsible" onclick="toggleSection(this)">
-      <span class="section-icon">◈</span> ARRIVAL &amp; PARKING
+    <div class="form-section-header{% if section.collapsible %} collapsible{% endif %}"
+         {% if section.collapsible %}onclick="toggleSection(this)"{% endif %}>
+      <span class="section-icon">{{ section.icon }}</span> {{ section.label }}
+      {% if section.collapsible %}
       <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+      {% endif %}
     </div>
-    <div class="form-section-body">
-      <div class="form-row cols-2">
-        <div class="field-group">
-          <label class="field-label">ACCESS TIME TO BUILDING</label>
-          <input type="text" class="field-input adv-field" data-key="access_time" value="{{ adv('access_time') }}" placeholder="e.g. 3:30pm">
-        </div>
-        <div class="field-group">
-          <label class="field-label">LOADING DOCK — WHICH BAY(S)?</label>
-          <select class="field-input adv-field" data-key="loading_dock">
-            {% for opt in ['-', 'N/A', 'Bay 1', 'Bay 2', 'Bay 3', 'Bay 4', 'Bay 5', 'Bay 1+2', 'Bay 1+2+3', 'Other — See Notes'] %}
-            <option value="{{ opt }}" {% if adv('loading_dock') == opt %}selected{% endif %}>{{ opt }}</option>
-            {% endfor %}
-          </select>
-        </div>
-      </div>
-
-      <div class="field-group">
-        <label class="field-label">VEHICLES</label>
-        <div class="checkbox-row">
-          {% for v in ['DPC Van (15-passenger, back seat removed)', 'DPC Truck', 'Rental Vehicle', 'Other'] %}
-          {% set vkey = 'vehicle_' + v.split(' ')[0].split('(')[0].lower().replace(' ','_') %}
-          <label class="checkbox-label">
-            <input type="checkbox" class="adv-checkbox adv-field" data-key="{{ vkey }}" {% if adv(vkey) == 'true' %}checked{% endif %}>
-            {{ v }}
-          </label>
-          {% endfor %}
-        </div>
-        <input type="text" class="field-input adv-field mt-xs" data-key="vehicle_notes" value="{{ adv('vehicle_notes') }}" placeholder="Vehicle notes...">
-      </div>
-
-      <div class="form-row cols-3">
-        {{ yes_no('runner_needed', 'RUNNER NEEDED?') }}
-        {{ yes_no('rental_car_needed', 'RENTAL CAR NEEDED?') }}
-        {{ yes_no('rental_drop_offs', 'RENTAL DROP-OFFS?') }}
-      </div>
-
-      <div class="conditional-block" data-show-when="runner_needed=Yes">
-        <div class="form-row cols-2">
-          <div class="field-group">
-            <label class="field-label">RUNNER PICKUP TIME</label>
-            <input type="text" class="field-input adv-field" data-key="runner_time" value="{{ adv('runner_time') }}" placeholder="e.g. 2:00pm">
-          </div>
-          <div class="field-group">
-            <label class="field-label">RUNNER VEHICLE</label>
-            <select class="field-input adv-field" data-key="runner_vehicle">
-              {% for v in ['-', 'DPC Van', 'DPC Truck', 'Rental Vehicle', 'Other'] %}
-              <option value="{{ v }}" {% if adv('runner_vehicle') == v %}selected{% endif %}>{{ v }}</option>
-              {% endfor %}
-            </select>
-          </div>
-        </div>
-      </div>
-
-      <div class="form-row cols-2">
-        <div>
-          {{ yes_no('parking_validations', 'PARKING VALIDATIONS NEEDED?') }}
-          <div class="conditional-block" data-show-when="parking_validations=Yes">
-            <div class="field-group">
-              <label class="field-label">HOW MANY?</label>
-              <input type="number" class="field-input adv-field" data-key="parking_validations_count" value="{{ adv('parking_validations_count') }}" min="0">
-            </div>
-          </div>
-        </div>
-        <div>
-          {{ yes_no('special_accommodations', 'SPECIAL ACCOMMODATIONS NEEDED?', 'special_accommodations_details') }}
-        </div>
-      </div>
-
-      {{ yes_no('additional_space', 'ADDITIONAL HOLDING / REHEARSAL SPACE NEEDED?', 'additional_space_details') }}
-
-      <div class="notes-section">
-        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ Arrival &amp; Parking Notes</button>
-        <div class="notes-body hidden">
-          <textarea class="field-input field-textarea adv-field" data-key="arrival_notes" rows="3" placeholder="Additional arrival and parking notes...">{{ adv('arrival_notes') }}</textarea>
-        </div>
-      </div>
+    <div class="form-section-body adv-form-grid">
+      {% for field in section.fields %}
+        {{ render_adv_field(field) }}
+      {% endfor %}
     </div>
   </div>
-
-  {# ── Security ───────────────────────────────────────────────────── #}
-  <div class="form-section">
-    <div class="form-section-header collapsible" onclick="toggleSection(this)">
-      <span class="section-icon">◈</span> SECURITY
-      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-    </div>
-    <div class="form-section-body">
-      <div class="form-row cols-2">
-        <div class="field-group">
-          <label class="field-label">HOW MANY PEOPLE BACKSTAGE (Cast/Crew/Staff)?</label>
-          <input type="number" class="field-input adv-field" data-key="backstage_headcount" value="{{ adv('backstage_headcount') }}" min="0" placeholder="0">
-        </div>
-        <div class="field-group">
-          <label class="field-label">CREDENTIALS / BADGES?</label>
-          <select class="field-input adv-field" data-key="credentials_badges">
-            <option value="-" {% if adv('credentials_badges') in ['-',''] %}selected{% endif %}>—</option>
-            <option value="Yes - Tour Provided" {% if adv('credentials_badges') == 'Yes - Tour Provided' %}selected{% endif %}>Yes — Tour Provided</option>
-            <option value="No - Use DPC Lanyards" {% if adv('credentials_badges') == 'No - Use DPC Lanyards' %}selected{% endif %}>No — Use DPC Lanyards / Wristbands</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row cols-2">
-        {{ yes_no('extra_security', 'EXTRA SECURITY NEEDS?', 'extra_security_details') }}
-        {{ yes_no('security_meeting', 'SECURITY MEETING NEEDED?') }}
-      </div>
-      <div class="conditional-block" data-show-when="security_meeting=Yes">
-        <div class="field-group">
-          <label class="field-label">SECURITY MEETING TIME</label>
-          <input type="text" class="field-input adv-field" data-key="security_meeting_time" value="{{ adv('security_meeting_time') }}" placeholder="e.g. 5:30pm">
-        </div>
-      </div>
-      <div class="notes-section">
-        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ Security Notes</button>
-        <div class="notes-body hidden">
-          <textarea class="field-input field-textarea adv-field" data-key="security_notes" rows="3" placeholder="Security notes...">{{ adv('security_notes') }}</textarea>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  {# ── Hospitality ────────────────────────────────────────────────── #}
-  <div class="form-section">
-    <div class="form-section-header collapsible" onclick="toggleSection(this)">
-      <span class="section-icon">◈</span> HOSPITALITY
-      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-    </div>
-    <div class="form-section-body">
-      <div class="form-row cols-2">
-        {{ yes_no('food_beverage', 'SPECIFIC FOOD &amp; BEVERAGE NEEDS?', 'food_beverage_details') }}
-        {{ yes_no('allergies', 'ALLERGIES TO BE AWARE OF?', 'allergies_details') }}
-      </div>
-      <div class="notes-section">
-        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ Hospitality Notes</button>
-        <div class="notes-body hidden">
-          <textarea class="field-input field-textarea adv-field" data-key="hospitality_notes" rows="3" placeholder="Hospitality notes...">{{ adv('hospitality_notes') }}</textarea>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  {# ── Front of House ─────────────────────────────────────────────── #}
-  <div class="form-section">
-    <div class="form-section-header collapsible" onclick="toggleSection(this)">
-      <span class="section-icon">◈</span> FRONT OF HOUSE
-      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-    </div>
-    <div class="form-section-body">
-      <div class="form-row cols-2">
-        <div class="field-group">
-          <label class="field-label">FOH CONTACT</label>
-          <input type="text" class="field-input adv-field" data-key="foh_contact" value="{{ adv('foh_contact') }}" placeholder="Name / contact info">
-        </div>
-        {{ yes_no('foh_activations', 'SPECIAL FOH ACTIVATIONS?', 'foh_activations_details') }}
-      </div>
-      <div class="notes-section">
-        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ Front-of-House Notes</button>
-        <div class="notes-body hidden">
-          <textarea class="field-input field-textarea adv-field" data-key="foh_notes" rows="3" placeholder="FOH notes...">{{ adv('foh_notes') }}</textarea>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  {# ── General Info ───────────────────────────────────────────────── #}
-  <div class="form-section">
-    <div class="form-section-header collapsible" onclick="toggleSection(this)">
-      <span class="section-icon">◈</span> GENERAL INFORMATION
-      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
-    </div>
-    <div class="form-section-body">
-      {{ yes_no('load_in_needed', 'LOAD-IN TIME NEEDED?', 'load_in_details') }}
-      <div class="notes-section">
-        <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ General Notes</button>
-        <div class="notes-body hidden">
-          <textarea class="field-input field-textarea adv-field" data-key="general_notes" rows="3" placeholder="General notes...">{{ adv('general_notes') }}</textarea>
-        </div>
-      </div>
-    </div>
-  </div>
+  {% endfor %}
 
 </form>
 </div>{# end tab-advance #}
 
 
-{# ════════════════════════════════════════════════════════════════════ #}
-{#                     PRODUCTION SCHEDULE TAB                         #}
-{# ════════════════════════════════════════════════════════════════════ #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
+{#                       PRODUCTION SCHEDULE TAB                                #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
 <div id="tab-schedule" class="tab-pane {% if tab == 'schedule' %}active{% endif %}">
 <form id="schedule-form" autocomplete="off">
 
-  {# ── Schedule Meta ─────────────────────────────────────────────── #}
+  {# ── Schedule Meta ─────────────────────────────────────────────────────── #}
   <div class="form-section">
     <div class="form-section-header"><span class="section-icon">◈</span> VENUE & TECH INFO</div>
     <div class="form-section-body">
       <div class="form-row cols-4">
         <div class="field-group">
           <label class="field-label">WIFI NETWORK</label>
-          <input type="text" class="field-input sched-meta" data-key="wifi_network" value="{{ meta('wifi_network') }}" placeholder="Network name">
+          <input type="text" class="field-input sched-meta" data-key="wifi_network" value="{{ meta('wifi_network') }}" placeholder="Network name" {% if restricted %}disabled{% endif %}>
         </div>
         <div class="field-group">
           <label class="field-label">WIFI CODE</label>
-          <input type="text" class="field-input sched-meta" data-key="wifi_code" value="{{ meta('wifi_code') }}" placeholder="Password">
+          <input type="text" class="field-input sched-meta" data-key="wifi_code" value="{{ meta('wifi_code') }}" placeholder="Password" {% if restricted %}disabled{% endif %}>
         </div>
         <div class="field-group">
           <label class="field-label">RADIO CHANNEL</label>
-          <input type="text" class="field-input sched-meta" data-key="radio_channel" value="{{ meta('radio_channel', advance_data.get('radio_channel','')) }}" placeholder="e.g. 16/Judson's">
+          <input type="text" class="field-input sched-meta" data-key="radio_channel" value="{{ meta('radio_channel', advance_data.get('radio_channel','')) }}" placeholder="e.g. 16/Judson's" {% if restricted %}disabled{% endif %}>
         </div>
         <div class="field-group">
           <label class="field-label">MIX POSITION</label>
-          <input type="text" class="field-input sched-meta" data-key="mix_position" value="{{ meta('mix_position') }}" placeholder="e.g. FOH">
+          <input type="text" class="field-input sched-meta" data-key="mix_position" value="{{ meta('mix_position') }}" placeholder="e.g. FOH" {% if restricted %}disabled{% endif %}>
         </div>
       </div>
       <div class="field-group">
         <label class="field-label">PARKING & SECURITY INFO</label>
-        <input type="text" class="field-input sched-meta" data-key="parking_security" value="{{ meta('parking_security') }}" placeholder="e.g. Judson's Live gravel lot">
+        <input type="text" class="field-input sched-meta" data-key="parking_security" value="{{ meta('parking_security') }}" placeholder="e.g. Judson's Live gravel lot" {% if restricted %}disabled{% endif %}>
       </div>
     </div>
   </div>
 
-  {# ── Timeline ──────────────────────────────────────────────────── #}
+  {# ── Timeline ──────────────────────────────────────────────────────────── #}
   <div class="form-section">
     <div class="form-section-header">
       <span class="section-icon">◈</span> TIMELINE
+      {% if not restricted %}
       <button type="button" class="btn btn-sm btn-ghost ml-auto" onclick="addScheduleRow()">+ Add Row</button>
+      {% endif %}
     </div>
     <div class="form-section-body no-pad">
       <table class="schedule-table" id="schedule-table">
@@ -382,44 +213,47 @@
             <th style="width:110px">END</th>
             <th>DESCRIPTION</th>
             <th style="width:160px">NOTES</th>
-            <th style="width:40px"></th>
+            {% if not restricted %}<th style="width:40px"></th>{% endif %}
           </tr>
         </thead>
         <tbody id="schedule-rows">
           {% if schedule_rows %}
             {% for row in schedule_rows %}
             <tr class="schedule-row" data-id="{{ row.id }}">
-              <td><input type="text" class="sched-cell" placeholder="3:00pm" value="{{ row.start_time }}"></td>
-              <td><input type="text" class="sched-cell" placeholder="4:00pm" value="{{ row.end_time }}"></td>
-              <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}"></td>
-              <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}"></td>
-              <td><button type="button" class="row-del-btn" onclick="removeRow(this)" title="Remove">×</button></td>
+              <td><input type="text" class="sched-cell" placeholder="3:00pm" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="4:00pm" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
+              {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)" title="Remove">×</button></td>{% endif %}
             </tr>
             {% endfor %}
           {% else %}
             <tr class="schedule-row">
-              <td><input type="text" class="sched-cell" placeholder="3:00pm" value=""></td>
-              <td><input type="text" class="sched-cell" placeholder="4:00pm" value=""></td>
-              <td><input type="text" class="sched-cell" placeholder="Crew Called" value=""></td>
-              <td><input type="text" class="sched-cell" placeholder="" value=""></td>
-              <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
+              <td><input type="text" class="sched-cell" placeholder="3:00pm" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="4:00pm" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Crew Called" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="" value="" {% if restricted %}disabled{% endif %}></td>
+              {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
             </tr>
           {% endif %}
         </tbody>
       </table>
     </div>
+    {% if not restricted %}
     <div class="form-section-footer">
       <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow()">+ Add Row</button>
     </div>
+    {% endif %}
   </div>
 
-  {# ── Contacts ──────────────────────────────────────────────────── #}
+  {# ── Contacts ──────────────────────────────────────────────────────────── #}
   <div class="form-section">
     <div class="form-section-header"><span class="section-icon">◈</span> SHOW CONTACTS</div>
     <div class="form-section-body">
       <h3 class="sub-section-label">ARTIST / TOUR CONTACTS</h3>
       <div class="field-group">
-        <textarea class="field-input field-textarea sched-meta" data-key="artist_contacts" rows="4" placeholder="Name · Role · Phone / Email (one per line)">{{ meta('artist_contacts') }}</textarea>
+        <textarea class="field-input field-textarea sched-meta" data-key="artist_contacts" rows="4"
+                  placeholder="Name · Role · Phone / Email (one per line)" {% if restricted %}disabled{% endif %}>{{ meta('artist_contacts') }}</textarea>
       </div>
 
       <h3 class="sub-section-label mt-md">DPC CONTACTS</h3>
@@ -435,7 +269,7 @@
         ] %}
         <div class="field-group">
           <label class="field-label">{{ role.upper() }}</label>
-          <select class="field-input sched-meta" data-key="contact_{{ role.lower().replace(' ','_') }}">
+          <select class="field-input sched-meta" data-key="contact_{{ role.lower().replace(' ','_') }}" {% if restricted %}disabled{% endif %}>
             <option value="">— Select —</option>
             <option value="-">N/A</option>
             {% for c in contacts_by_dept.get(dept, []) %}
@@ -449,7 +283,8 @@
         {% endfor %}
         <div class="field-group">
           <label class="field-label">SECURITY EMAIL</label>
-          <input type="text" class="field-input sched-meta" data-key="security_email" value="{{ meta('security_email', 'security@drphillipscenter.org') }}">
+          <input type="text" class="field-input sched-meta" data-key="security_email"
+                 value="{{ meta('security_email', 'security@drphillipscenter.org') }}" {% if restricted %}disabled{% endif %}>
         </div>
       </div>
     </div>
@@ -459,9 +294,9 @@
 </div>{# end tab-schedule #}
 
 
-{# ════════════════════════════════════════════════════════════════════ #}
-{#                      POST-SHOW NOTES TAB                            #}
-{# ════════════════════════════════════════════════════════════════════ #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
+{#                         POST-SHOW NOTES TAB                                  #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
 <div id="tab-postnotes" class="tab-pane {% if tab == 'postnotes' %}active{% endif %}">
 <form id="postnotes-form" autocomplete="off">
 
@@ -475,11 +310,13 @@
       <div class="form-row cols-2">
         <div class="field-group">
           <label class="field-label">PRODUCTION MANAGER</label>
-          <input type="text" class="field-input notes-field" data-key="pm" value="{{ note('pm', advance_data.get('production_manager','')) }}">
+          <input type="text" class="field-input notes-field" data-key="pm"
+                 value="{{ note('pm', advance_data.get('production_manager','')) }}" {% if restricted %}disabled{% endif %}>
         </div>
         <div class="field-group">
           <label class="field-label">CREW CALLED</label>
-          <input type="text" class="field-input notes-field" data-key="crew_called" value="{{ note('crew_called') }}" placeholder="e.g. 3:00pm">
+          <input type="text" class="field-input notes-field" data-key="crew_called"
+                 value="{{ note('crew_called') }}" placeholder="e.g. 3:00pm" {% if restricted %}disabled{% endif %}>
         </div>
       </div>
 
@@ -491,7 +328,8 @@
       ] %}
       <div class="field-group">
         <label class="field-label">{{ label }}</label>
-        <textarea class="field-input field-textarea notes-field" data-key="{{ key }}" rows="4" placeholder="{{ placeholder }}">{{ note(key) }}</textarea>
+        <textarea class="field-input field-textarea notes-field" data-key="{{ key }}"
+                  rows="4" placeholder="{{ placeholder }}" {% if restricted %}disabled{% endif %}>{{ note(key) }}</textarea>
       </div>
       {% endfor %}
     </div>
@@ -501,9 +339,9 @@
 </div>{# end tab-postnotes #}
 
 
-{# ════════════════════════════════════════════════════════════════════ #}
-{#                         EXPORT TAB                                  #}
-{# ════════════════════════════════════════════════════════════════════ #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
+{#                           EXPORT TAB                                         #}
+{# ════════════════════════════════════════════════════════════════════════════ #}
 <div id="tab-export" class="tab-pane {% if tab == 'export' %}active{% endif %}">
 
   <div class="export-grid">
@@ -566,12 +404,160 @@
 
 </div>{# end tab-export #}
 
+{# ─── Version History Drawer ──────────────────────────────────────────────── #}
+<div id="history-overlay" class="history-overlay" onclick="closeHistory()" style="display:none"></div>
+<div id="history-drawer" class="history-drawer" style="display:none">
+  <div class="history-drawer-header">
+    <span class="history-drawer-title">Version History</span>
+    <div style="display:flex;gap:8px;align-items:center">
+      <select id="history-form-type" class="field-input" style="width:auto;font-size:12px" onchange="loadHistory(this.value)">
+        <option value="advance">Advance Sheet</option>
+        <option value="schedule">Schedule</option>
+        <option value="postnotes">Post-Show Notes</option>
+      </select>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="closeHistory()">✕</button>
+    </div>
+  </div>
+  <div id="history-list" class="history-list">
+    <p class="text-dim" style="padding:16px;margin:0">Loading...</p>
+  </div>
+</div>
+
+{# ─── Snapshot Preview Modal ──────────────────────────────────────────────── #}
+<div id="snapshot-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSnapshot()">
+  <div class="modal-card" style="max-width:640px;max-height:80vh;overflow-y:auto">
+    <div class="modal-header">
+      <h3 class="modal-title">Snapshot Preview</h3>
+      <button type="button" class="modal-close" onclick="closeSnapshot()">✕</button>
+    </div>
+    <div id="snapshot-content" class="modal-body">
+      <p class="text-dim">Loading...</p>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="closeSnapshot()">Close</button>
+      <button type="button" class="btn btn-primary" id="restore-btn" onclick="confirmRestore()">Restore This Version</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
   const SHOW_ID = {{ show.id }};
+  const RESTRICTED = {{ 'true' if restricted else 'false' }};
   const INITIAL_TAB = '{{ tab }}';
+  let _currentHistId = null;
   initShow(SHOW_ID, INITIAL_TAB);
+
+  /* ── Version History ────────────────────────────────────────── */
+  function openHistory() {
+    const formType = activeTab === 'advance' ? 'advance'
+                   : activeTab === 'schedule' ? 'schedule'
+                   : activeTab === 'postnotes' ? 'postnotes'
+                   : 'advance';
+    document.getElementById('history-form-type').value = formType;
+    document.getElementById('history-overlay').style.display = '';
+    document.getElementById('history-drawer').style.display = '';
+    loadHistory(formType);
+  }
+
+  function closeHistory() {
+    document.getElementById('history-overlay').style.display = 'none';
+    document.getElementById('history-drawer').style.display = 'none';
+  }
+
+  async function loadHistory(formType) {
+    const list = document.getElementById('history-list');
+    list.innerHTML = '<p class="text-dim" style="padding:16px;margin:0">Loading...</p>';
+    try {
+      const resp = await fetch(`/shows/${SHOW_ID}/history/${formType}`);
+      const entries = await resp.json();
+      if (!entries.length) {
+        list.innerHTML = '<p class="text-dim" style="padding:16px;margin:0">No history yet. Save the form to create snapshots.</p>';
+        return;
+      }
+      list.innerHTML = entries.map(e => `
+        <div class="history-entry">
+          <div class="history-entry-meta">
+            <strong>${e.saved_by_name}</strong>
+            <span class="text-dim" style="font-size:11px">${e.saved_at ? e.saved_at.substring(0,16).replace('T',' ') : '—'}</span>
+          </div>
+          <div class="history-entry-actions">
+            <button class="btn btn-xs btn-ghost" onclick="previewSnapshot(${e.id})">Preview</button>
+            ${!RESTRICTED ? `<button class="btn btn-xs btn-ghost" onclick="restoreSnapshot(${e.id})">Restore</button>` : ''}
+          </div>
+        </div>
+      `).join('');
+    } catch(err) {
+      list.innerHTML = '<p class="text-dim" style="padding:16px;margin:0">Failed to load history.</p>';
+    }
+  }
+
+  async function previewSnapshot(histId) {
+    _currentHistId = histId;
+    document.getElementById('snapshot-modal').style.display = '';
+    document.getElementById('snapshot-content').innerHTML = '<p class="text-dim">Loading...</p>';
+    try {
+      const resp = await fetch(`/shows/${SHOW_ID}/history/${histId}/snapshot`);
+      const snap = await resp.json();
+      const data = snap.data || {};
+      let html = `<p style="margin-bottom:12px;font-size:12px;color:var(--text-dim)">
+        Saved ${snap.saved_at ? snap.saved_at.substring(0,16).replace('T',' ') : '—'}
+      </p><table class="data-table" style="font-size:12px">`;
+
+      const flat = data.advance_data || data.notes_data || {};
+      const rows = data.rows || [];
+
+      if (Object.keys(flat).length) {
+        html += '<thead><tr><th>Field</th><th>Value</th></tr></thead><tbody>';
+        for (const [k, v] of Object.entries(flat)) {
+          if (v && v !== '-' && v !== 'false') {
+            html += `<tr><td style="color:var(--text-dim);white-space:nowrap">${k.replace(/_/g,' ')}</td><td>${v}</td></tr>`;
+          }
+        }
+        html += '</tbody>';
+      } else if (rows.length) {
+        html += '<thead><tr><th>Start</th><th>End</th><th>Description</th><th>Notes</th></tr></thead><tbody>';
+        rows.forEach(r => {
+          html += `<tr><td>${r.start_time||''}</td><td>${r.end_time||''}</td><td>${r.description||''}</td><td>${r.notes||''}</td></tr>`;
+        });
+        html += '</tbody>';
+      }
+      html += '</table>';
+      document.getElementById('snapshot-content').innerHTML = html;
+    } catch(err) {
+      document.getElementById('snapshot-content').innerHTML = '<p class="text-dim">Failed to load snapshot.</p>';
+    }
+  }
+
+  function closeSnapshot() {
+    document.getElementById('snapshot-modal').style.display = 'none';
+    _currentHistId = null;
+  }
+
+  async function confirmRestore() {
+    if (!_currentHistId) return;
+    if (!confirm('Restore this version? The current form data will be overwritten.')) return;
+    try {
+      const resp = await fetch(`/shows/${SHOW_ID}/history/${_currentHistId}/restore`, {method:'POST'});
+      const d = await resp.json();
+      if (d.success) {
+        closeSnapshot();
+        closeHistory();
+        location.reload();
+      } else {
+        alert('Restore failed: ' + (d.error || 'Unknown error'));
+      }
+    } catch(err) {
+      alert('Network error during restore.');
+    }
+  }
+
+  function restoreSnapshot(histId) {
+    previewSnapshot(histId).then(() => {
+      document.getElementById('snapshot-modal').style.display = '';
+    });
+  }
 </script>
 {% endblock %}

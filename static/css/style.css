@@ -376,4 +376,140 @@ select option { background: var(--bg-surface); color: var(--text); }
   .two-col { grid-template-columns: 1fr; }
   .export-grid { grid-template-columns: 1fr; }
   .form-row.cols-2, .form-row.cols-3, .form-row.cols-4, .form-row.cols-5 { grid-template-columns: 1fr; }
+  .adv-form-grid { grid-template-columns: 1fr !important; }
+  .adv-form-grid [style*="grid-column"] { grid-column: 1 / -1 !important; }
+  .history-drawer { width: 100% !important; right: 0; }
 }
+
+/* ── Dynamic Advance Form Grid ───────────────────────────────────── */
+.adv-form-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 14px;
+  padding: 16px;
+}
+/* Notes sections always full-width */
+.adv-form-grid .notes-section { grid-column: 1 / -1; }
+/* Conditional blocks inside grid: override padding from global .conditional-block rule */
+.adv-form-grid .conditional-block { padding: 0; }
+
+/* ── Last Saved Hint ─────────────────────────────────────────────── */
+.last-saved-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-family: var(--font-mono);
+}
+.last-saved-hint strong { color: var(--text-dim); }
+
+/* ── Version History Drawer ──────────────────────────────────────── */
+.history-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.5);
+  z-index: 400;
+}
+.history-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 340px;
+  height: 100vh;
+  background: var(--bg-card);
+  border-left: 1px solid var(--border-light);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.history-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+.history-drawer-title {
+  font-family: var(--font-cond);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+}
+.history-entry {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  gap: 10px;
+}
+.history-entry:hover { background: var(--bg-hover); }
+.history-entry-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  min-width: 0;
+}
+.history-entry-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ── Extra-small buttons ─────────────────────────────────────────── */
+.btn-xs {
+  padding: 3px 8px !important;
+  font-size: 11px !important;
+}
+
+/* ── Form Field Editor (Settings) ────────────────────────────────── */
+.field-editor-table { width: 100%; border-collapse: collapse; }
+.field-editor-table th {
+  font-family: var(--font-cond); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; color: var(--text-muted); text-transform: uppercase;
+  padding: 8px 10px; text-align: left; border-bottom: 2px solid var(--border);
+}
+.field-editor-table td {
+  padding: 7px 10px; border-bottom: 1px solid var(--border); font-size: 12px;
+  vertical-align: middle;
+}
+.field-editor-table tr:last-child td { border-bottom: none; }
+.field-editor-table tr:hover td { background: var(--bg-hover); }
+.drag-handle {
+  cursor: grab; color: var(--text-muted); font-size: 14px; padding: 0 4px;
+  user-select: none;
+}
+.drag-handle:active { cursor: grabbing; }
+.field-row.dragging { opacity: .4; }
+.field-type-badge {
+  display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px;
+  background: var(--bg-surface); color: var(--text-dim); border: 1px solid var(--border);
+  font-family: var(--font-mono);
+}
+
+/* ── Group Management ────────────────────────────────────────────── */
+.group-type-badge {
+  display: inline-block; padding: 2px 7px; border-radius: 3px;
+  font-family: var(--font-cond); font-size: 10px; font-weight: 700; letter-spacing: 0.06em;
+}
+.group-all-access { background: rgba(34,197,94,.1); color: var(--green); }
+.group-restricted  { background: rgba(239,68,68,.1);  color: var(--red); }
+
+/* ── Syslog / Backup Tabs ────────────────────────────────────────── */
+.settings-info-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 12px;
+}
+.settings-info-row:last-child { border-bottom: none; }
+.backup-filename { font-family: var(--font-mono); font-size: 11px; color: var(--text); }
+.backup-size { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; }
+.backup-mtime { color: var(--text-muted); font-size: 11px; }

@@ -1,0 +1,37 @@
+# ── Runtime data — NEVER commit these ────────────────────────────
+# These files contain live production data and secrets.
+# A git pull must never overwrite them.
+
+# SQLite database (production data)
+advance.db
+
+# Environment file (SECRET_KEY and other secrets)
+.env
+
+# Backup files
+backups/
+
+# Python virtual environment
+venv/
+.venv/
+
+# ── Python cache ──────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ── Editor / OS ───────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/

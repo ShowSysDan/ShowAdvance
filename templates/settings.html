@@ -5,26 +5,38 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">Settings</h1>
-    <p class="page-sub">Manage contacts directory and user accounts</p>
+    <p class="page-sub">Manage contacts, users, form fields, and system configuration</p>
   </div>
 </div>
 
 <!-- Settings Tabs -->
 <div class="tab-nav">
-  <button class="tab-btn active" onclick="switchSettingsTab('contacts')">Contacts</button>
+  {% if user.role == 'admin' or is_content_admin %}
+  <button class="tab-btn" onclick="switchSettingsTab('contacts')">Contacts</button>
+  {% endif %}
   <button class="tab-btn" onclick="switchSettingsTab('users')">Users</button>
+  {% if user.role == 'admin' %}
+  <button class="tab-btn" onclick="switchSettingsTab('groups')">Groups</button>
+  {% endif %}
+  {% if user.role == 'admin' or is_content_admin %}
+  <button class="tab-btn" onclick="switchSettingsTab('fields')">Form Fields</button>
+  {% endif %}
+  {% if user.role == 'admin' %}
+  <button class="tab-btn" onclick="switchSettingsTab('syslog')">Syslog</button>
+  <button class="tab-btn" onclick="switchSettingsTab('backups')">Backups</button>
+  {% endif %}
   <button class="tab-btn" onclick="switchSettingsTab('account')">My Account</button>
 </div>
 
-{# ── CONTACTS ─────────────────────────────────────────────────────── #}
-<div id="stab-contacts" class="stab-pane active">
+{# ── CONTACTS ──────────────────────────────────────────────────────────────── #}
+<div id="stab-contacts" class="stab-pane" style="display:none">
   <div class="form-section">
     <div class="form-section-header">
       <span class="section-icon">◈</span> CONTACTS DIRECTORY
       <span class="section-count ml-auto text-dim">{{ contacts|length }} contacts</span>
     </div>
 
-    <!-- Add Contact Form -->
+    {% if user.role == 'admin' or is_content_admin %}
     <div class="form-section-body" style="border-bottom:1px solid var(--border);">
       <h3 class="sub-section-label">ADD CONTACT</h3>
       <form method="post" action="{{ url_for('add_contact') }}" class="form-row cols-5 align-end">
@@ -40,9 +52,7 @@
           <label class="field-label">DEPARTMENT</label>
           <select name="department" class="field-input">
             <option value="">— None —</option>
-            {% for d in departments %}
-            <option value="{{ d }}">{{ d }}</option>
-            {% endfor %}
+            {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
           </select>
         </div>
         <div class="field-group">
@@ -56,49 +66,34 @@
         <button type="submit" class="btn btn-primary">Add</button>
       </form>
     </div>
+    {% endif %}
 
-    <!-- Contacts Table -->
     <div class="form-section-body no-pad">
-      <!-- Filter bar -->
       <div class="table-toolbar">
         <input type="text" id="contact-search" class="field-input field-input-sm" placeholder="Search contacts..." oninput="filterContacts(this.value)" style="max-width:280px">
         <select id="dept-filter" class="field-input field-input-sm" onchange="filterContacts()" style="max-width:200px">
           <option value="">All Departments</option>
-          {% for d in departments %}
-          <option value="{{ d }}">{{ d }}</option>
-          {% endfor %}
+          {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
         </select>
       </div>
-
       <table class="data-table" id="contacts-table">
-        <thead>
-          <tr>
-            <th>NAME</th>
-            <th>TITLE</th>
-            <th>DEPARTMENT</th>
-            <th>PHONE</th>
-            <th>EMAIL</th>
-            <th style="width:80px">ACTIONS</th>
-          </tr>
-        </thead>
+        <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th>EMAIL</th>{% if user.role == 'admin' or is_content_admin %}<th style="width:80px">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}">
             <td class="contact-name" data-field="name">{{ c.name }}</td>
             <td class="text-dim" data-field="title">{{ c.title or '—' }}</td>
-            <td>
-              {% if c.department %}
-              <span class="dept-badge dept-{{ c.department.lower().replace(' ','-') }}">{{ c.department }}</span>
-              {% else %}—{% endif %}
-            </td>
+            <td>{% if c.department %}<span class="dept-badge">{{ c.department }}</span>{% else %}—{% endif %}</td>
             <td class="mono text-sm" data-field="phone">{{ c.phone or '—' }}</td>
             <td class="text-sm" data-field="email">{{ c.email or '—' }}</td>
+            {% if user.role == 'admin' or is_content_admin %}
             <td>
               <div class="action-btns">
                 <button class="btn btn-xs btn-ghost" onclick="editContact(this, {{ c.id }})" title="Edit">✎</button>
                 <button class="btn btn-xs btn-danger-ghost" onclick="deleteContact({{ c.id }}, this)" title="Delete">×</button>
               </div>
             </td>
+            {% endif %}
           </tr>
           {% endfor %}
         </tbody>
@@ -107,11 +102,10 @@
   </div>
 </div>
 
-{# ── USERS ────────────────────────────────────────────────────────── #}
+{# ── USERS ─────────────────────────────────────────────────────────────────── #}
 <div id="stab-users" class="stab-pane" style="display:none">
   <div class="form-section">
     <div class="form-section-header"><span class="section-icon">◈</span> USER ACCOUNTS</div>
-
     {% if user.role == 'admin' %}
     <div class="form-section-body" style="border-bottom:1px solid var(--border)">
       <h3 class="sub-section-label">ADD USER</h3>
@@ -139,7 +133,6 @@
       </form>
     </div>
     {% endif %}
-
     <div class="form-section-body no-pad">
       <table class="data-table">
         <thead><tr><th>DISPLAY NAME</th><th>USERNAME</th><th>ROLE</th><th>CREATED</th><th>ACTIONS</th></tr></thead>
@@ -168,7 +161,269 @@
   </div>
 </div>
 
-{# ── MY ACCOUNT ───────────────────────────────────────────────────── #}
+{# ── GROUPS (admin only) ───────────────────────────────────────────────────── #}
+{% if user.role == 'admin' %}
+<div id="stab-groups" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> USER GROUPS
+      <button class="btn btn-sm btn-ghost ml-auto" onclick="openGroupModal()">+ New Group</button>
+    </div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">
+        <strong>all_access</strong> groups can see all shows and edit freely.
+        <strong>restricted</strong> group members can only view/export shows explicitly assigned to their group.
+      </p>
+
+      {% if groups %}
+      {% for g in groups %}
+      <div class="form-section" style="margin-bottom:12px">
+        <div class="form-section-header" style="background:var(--bg-hover)">
+          <span class="group-type-badge group-{{ g.group_type.replace('_','-') }}">{{ g.group_type.replace('_',' ').upper() }}</span>
+          <strong style="font-size:13px;color:var(--text);letter-spacing:normal;text-transform:none">{{ g.name }}</strong>
+          {% if g.description %}<span class="text-dim" style="font-size:11px;font-weight:400;letter-spacing:0">{{ g.description }}</span>{% endif %}
+          <div class="action-btns ml-auto">
+            <button class="btn btn-xs btn-danger-ghost" onclick="deleteGroup({{ g.id }})">Delete</button>
+          </div>
+        </div>
+        <div class="form-section-body" style="gap:16px">
+
+          {# Members #}
+          <div>
+            <h4 class="sub-section-label">MEMBERS</h4>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center">
+              {% for m in g.members %}
+              <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;font-size:12px">
+                {{ m.display_name or m.username }}
+                <button type="button" onclick="removeGroupMember({{ g.id }}, {{ m.id }})"
+                        style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:0;line-height:1">×</button>
+              </span>
+              {% endfor %}
+              <div style="display:flex;gap:4px">
+                <select id="add-member-{{ g.id }}" class="field-input" style="width:auto;font-size:12px">
+                  <option value="">Add user...</option>
+                  {% for u in users %}
+                  {% if u.id not in g.members|map(attribute='id')|list %}
+                  <option value="{{ u.id }}">{{ u.display_name or u.username }}</option>
+                  {% endif %}
+                  {% endfor %}
+                </select>
+                <button type="button" class="btn btn-sm btn-ghost" onclick="addGroupMember({{ g.id }}, document.getElementById('add-member-{{ g.id }}').value)">Add</button>
+              </div>
+            </div>
+          </div>
+
+          {# Show Access (only meaningful for restricted groups) #}
+          {% if g.group_type == 'restricted' %}
+          <div>
+            <h4 class="sub-section-label">ASSIGNED SHOWS</h4>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px;align-items:center">
+              {% for s in g.shows %}
+              <span style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;background:var(--bg-surface);border:1px solid var(--border);border-radius:4px;font-size:12px">
+                {{ s.name }} {% if s.show_date %}<span class="text-dim">{{ s.show_date }}</span>{% endif %}
+                <button type="button" onclick="removeGroupShowAccess({{ s.id }}, {{ g.id }})"
+                        style="background:none;border:none;color:var(--text-muted);cursor:pointer;font-size:14px;padding:0;line-height:1">×</button>
+              </span>
+              {% endfor %}
+              <div style="display:flex;gap:4px">
+                <select id="add-show-{{ g.id }}" class="field-input" style="width:auto;font-size:12px" onchange="">
+                  <option value="">Assign show...</option>
+                </select>
+                <button type="button" class="btn btn-sm btn-ghost" onclick="addGroupShowAccess(document.getElementById('add-show-{{ g.id }}').value, {{ g.id }})">Assign</button>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
+        </div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <p class="text-dim">No groups yet. Create one to restrict show access for certain users.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{# ── FORM FIELDS (admin only) ──────────────────────────────────────────────── #}
+<div id="stab-fields" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> ADVANCE FORM FIELDS
+      <div class="action-btns ml-auto">
+        <button class="btn btn-sm btn-ghost" onclick="openSectionModal(null)">+ Add Section</button>
+      </div>
+    </div>
+    <div class="form-section-body" style="gap:16px">
+      <p class="text-dim" style="font-size:12px">
+        Drag rows to reorder fields within a section. Changes take effect immediately for all new and existing shows.
+      </p>
+
+      {% for section in (form_sections if form_sections is defined else []) %}
+      <div class="form-section" data-section-id="{{ section.id }}" style="margin-bottom:0">
+        <div class="form-section-header" style="background:var(--bg-hover)">
+          <span class="section-icon">{{ section.icon }}</span>
+          <strong style="font-size:12px;color:var(--text);letter-spacing:normal;text-transform:none">{{ section.label }}</strong>
+          <span class="text-dim" style="font-size:10px;font-weight:400;letter-spacing:0">({{ section.fields|length }} fields)</span>
+          <div class="action-btns ml-auto">
+            <button class="btn btn-xs btn-ghost" onclick="openSectionModal({{ section.id }})"
+                    data-id="{{ section.id }}" data-label="{{ section.label }}"
+                    data-icon="{{ section.icon }}" data-collapsible="{{ '1' if section.collapsible else '0' }}">Edit</button>
+            <button class="btn btn-xs btn-danger-ghost" onclick="deleteSection({{ section.id }})">Delete</button>
+          </div>
+        </div>
+        <div class="form-section-body no-pad">
+          <table class="field-editor-table">
+            <thead>
+              <tr>
+                <th style="width:28px"></th>
+                <th>LABEL</th>
+                <th style="width:120px">TYPE</th>
+                <th style="width:140px">CONDITION</th>
+                <th style="width:80px">ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody data-section-id="{{ section.id }}">
+              {% for field in section.fields %}
+              <tr class="field-row" draggable="true" data-id="{{ field.id }}">
+                <td><span class="drag-handle" title="Drag to reorder">⠿</span></td>
+                <td>
+                  {{ field.label }}
+                  {% if field.is_notes_field %}<span class="text-dim" style="font-size:10px"> (notes)</span>{% endif %}
+                </td>
+                <td><span class="field-type-badge">{{ field.field_type }}</span></td>
+                <td class="text-dim" style="font-size:11px;font-family:var(--font-mono)">{{ field.conditional_show_when or '—' }}</td>
+                <td>
+                  <div class="action-btns">
+                    <button class="btn btn-xs btn-ghost" onclick="openFieldModal({{ field.id }}, {{ section.id }})">Edit</button>
+                    <button class="btn btn-xs btn-danger-ghost" onclick="deleteField({{ field.id }})">×</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <div style="padding:10px 14px;border-top:1px solid var(--border)">
+            <button class="btn btn-sm btn-ghost" onclick="openFieldModal(null, {{ section.id }})">+ Add Field</button>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+
+{# ── SYSLOG (admin only) ───────────────────────────────────────────────────── #}
+<div id="stab-syslog" class="stab-pane" style="display:none">
+
+  {# Server port setting #}
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> SERVER SETTINGS</div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:16px">
+        Application port stored in the database. Restart the service after changing.
+        <br>For the systemd service, re-run <code>sudo ./install.sh</code> to apply the new port.
+      </p>
+      <form onsubmit="event.preventDefault(); saveServerSettings(this)" style="max-width:300px">
+        <div class="field-group">
+          <label class="field-label">APP PORT</label>
+          <input type="number" name="app_port" class="field-input"
+                 value="{{ syslog_settings.get('app_port', '5400') }}"
+                 placeholder="5400" min="1024" max="65535">
+        </div>
+        <div class="server-save-msg field-msg"></div>
+        <button type="submit" class="btn btn-primary">Save Port</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> SYSLOG SETTINGS</div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:4px">
+        Send audit events (logins, saves, exports, user changes) to a remote syslog server via UDP.
+        Requires the syslog server to accept UDP on the configured port.
+      </p>
+      <form onsubmit="event.preventDefault(); saveSyslogSettings(this)" style="max-width:440px">
+        <div class="field-group">
+          <label class="field-label">
+            <input type="checkbox" name="syslog_enabled"
+                   {% if syslog_settings.get('syslog_enabled') == '1' %}checked{% endif %}
+                   style="margin-right:6px;accent-color:var(--accent)">
+            ENABLE SYSLOG
+          </label>
+        </div>
+        <div class="field-group">
+          <label class="field-label">SYSLOG HOST</label>
+          <input type="text" name="syslog_host" class="field-input"
+                 value="{{ syslog_settings.get('syslog_host', '127.0.0.1') }}"
+                 placeholder="127.0.0.1">
+        </div>
+        <div class="field-group">
+          <label class="field-label">SYSLOG PORT (UDP)</label>
+          <input type="number" name="syslog_port" class="field-input"
+                 value="{{ syslog_settings.get('syslog_port', '514') }}"
+                 placeholder="514" min="1" max="65535">
+        </div>
+        <div class="field-group">
+          <label class="field-label">FACILITY</label>
+          <select name="syslog_facility" class="field-input">
+            {% for fac in ['LOG_LOCAL0','LOG_LOCAL1','LOG_LOCAL2','LOG_LOCAL3','LOG_LOCAL4','LOG_LOCAL5','LOG_LOCAL6','LOG_LOCAL7','LOG_USER','LOG_DAEMON'] %}
+            <option value="{{ fac }}" {% if syslog_settings.get('syslog_facility','LOG_LOCAL0') == fac %}selected{% endif %}>{{ fac }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="syslog-save-msg field-msg"></div>
+        <button type="submit" class="btn btn-primary">Save Syslog Settings</button>
+      </form>
+
+      <div style="margin-top:24px">
+        <h4 class="sub-section-label">EVENTS LOGGED</h4>
+        <p class="text-dim" style="font-size:12px;margin-top:8px">
+          LOGIN / LOGOUT · SHOW_CREATE / ARCHIVE / DELETE / RESTORE ·
+          FORM_SAVE (advance, schedule, postnotes) · PDF_EXPORT ·
+          USER_CREATE / DELETE / PASSWORD_CHANGE ·
+          GROUP_ASSIGN / REMOVE · SHOW_ACCESS_ADD / REMOVE ·
+          HISTORY_RESTORE · BACKUP_CREATED · SETTINGS_CHANGE
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+{# ── BACKUPS (admin only) ──────────────────────────────────────────────────── #}
+<div id="stab-backups" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> DATABASE BACKUPS
+      <button class="btn btn-sm btn-ghost ml-auto" onclick="runManualBackup(this)">Run Backup Now</button>
+    </div>
+    <div class="form-section-body" style="gap:20px">
+      <p class="text-dim" style="font-size:12px">
+        Automatic backups run hourly (keeping last 24) and daily at midnight (keeping last 30).
+        Backup files are stored in <code style="font-family:var(--font-mono);font-size:11px">./backups/</code>.
+      </p>
+
+      <div>
+        <h4 class="sub-section-label">HOURLY BACKUPS (last 10)</h4>
+        <div id="backup-list-hourly" class="form-section" style="margin:8px 0 0;overflow:hidden">
+          <p class="text-dim" style="padding:10px">Loading...</p>
+        </div>
+      </div>
+
+      <div>
+        <h4 class="sub-section-label">DAILY BACKUPS (last 10)</h4>
+        <div id="backup-list-daily" class="form-section" style="margin:8px 0 0;overflow:hidden">
+          <p class="text-dim" style="padding:10px">Loading...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}{# end admin-only tabs #}
+
+{# ── MY ACCOUNT ────────────────────────────────────────────────────────────── #}
 <div id="stab-account" class="stab-pane" style="display:none">
   <div class="form-section">
     <div class="form-section-header"><span class="section-icon">◈</span> CHANGE PASSWORD</div>
@@ -193,37 +448,25 @@
   </div>
 </div>
 
+{# ── MODALS ────────────────────────────────────────────────────────────────── #}
+
 <!-- Edit Contact Modal -->
 <div id="edit-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeEditModal()">
   <div class="modal-card">
     <div class="modal-header">Edit Contact <button onclick="closeEditModal()" class="modal-close">×</button></div>
     <div class="modal-body">
       <input type="hidden" id="edit-id">
-      <div class="field-group">
-        <label class="field-label">NAME</label>
-        <input type="text" id="edit-name" class="field-input">
-      </div>
-      <div class="field-group">
-        <label class="field-label">TITLE</label>
-        <input type="text" id="edit-title" class="field-input">
-      </div>
+      <div class="field-group"><label class="field-label">NAME</label><input type="text" id="edit-name" class="field-input"></div>
+      <div class="field-group"><label class="field-label">TITLE</label><input type="text" id="edit-title" class="field-input"></div>
       <div class="field-group">
         <label class="field-label">DEPARTMENT</label>
         <select id="edit-dept" class="field-input">
           <option value="">— None —</option>
-          {% for d in departments %}
-          <option value="{{ d }}">{{ d }}</option>
-          {% endfor %}
+          {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
         </select>
       </div>
-      <div class="field-group">
-        <label class="field-label">PHONE</label>
-        <input type="text" id="edit-phone" class="field-input">
-      </div>
-      <div class="field-group">
-        <label class="field-label">EMAIL</label>
-        <input type="email" id="edit-email" class="field-input">
-      </div>
+      <div class="field-group"><label class="field-label">PHONE</label><input type="text" id="edit-phone" class="field-input"></div>
+      <div class="field-group"><label class="field-label">EMAIL</label><input type="email" id="edit-email" class="field-input"></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
@@ -232,20 +475,182 @@
   </div>
 </div>
 
+{% if user.role == 'admin' %}
+<!-- Add Group Modal -->
+<div id="group-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeGroupModal()">
+  <div class="modal-card">
+    <div class="modal-header">New Group <button onclick="closeGroupModal()" class="modal-close">×</button></div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label class="field-label">GROUP NAME *</label>
+        <input type="text" id="group-name" class="field-input" placeholder="e.g. Visiting Artists">
+      </div>
+      <div class="field-group">
+        <label class="field-label">GROUP TYPE</label>
+        <select id="group-type" class="field-input">
+          <option value="all_access">All Access — can see all shows</option>
+          <option value="restricted">Restricted — assigned shows only (view/export)</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="field-label">DESCRIPTION</label>
+        <input type="text" id="group-desc" class="field-input" placeholder="Optional description">
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeGroupModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="createGroup()">Create Group</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Form Field Modal -->
+<div id="field-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeFieldModal()">
+  <div class="modal-card" style="max-width:560px;max-height:88vh;overflow-y:auto">
+    <div class="modal-header">
+      <span id="field-modal-title">Add Field</span>
+      <button onclick="closeFieldModal()" class="modal-close">×</button>
+    </div>
+    <div class="modal-body" id="field-modal-form">
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">LABEL *</label>
+          <input type="text" name="label" class="field-input" placeholder="e.g. SHOW NAME">
+        </div>
+        <div class="field-group">
+          <label class="field-label">FIELD KEY *</label>
+          <input type="text" name="field_key" class="field-input" placeholder="e.g. show_name" style="font-family:var(--font-mono);font-size:12px">
+        </div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">FIELD TYPE</label>
+          <select name="field_type" class="field-input" onchange="_toggleFieldTypeOptions(this.value)">
+            <option value="text">text</option>
+            <option value="textarea">textarea</option>
+            <option value="date">date</option>
+            <option value="time">time</option>
+            <option value="number">number</option>
+            <option value="select">select (dropdown)</option>
+            <option value="yes_no">yes_no</option>
+            <option value="checkbox">checkbox</option>
+            <option value="contact_dropdown">contact_dropdown</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">SECTION</label>
+          <select name="section_id" class="field-input">
+            {% for s in (form_sections if form_sections is defined else []) %}
+            <option value="{{ s.id }}">{{ s.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="options-group" style="display:none">
+        <div class="field-group">
+          <label class="field-label">OPTIONS (one per line)</label>
+          <textarea name="options_text" class="field-input field-textarea" rows="4" placeholder="-&#10;Option A&#10;Option B"></textarea>
+        </div>
+      </div>
+      <div class="contact-dept-group" style="display:none">
+        <div class="field-group">
+          <label class="field-label">CONTACT DEPARTMENT</label>
+          <select name="contact_dept" class="field-input">
+            <option value="">— None —</option>
+            {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">CONDITIONAL SHOW WHEN (e.g. runner_needed=Yes)</label>
+        <input type="text" name="conditional_show_when" class="field-input" placeholder="field_key=Value" style="font-family:var(--font-mono);font-size:12px">
+      </div>
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">PLACEHOLDER TEXT</label>
+          <input type="text" name="placeholder" class="field-input">
+        </div>
+        <div class="field-group">
+          <label class="field-label">WIDTH HINT</label>
+          <select name="width_hint" class="field-input">
+            <option value="full">Full width</option>
+            <option value="half">Half width</option>
+            <option value="third">Third width</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" name="is_notes_field">
+          Collapsible notes field (renders in toggle-open notes section)
+        </label>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeFieldModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveField()">Save Field</button>
+    </div>
+  </div>
+</div>
+
+<!-- Add/Edit Section Modal -->
+<div id="section-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSectionModal()">
+  <div class="modal-card">
+    <div class="modal-header">Form Section <button onclick="closeSectionModal()" class="modal-close">×</button></div>
+    <div class="modal-body" id="section-modal-form">
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">SECTION LABEL *</label>
+          <input type="text" name="label" class="field-input" placeholder="e.g. ARRIVAL & PARKING">
+        </div>
+        <div class="field-group">
+          <label class="field-label">SECTION KEY (new sections only)</label>
+          <input type="text" name="section_key" class="field-input" placeholder="arrival_parking" style="font-family:var(--font-mono);font-size:12px">
+        </div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">ICON</label>
+          <input type="text" name="icon" class="field-input" value="◈">
+        </div>
+        <div class="field-group">
+          <label class="checkbox-label" style="margin-top:20px">
+            <input type="checkbox" name="collapsible" checked>
+            Collapsible section
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeSectionModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSection()">Save Section</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}
 
 {% block scripts %}
 <script>
+/* ── Settings Tab Switcher ─────────────────────────────────────── */
+const ALL_STABS = ['contacts','users','groups','fields','syslog','backups','account'];
+
 function switchSettingsTab(name) {
-  document.querySelectorAll('.stab-pane').forEach(p => p.style.display='none');
-  document.getElementById('stab-' + name).style.display='block';
-  document.querySelectorAll('.tab-btn').forEach((b,i) => {
-    b.classList.toggle('active', ['contacts','users','account'][i] === name);
+  ALL_STABS.forEach(t => {
+    const el = document.getElementById('stab-' + t);
+    if (el) el.style.display = (t === name) ? 'block' : 'none';
   });
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.toggle('active', b.getAttribute('onclick') === `switchSettingsTab('${name}')`);
+  });
+  history.replaceState({}, '', '#' + name);
+  if (name === 'backups') loadBackupStatus();
 }
 
+/* ── Contacts ──────────────────────────────────────────────────── */
 function filterContacts(val) {
-  const q   = (val || document.getElementById('contact-search').value).toLowerCase();
+  const q    = (val || document.getElementById('contact-search').value).toLowerCase();
   const dept = document.getElementById('dept-filter').value;
   document.querySelectorAll('#contacts-table tbody tr').forEach(row => {
     const text = row.textContent.toLowerCase();
@@ -256,7 +661,7 @@ function filterContacts(val) {
 
 function editContact(btn, id) {
   const row = btn.closest('tr');
-  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-id').value    = id;
   document.getElementById('edit-name').value  = row.querySelector('[data-field=name]').textContent.trim();
   document.getElementById('edit-title').value = row.querySelector('[data-field=title]').textContent.replace('—','').trim();
   document.getElementById('edit-phone').value = row.querySelector('[data-field=phone]').textContent.replace('—','').trim();
@@ -265,18 +670,16 @@ function editContact(btn, id) {
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
-function closeEditModal() {
-  document.getElementById('edit-modal').classList.add('hidden');
-}
+function closeEditModal() { document.getElementById('edit-modal').classList.add('hidden'); }
 
 async function saveContact() {
   const id = document.getElementById('edit-id').value;
   const data = {
-    name:       document.getElementById('edit-name').value,
-    title:      document.getElementById('edit-title').value,
+    name: document.getElementById('edit-name').value,
+    title: document.getElementById('edit-title').value,
     department: document.getElementById('edit-dept').value,
-    phone:      document.getElementById('edit-phone').value,
-    email:      document.getElementById('edit-email').value,
+    phone: document.getElementById('edit-phone').value,
+    email: document.getElementById('edit-email').value,
   };
   const resp = await fetch(`/settings/contacts/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
@@ -290,6 +693,7 @@ async function deleteContact(id, btn) {
   if ((await resp.json()).success) btn.closest('tr').remove();
 }
 
+/* ── Users ─────────────────────────────────────────────────────── */
 async function deleteUser(id, btn) {
   if (!confirm('Delete this user?')) return;
   const resp = await fetch(`/settings/users/${id}/delete`, {method:'POST'});
@@ -309,12 +713,13 @@ async function resetPassword(id) {
   alert(data.success ? 'Password reset successfully.' : data.error);
 }
 
+/* ── My Account ────────────────────────────────────────────────── */
 async function changePassword() {
   const current = document.getElementById('pw-current').value;
   const newpw   = document.getElementById('pw-new').value;
-  const confirm = document.getElementById('pw-confirm').value;
+  const conf    = document.getElementById('pw-confirm').value;
   const msg     = document.getElementById('pw-msg');
-  if (newpw !== confirm) { showMsg(msg,'Passwords do not match.','error'); return; }
+  if (newpw !== conf)    { showMsg(msg,'Passwords do not match.','error'); return; }
   if (newpw.length < 6)  { showMsg(msg,'Password must be at least 6 characters.','error'); return; }
   const resp = await fetch('/account/change_password', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -332,8 +737,55 @@ function showMsg(el, text, type) {
   setTimeout(() => el.style.display='none', 4000);
 }
 
-// Anchor-based tab from flash redirects
-const hash = location.hash.replace('#','');
-if (['contacts','users','account'].includes(hash)) switchSettingsTab(hash);
+/* ── Groups ────────────────────────────────────────────────────── */
+function openGroupModal() { document.getElementById('group-modal').style.display=''; }
+function closeGroupModal() { document.getElementById('group-modal').style.display='none'; }
+
+async function createGroup() {
+  const data = {
+    name: document.getElementById('group-name').value.trim(),
+    group_type: document.getElementById('group-type').value,
+    description: document.getElementById('group-desc').value.trim(),
+  };
+  if (!data.name) { alert('Group name required.'); return; }
+  const resp = await fetch('/settings/groups/add', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+  });
+  const d = await resp.json();
+  if (d.success) { closeGroupModal(); location.reload(); }
+  else alert(d.error || 'Failed to create group.');
+}
+
+/* ── Load show options for restricted group assignment ─────────── */
+async function loadShowOptions() {
+  try {
+    const resp = await fetch('/api/shows');
+    const shows = await resp.json();
+    document.querySelectorAll('[id^="add-show-"]').forEach(sel => {
+      const existingVals = [...sel.parentElement.parentElement.querySelectorAll('[onclick*="removeGroupShowAccess"]')]
+        .map(b => b.getAttribute('onclick').match(/\d+/)?.[0]).filter(Boolean);
+      const currentOptions = sel.innerHTML;
+      shows.forEach(s => {
+        if (!existingVals.includes(String(s.id))) {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          opt.textContent = s.name + (s.show_date ? ' · ' + s.show_date : '');
+          sel.appendChild(opt);
+        }
+      });
+    });
+  } catch(e) {}
+}
+
+/* ── Form Field Editor init ─────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', () => {
+  initFieldDrag();
+  loadShowOptions();
+  // Activate tab from URL hash or server-side default
+  const hash = location.hash.replace('#','');
+  const validTabs = ['contacts','users','groups','fields','syslog','backups','account'];
+  const defaultTab = {{ '"contacts"' if (user.role == 'admin' or is_content_admin) else '"users"' }};
+  switchSettingsTab(validTabs.includes(hash) ? hash : {% if active_tab %}'{{ active_tab }}'{% else %}defaultTab{% endif %});
+});
 </script>
 {% endblock %}
