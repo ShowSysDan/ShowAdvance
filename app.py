@@ -787,13 +787,16 @@ def restore_history(show_id, hist_id):
 
 # ─── Real-time Sync ───────────────────────────────────────────────────────────
 
-def _upsert_active_session(db, user_id, show_id, tab):
+def _upsert_active_session(db, user_id, show_id, tab, focused_field=None):
     """Record that a user is actively on a show page and prune stale sessions."""
     db.execute("""
-        INSERT INTO active_sessions (user_id, show_id, tab, last_seen)
-        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        ON CONFLICT(user_id, show_id) DO UPDATE SET tab=excluded.tab, last_seen=excluded.last_seen
-    """, (user_id, show_id, tab))
+        INSERT INTO active_sessions (user_id, show_id, tab, focused_field, last_seen)
+        VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, show_id) DO UPDATE SET
+            tab=excluded.tab,
+            focused_field=excluded.focused_field,
+            last_seen=excluded.last_seen
+    """, (user_id, show_id, tab, focused_field or None))
     # Prune sessions idle > 60 s
     db.execute("DELETE FROM active_sessions WHERE last_seen < datetime('now', '-60 seconds')")
 
@@ -801,7 +804,7 @@ def _upsert_active_session(db, user_id, show_id, tab):
 def _get_other_active_users(db, user_id, show_id):
     """Return list of other users active on this show in the last 45 s."""
     rows = db.execute("""
-        SELECT u.display_name, u.username, acs.tab
+        SELECT u.display_name, u.username, acs.tab, acs.focused_field
         FROM active_sessions acs
         JOIN users u ON acs.user_id = u.id
         WHERE acs.show_id = ?
@@ -809,7 +812,12 @@ def _get_other_active_users(db, user_id, show_id):
           AND acs.last_seen > datetime('now', '-45 seconds')
         ORDER BY acs.last_seen DESC
     """, (show_id, user_id)).fetchall()
-    return [{'name': r['display_name'] or r['username'], 'tab': r['tab']} for r in rows]
+    return [{
+        'name':          r['display_name'] or r['username'],
+        'initials':      ''.join(w[0].upper() for w in (r['display_name'] or r['username']).split()[:2]),
+        'tab':           r['tab'],
+        'focused_field': r['focused_field'],
+    } for r in rows]
 
 
 @app.route('/shows/<int:show_id>/sync/advance')
@@ -824,8 +832,9 @@ def sync_advance(show_id):
     if not can_access_show(session['user_id'], show_id):
         abort(403)
 
-    since = request.args.get('since', '')
-    tab   = request.args.get('tab', 'advance')
+    since         = request.args.get('since', '')
+    tab           = request.args.get('tab', 'advance')
+    focused_field = request.args.get('field') or None
 
     db = get_db()
 
@@ -850,8 +859,8 @@ def sync_advance(show_id):
     ).fetchone()
     new_since = ts_row[0] if ts_row and ts_row[0] else since
 
-    # Update presence and get other active users
-    _upsert_active_session(db, session['user_id'], show_id, tab)
+    # Update presence (including which field is focused) and get other active users
+    _upsert_active_session(db, session['user_id'], show_id, tab, focused_field)
     others = _get_other_active_users(db, session['user_id'], show_id)
 
     db.commit()
@@ -875,11 +884,12 @@ def show_heartbeat(show_id):
     if not can_access_show(session['user_id'], show_id):
         abort(403)
 
-    data = request.get_json(force=True) or {}
-    tab  = data.get('tab', 'advance')
+    data          = request.get_json(force=True) or {}
+    tab           = data.get('tab', 'advance')
+    focused_field = data.get('focused_field') or None
 
     db = get_db()
-    _upsert_active_session(db, session['user_id'], show_id, tab)
+    _upsert_active_session(db, session['user_id'], show_id, tab, focused_field)
     others = _get_other_active_users(db, session['user_id'], show_id)
 
     # For schedule / postnotes: tell the client if someone else saved recently

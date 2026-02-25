@@ -6,56 +6,76 @@
 let SHOW_ID = null;
 let activeTab = 'advance';
 let saveTimer = null;
-let _isDirty = false;        // true whenever there are unsaved changes
-let _syncSince = '';         // ISO timestamp cursor for advance-field sync
-let _syncInterval = null;    // advance field poll handle
-let _heartbeatInterval = null; // presence-only poll handle for other tabs
+let _isDirty = false;          // true whenever there are unsaved changes
+let _syncSince = '';           // ISO timestamp cursor for advance-field sync
+let _syncInterval = null;      // advance field poll handle (1 s)
+let _heartbeatInterval = null; // presence-only poll handle for other tabs (15 s)
+let _focusedField = null;      // field_key the current user has focused right now
+
+// Deterministic per-user colour palette (8 colours, cycled by name hash)
+const _PRESENCE_COLORS = [
+  '#f59e0b','#3b82f6','#10b981','#ef4444',
+  '#8b5cf6','#ec4899','#06b6d4','#84cc16'
+];
+function _userColor(name) {
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+  return _PRESENCE_COLORS[Math.abs(h) % _PRESENCE_COLORS.length];
+}
+function _initials(name) {
+  return name.split(/\s+/).slice(0,2).map(w => w[0]).join('').toUpperCase();
+}
 
 /* ── Real-time Sync ─────────────────────────────────────────────── */
 
 /**
- * Poll the server every 3 s for advance-field changes made by other users.
- * Only runs while the advance tab is active.
- * Merges incoming changes into fields the current user is NOT focused on.
+ * Poll every 1 s for advance-field changes made by other users.
+ * Merges incoming values into any field the current user is NOT focused on.
+ * Also sends which field the current user has focused (for others' indicators).
  */
 async function _pollAdvanceSync() {
   if (!SHOW_ID) return;
   try {
-    const url = `/shows/${SHOW_ID}/sync/advance?since=${encodeURIComponent(_syncSince)}&tab=${activeTab}`;
-    const resp = await fetch(url);
+    const params = new URLSearchParams({
+      since: _syncSince,
+      tab:   activeTab,
+      field: _focusedField || '',
+    });
+    const resp = await fetch(`/shows/${SHOW_ID}/sync/advance?${params}`);
     if (!resp.ok) return;
     const d = await resp.json();
 
     if (d.since) _syncSince = d.since;
 
-    // Merge changed fields — skip the field the user is currently typing in
+    // ── Merge field values ───────────────────────────────────────────────────
     const focused = document.activeElement;
     const fields = d.fields || {};
     let mergedCount = 0;
     for (const [key, value] of Object.entries(fields)) {
       const el = document.querySelector(`#advance-form [data-key="${key}"]`);
-      if (!el || el === focused) continue;   // don't interrupt active typing
+      if (!el || el === focused) continue;   // never overwrite what you're typing
       if (el.type === 'checkbox') {
-        const newChecked = (value === 'true');
-        if (el.checked !== newChecked) { el.checked = newChecked; mergedCount++; _flashField(el); }
+        const next = (value === 'true');
+        if (el.checked !== next) { el.checked = next; mergedCount++; _flashField(el); }
       } else if (el.value !== value) {
         el.value = value;
         mergedCount++;
         _flashField(el);
-        // Re-evaluate conditional visibility if this field is a trigger
         evaluateAllConditionals();
       }
     }
     if (mergedCount > 0) {
-      showSaveToast(`↓ ${mergedCount} field${mergedCount > 1 ? 's' : ''} updated by another user`);
+      showSaveToast(`↓ ${mergedCount} field${mergedCount > 1 ? 's' : ''} updated`);
     }
 
-    _updatePresence(d.active_users || []);
-  } catch (_) { /* network error — silently wait for next poll */ }
+    // ── Update presence indicators ───────────────────────────────────────────
+    _updatePresenceBadge(d.active_users || []);
+    _renderFieldIndicators(d.active_users || []);
+  } catch (_) { /* silently ignore network errors */ }
 }
 
 /**
- * Heartbeat poll for schedule / postnotes tabs (presence + "someone saved" notice).
+ * Heartbeat for schedule / postnotes tabs — presence + "someone saved" notice.
  */
 async function _pollHeartbeat() {
   if (!SHOW_ID) return;
@@ -63,38 +83,91 @@ async function _pollHeartbeat() {
     const resp = await fetch(`/shows/${SHOW_ID}/heartbeat`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ tab: activeTab }),
+      body: JSON.stringify({ tab: activeTab, focused_field: _focusedField }),
     });
     if (!resp.ok) return;
     const d = await resp.json();
-    _updatePresence(d.active_users || []);
-
-    if (d.other_saved && !_isDirty) {
-      _showOtherSavedBanner(d.last_saved_at);
-    }
+    _updatePresenceBadge(d.active_users || []);
+    if (d.other_saved && !_isDirty) _showOtherSavedBanner(d.last_saved_at);
   } catch (_) {}
 }
 
-/** Brief yellow flash on a field that was updated by another user. */
+/** Brief amber flash on a field updated by another user. */
 function _flashField(el) {
+  el.classList.remove('field-synced');
+  void el.offsetWidth;  // force reflow to restart animation
   el.classList.add('field-synced');
   setTimeout(() => el.classList.remove('field-synced'), 1400);
 }
 
-/** Update the "Also editing: …" presence badge in the show header. */
-function _updatePresence(users) {
-  const el = document.getElementById('presence-indicator');
-  if (!el) return;
-  if (!users.length) { el.textContent = ''; el.hidden = true; return; }
-  const names = users.map(u => `${u.name} (${u.tab})`).join(' · ');
-  el.textContent = '● ' + names;
-  el.hidden = false;
+/**
+ * Render or update per-field presence dots.
+ * Shows a coloured avatar chip beside any field another user is focused on.
+ */
+function _renderFieldIndicators(users) {
+  // Remove all existing indicators
+  document.querySelectorAll('.field-presence-chip').forEach(el => el.remove());
+
+  const focusedUsers = users.filter(u => u.focused_field);
+  if (!focusedUsers.length) return;
+
+  // Group by field_key in case multiple users are on the same field
+  const byField = {};
+  for (const u of focusedUsers) {
+    (byField[u.focused_field] = byField[u.focused_field] || []).push(u);
+  }
+
+  for (const [key, usrs] of Object.entries(byField)) {
+    // Find the field element (input/select/textarea) and its wrapping label
+    const fieldEl = document.querySelector(`#advance-form [data-key="${key}"]`);
+    if (!fieldEl) continue;
+
+    // Walk up to find the .field-group wrapper, then find its label
+    const wrapper = fieldEl.closest('.field-group, .notes-section, .checkbox-label, .adv-field-wrapper');
+    if (!wrapper) continue;
+
+    const chipRow = document.createElement('div');
+    chipRow.className = 'field-presence-row';
+
+    for (const u of usrs) {
+      const color = _userColor(u.name);
+      const chip  = document.createElement('span');
+      chip.className = 'field-presence-chip';
+      chip.title = `${u.name} is here`;
+      chip.style.background = color;
+      chip.textContent = _initials(u.name);
+
+      // Add typing animation for notes fields
+      if (u.focused_field === key) {
+        const dots = document.createElement('span');
+        dots.className = 'typing-dots';
+        dots.innerHTML = '<span></span><span></span><span></span>';
+        chip.appendChild(dots);
+      }
+      chipRow.appendChild(chip);
+    }
+
+    wrapper.style.position = 'relative';
+    wrapper.appendChild(chipRow);
+  }
 }
 
-/** Show a dismissible banner when another user saved the schedule/postnotes. */
+/** Header presence badge showing who else is on this show page. */
+function _updatePresenceBadge(users) {
+  const el = document.getElementById('presence-indicator');
+  if (!el) return;
+  if (!users.length) { el.innerHTML = ''; el.hidden = true; return; }
+
+  el.hidden = false;
+  el.innerHTML = users.map(u => {
+    const color = _userColor(u.name);
+    return `<span class="presence-avatar" style="background:${color}" title="${u.name} · ${u.tab} tab">${_initials(u.name)}</span>`;
+  }).join('') + `<span class="presence-label">${users.length === 1 ? users[0].name.split(' ')[0] : users.length + ' people'} also here</span>`;
+}
+
+/** Non-blocking "someone else saved" banner for schedule/postnotes tabs. */
 function _showOtherSavedBanner(savedAt) {
-  const existing = document.getElementById('other-saved-banner');
-  if (existing) return;  // already showing
+  if (document.getElementById('other-saved-banner')) return;
   const banner = document.createElement('div');
   banner.id = 'other-saved-banner';
   banner.className = 'other-saved-banner';
@@ -105,8 +178,8 @@ function _showOtherSavedBanner(savedAt) {
       <button class="btn btn-xs btn-primary" onclick="location.reload()">Reload</button>
       <button class="btn btn-xs btn-ghost" onclick="this.closest('.other-saved-banner').remove()">Dismiss</button>
     </div>`;
-  document.getElementById('advance-form')?.before(banner) ||
-    document.querySelector('.tab-pane.active')?.prepend(banner);
+  (document.getElementById('advance-form') || document.querySelector('.tab-pane.active'))
+    ?.insertAdjacentElement('beforebegin', banner);
 }
 
 /* ── Tab Switching ─────────────────────────────────────────────── */
