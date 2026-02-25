@@ -244,8 +244,10 @@
     </div>
   </div>
 </div>
+{% endif %}{# end groups admin-only #}
 
-{# ── FORM FIELDS (admin only) ──────────────────────────────────────────────── #}
+{# ── FORM FIELDS (admin or content_admin) ─────────────────────────────────── #}
+{% if user.role == 'admin' or is_content_admin %}
 <div id="stab-fields" class="stab-pane" style="display:none">
   <div class="form-section">
     <div class="form-section-header">
@@ -312,8 +314,10 @@
     </div>
   </div>
 </div>
+{% endif %}{# end fields admin/content_admin #}
 
 {# ── SYSLOG (admin only) ───────────────────────────────────────────────────── #}
+{% if user.role == 'admin' %}
 <div id="stab-syslog" class="stab-pane" style="display:none">
 
   {# Server port setting #}
@@ -503,7 +507,9 @@
     </div>
   </div>
 </div>
+{% endif %}{# end group modal admin-only #}
 
+{% if user.role == 'admin' or is_content_admin %}
 <!-- Add/Edit Form Field Modal -->
 <div id="field-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeFieldModal()">
   <div class="modal-card" style="max-width:560px;max-height:88vh;overflow-y:auto">

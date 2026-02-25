@@ -264,12 +264,25 @@
 
       <h3 class="sub-section-label mt-md">DPC CONTACTS</h3>
       <div class="form-row cols-2">
+        {# Production Manager and Hospitality come from the Advance Sheet #}
+        <div class="field-group">
+          <label class="field-label">PRODUCTION MANAGER</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ adv('production_manager') or '—' }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
+        <div class="field-group">
+          <label class="field-label">HOSPITALITY</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ adv('hospitality_contact') or '—' }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
         {% for role, dept in [
-          ('Production Manager', 'Production'),
           ('Programming', 'Programming'),
           ('Event Manager', 'Event Manager'),
           ('Education', 'Education Team'),
-          ('Hospitality', 'Hospitality'),
           ('Guest Services', 'Guest Services'),
           ('Runner', 'Runners')
         ] %}
@@ -508,12 +521,11 @@
 
 {% block scripts %}
 <script>
-  const SHOW_ID = {{ show.id }};
   const RESTRICTED = {{ 'true' if restricted else 'false' }};
   const INITIAL_TAB = '{{ tab }}';
   const ALL_USERS = {{ all_users | tojson }};
   let _currentHistId = null;
-  initShow(SHOW_ID, INITIAL_TAB);
+  initShow({{ show.id }}, INITIAL_TAB);
 
   /* ── Version History ────────────────────────────────────────── */
   function openHistory() {
