@@ -38,7 +38,7 @@ step()  { echo -e "\n${CYAN}==> $*${NC}"; }
 
 echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════╗${NC}"
-echo -e "${CYAN}║   ShowAdvance — DPC Production Manager   ║${NC}"
+echo -e "${CYAN}║     ShowAdvance — Production Manager     ║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -131,7 +131,7 @@ if [ "$(id -u)" -eq 0 ]; then
     # this file when the port changes via the Settings UI).
     cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=ShowAdvance — DPC Production Management
+Description=ShowAdvance — Production Management
 Documentation=https://github.com/ShowSysDan/ShowAdvance
 After=network.target
 
