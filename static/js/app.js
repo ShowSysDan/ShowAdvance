@@ -6,6 +6,7 @@
 let SHOW_ID = null;
 let activeTab = 'advance';
 let saveTimer = null;
+let _isDirty = false;  // true whenever there are unsaved changes
 
 /* ── Tab Switching ─────────────────────────────────────────────── */
 function switchTab(name) {
@@ -29,6 +30,23 @@ function initShow(showId, initialTab) {
   bindScheduleForm();
   bindPostNotesForm();
   evaluateAllConditionals();
+
+  // 30-second safety-net: flush any unsaved changes that the debounce
+  // may have missed (e.g. browser regained focus, slow typing bursts).
+  setInterval(() => {
+    if (_isDirty && ['advance', 'schedule', 'postnotes'].includes(activeTab)) {
+      clearTimeout(saveTimer);
+      saveActive();
+    }
+  }, 30000);
+
+  // Warn before leaving page with unsaved changes
+  window.addEventListener('beforeunload', e => {
+    if (_isDirty) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 }
 
 /* ── Save Status ───────────────────────────────────────────────── */
@@ -40,9 +58,20 @@ function setSaveStatus(state, msg) {
 }
 
 function scheduleSave() {
-  setSaveStatus('saving', 'Unsaved changes...');
+  _isDirty = true;
+  setSaveStatus('pending', 'Unsaved changes...');
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => saveActive(), 1500);
+}
+
+/* ── Toast Notification ─────────────────────────────────────────── */
+function showSaveToast(msg, type) {
+  const toast = document.getElementById('save-toast');
+  if (!toast) return;
+  toast.textContent = msg;
+  toast.className = 'save-toast show' + (type === 'error' ? ' toast-error' : '');
+  clearTimeout(toast._timer);
+  toast._timer = setTimeout(() => { toast.className = 'save-toast'; }, 2500);
 }
 
 function saveActive() {
@@ -84,9 +113,19 @@ async function saveAdvance() {
       body: JSON.stringify(collectAdvanceData())
     });
     const d = await resp.json();
-    if (d.success) { setSaveStatus('saved', '✓ Saved'); setTimeout(() => setSaveStatus('', ''), 3000); }
-    else setSaveStatus('error', '✗ Save failed');
-  } catch(e) { setSaveStatus('error', '✗ Network error'); }
+    if (d.success) {
+      _isDirty = false;
+      setSaveStatus('saved', '✓ Saved');
+      showSaveToast('✓ Saved');
+      setTimeout(() => setSaveStatus('', ''), 3000);
+    } else {
+      setSaveStatus('error', '✗ Save failed');
+      showSaveToast('✗ Save failed', 'error');
+    }
+  } catch(e) {
+    setSaveStatus('error', '✗ Network error');
+    showSaveToast('✗ Network error', 'error');
+  }
 }
 
 /* ── Schedule Form ──────────────────────────────────────────────── */
@@ -152,9 +191,19 @@ async function saveSchedule() {
       body: JSON.stringify(collectScheduleData())
     });
     const d = await resp.json();
-    if (d.success) { setSaveStatus('saved', '✓ Saved'); setTimeout(() => setSaveStatus('', ''), 3000); }
-    else setSaveStatus('error', '✗ Save failed');
-  } catch(e) { setSaveStatus('error', '✗ Network error'); }
+    if (d.success) {
+      _isDirty = false;
+      setSaveStatus('saved', '✓ Saved');
+      showSaveToast('✓ Saved');
+      setTimeout(() => setSaveStatus('', ''), 3000);
+    } else {
+      setSaveStatus('error', '✗ Save failed');
+      showSaveToast('✗ Save failed', 'error');
+    }
+  } catch(e) {
+    setSaveStatus('error', '✗ Network error');
+    showSaveToast('✗ Network error', 'error');
+  }
 }
 
 /* ── Post-Show Notes ──────────────────────────────────────────── */
@@ -184,9 +233,19 @@ async function savePostNotes() {
       body: JSON.stringify(collectPostNotesData())
     });
     const d = await resp.json();
-    if (d.success) { setSaveStatus('saved', '✓ Saved'); setTimeout(() => setSaveStatus('', ''), 3000); }
-    else setSaveStatus('error', '✗ Network error'); 
-  } catch(e) { setSaveStatus('error', '✗ Network error'); }
+    if (d.success) {
+      _isDirty = false;
+      setSaveStatus('saved', '✓ Saved');
+      showSaveToast('✓ Saved');
+      setTimeout(() => setSaveStatus('', ''), 3000);
+    } else {
+      setSaveStatus('error', '✗ Save failed');
+      showSaveToast('✗ Save failed', 'error');
+    }
+  } catch(e) {
+    setSaveStatus('error', '✗ Network error');
+    showSaveToast('✗ Network error', 'error');
+  }
 }
 
 /* ── Conditional Fields ──────────────────────────────────────────── */
@@ -482,20 +541,62 @@ async function deleteGroup(gid) {
   else alert(d.error || 'Delete failed.');
 }
 
-/* ── Server Settings ─────────────────────────────────────────── */
+/* ── Server Settings (port change + live restart) ────────────── */
 async function saveServerSettings(form) {
-  const data = { app_port: parseInt(form.querySelector('[name="app_port"]').value, 10) };
+  const newPort = parseInt(form.querySelector('[name="app_port"]').value, 10);
+  const msg = form.querySelector('.server-save-msg');
+
   const resp = await fetch('/settings/server', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(data)
+    body: JSON.stringify({ app_port: newPort })
   });
   const d = await resp.json();
-  const msg = form.querySelector('.server-save-msg');
-  if (msg) {
-    msg.textContent = d.success ? ('✓ ' + (d.message || 'Saved')) : ('Error: ' + (d.error||'Unknown'));
-    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
-    setTimeout(() => { msg.textContent=''; msg.className='field-msg'; }, 5000);
+
+  if (!d.success) {
+    if (msg) {
+      msg.textContent = 'Error: ' + (d.error || 'Unknown');
+      msg.className = 'field-msg field-msg-error';
+    }
+    return;
+  }
+
+  if (d.restarting) {
+    // Service is restarting on new port — poll until it responds, then redirect
+    if (msg) {
+      msg.textContent = '⟳ Restarting on port ' + d.new_port + '...';
+      msg.className = 'field-msg field-msg-warning';
+    }
+    const newOrigin = location.protocol + '//' + location.hostname + ':' + d.new_port;
+    let attempts = 0;
+    const poll = setInterval(async () => {
+      attempts++;
+      if (attempts > 40) {  // 40 s timeout
+        clearInterval(poll);
+        if (msg) {
+          msg.textContent = '⚠ Timeout. Navigate manually to port ' + d.new_port;
+          msg.className = 'field-msg field-msg-error';
+        }
+        return;
+      }
+      try {
+        // no-cors fetch just to see if the server is up
+        await fetch(newOrigin + '/login', {
+          mode: 'no-cors',
+          signal: AbortSignal.timeout(2000)
+        });
+        clearInterval(poll);
+        if (msg) msg.textContent = '✓ Restarted! Redirecting...';
+        setTimeout(() => { location.href = newOrigin + location.pathname; }, 800);
+      } catch (_) { /* still restarting */ }
+    }, 1000);
+  } else {
+    // Not a systemd service — just show confirmation
+    if (msg) {
+      msg.textContent = '✓ ' + (d.message || 'Saved. Restart the service to apply.');
+      msg.className = 'field-msg field-msg-success';
+      setTimeout(() => { msg.textContent = ''; msg.className = 'field-msg'; }, 6000);
+    }
   }
 }
 

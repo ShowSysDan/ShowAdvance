@@ -442,6 +442,9 @@
 
 {% endblock %}
 
+{# Autosave toast — fixed bottom-right, shown briefly after each save #}
+<div id="save-toast" class="save-toast"></div>
+
 {% block scripts %}
 <script>
   const SHOW_ID = {{ show.id }};

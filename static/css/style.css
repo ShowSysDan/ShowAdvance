@@ -513,3 +513,47 @@ select option { background: var(--bg-surface); color: var(--text); }
 .backup-filename { font-family: var(--font-mono); font-size: 11px; color: var(--text); }
 .backup-size { color: var(--text-muted); font-family: var(--font-mono); font-size: 11px; }
 .backup-mtime { color: var(--text-muted); font-size: 11px; }
+
+/* ── Autosave Toast ───────────────────────────────────────────────── */
+/* Fixed bottom-right notification; slides up, fades out automatically */
+.save-toast {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  z-index: 9999;
+  padding: 9px 18px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: #1e3a2b;
+  color: #4ade80;
+  border: 1px solid #2d5a3d;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.45);
+  opacity: 0;
+  transform: translateY(12px);
+  pointer-events: none;
+  transition: opacity 0.22s ease, transform 0.22s ease;
+}
+.save-toast.show {
+  opacity: 1;
+  transform: translateY(0);
+}
+.save-toast.toast-error {
+  background: #3a1e1e;
+  color: #f87171;
+  border-color: #5a2d2d;
+}
+
+/* ── Field message colours (shared by settings forms) ─────────────── */
+.field-msg-warning {
+  color: #f59e0b;
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+/* ── Save status indicator (header) ──────────────────────────────── */
+.save-status.pending { color: var(--text-muted); }
+.save-status.saving  { color: var(--text-muted); }
+.save-status.saved   { color: #4ade80; }
+.save-status.error   { color: #f87171; }

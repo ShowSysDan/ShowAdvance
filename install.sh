@@ -123,12 +123,12 @@ if [ "$(id -u)" -eq 0 ]; then
     # Ensure .env is readable by service user
     chown "${RUN_USER}" "$ENV_FILE" 2>/dev/null || true
 
-    GUNICORN="${VENV}/bin/gunicorn"
-    if [ ! -f "$GUNICORN" ]; then
-        error "gunicorn not found in venv — ensure gunicorn is in requirements.txt"
-    fi
+    # Make start.sh executable
+    chmod +x "${APP_DIR}/start.sh"
 
-    # Write the systemd unit
+    # Write the systemd unit — ExecStart uses start.sh so the port is
+    # read from the database on every service restart (no need to edit
+    # this file when the port changes via the Settings UI).
     cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=ShowAdvance — DPC Production Management
@@ -140,7 +140,7 @@ Type=simple
 User=${RUN_USER}
 WorkingDirectory=${APP_DIR}
 EnvironmentFile=${ENV_FILE}
-ExecStart=${GUNICORN} --workers 2 --bind 0.0.0.0:${PORT} --timeout 120 --access-logfile - app:app
+ExecStart=${APP_DIR}/start.sh
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -152,6 +152,14 @@ WantedBy=multi-user.target
 EOF
 
     info "Systemd unit written to ${SERVICE_FILE}"
+
+    # Allow the service user to restart showadvance without a password.
+    # This enables the "Change Port" UI button to trigger a live restart.
+    SUDOERS_FILE="/etc/sudoers.d/${APP_NAME}"
+    echo "${RUN_USER} ALL=(ALL) NOPASSWD: /bin/systemctl restart ${APP_NAME}, /usr/bin/systemctl restart ${APP_NAME}" \
+        > "$SUDOERS_FILE"
+    chmod 440 "$SUDOERS_FILE"
+    info "Sudoers entry written to ${SUDOERS_FILE} (allows service restart from UI)"
 
     systemctl daemon-reload
     systemctl enable "$APP_NAME" --quiet

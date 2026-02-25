@@ -9,6 +9,8 @@ import shutil
 import logging
 import logging.handlers
 import atexit
+import subprocess
+import threading
 from datetime import datetime, date
 from functools import wraps
 from io import BytesIO
@@ -1468,12 +1470,49 @@ def save_server_settings():
             return jsonify({'success': False, 'error': 'Port must be between 1024 and 65535.'}), 400
     except ValueError:
         return jsonify({'success': False, 'error': 'Invalid port number.'}), 400
+
     db = get_db()
     db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
                ('app_port', str(port_val)))
     db.commit(); db.close()
     syslog_logger.info(f"SETTINGS_CHANGE key=app_port value={port_val} by={session.get('username')}")
-    return jsonify({'success': True, 'message': f'Port set to {port_val}. Restart the service to apply.'})
+
+    # Check if running under the showadvance systemd service
+    svc_active = False
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'showadvance'],
+            capture_output=True, text=True, timeout=3
+        )
+        svc_active = result.stdout.strip() == 'active'
+    except Exception:
+        pass
+
+    if svc_active:
+        # Schedule restart after response is sent (1 s delay so the JSON
+        # response reaches the browser before the process is killed)
+        def _do_restart():
+            import time as _time
+            _time.sleep(1.0)
+            try:
+                subprocess.run(
+                    ['sudo', 'systemctl', 'restart', 'showadvance'],
+                    timeout=10
+                )
+            except Exception as exc:
+                app.logger.error(f'Service restart failed: {exc}')
+        threading.Thread(target=_do_restart, daemon=True).start()
+
+    return jsonify({
+        'success': True,
+        'new_port': port_val,
+        'restarting': svc_active,
+        'message': (
+            f'Port changed to {port_val}. Service is restarting...'
+            if svc_active else
+            f'Port set to {port_val}. Restart the service to apply.'
+        )
+    })
 
 
 @app.route('/settings/syslog', methods=['POST'])
