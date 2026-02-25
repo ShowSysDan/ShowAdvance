@@ -6,7 +6,108 @@
 let SHOW_ID = null;
 let activeTab = 'advance';
 let saveTimer = null;
-let _isDirty = false;  // true whenever there are unsaved changes
+let _isDirty = false;        // true whenever there are unsaved changes
+let _syncSince = '';         // ISO timestamp cursor for advance-field sync
+let _syncInterval = null;    // advance field poll handle
+let _heartbeatInterval = null; // presence-only poll handle for other tabs
+
+/* ── Real-time Sync ─────────────────────────────────────────────── */
+
+/**
+ * Poll the server every 3 s for advance-field changes made by other users.
+ * Only runs while the advance tab is active.
+ * Merges incoming changes into fields the current user is NOT focused on.
+ */
+async function _pollAdvanceSync() {
+  if (!SHOW_ID) return;
+  try {
+    const url = `/shows/${SHOW_ID}/sync/advance?since=${encodeURIComponent(_syncSince)}&tab=${activeTab}`;
+    const resp = await fetch(url);
+    if (!resp.ok) return;
+    const d = await resp.json();
+
+    if (d.since) _syncSince = d.since;
+
+    // Merge changed fields — skip the field the user is currently typing in
+    const focused = document.activeElement;
+    const fields = d.fields || {};
+    let mergedCount = 0;
+    for (const [key, value] of Object.entries(fields)) {
+      const el = document.querySelector(`#advance-form [data-key="${key}"]`);
+      if (!el || el === focused) continue;   // don't interrupt active typing
+      if (el.type === 'checkbox') {
+        const newChecked = (value === 'true');
+        if (el.checked !== newChecked) { el.checked = newChecked; mergedCount++; _flashField(el); }
+      } else if (el.value !== value) {
+        el.value = value;
+        mergedCount++;
+        _flashField(el);
+        // Re-evaluate conditional visibility if this field is a trigger
+        evaluateAllConditionals();
+      }
+    }
+    if (mergedCount > 0) {
+      showSaveToast(`↓ ${mergedCount} field${mergedCount > 1 ? 's' : ''} updated by another user`);
+    }
+
+    _updatePresence(d.active_users || []);
+  } catch (_) { /* network error — silently wait for next poll */ }
+}
+
+/**
+ * Heartbeat poll for schedule / postnotes tabs (presence + "someone saved" notice).
+ */
+async function _pollHeartbeat() {
+  if (!SHOW_ID) return;
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/heartbeat`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ tab: activeTab }),
+    });
+    if (!resp.ok) return;
+    const d = await resp.json();
+    _updatePresence(d.active_users || []);
+
+    if (d.other_saved && !_isDirty) {
+      _showOtherSavedBanner(d.last_saved_at);
+    }
+  } catch (_) {}
+}
+
+/** Brief yellow flash on a field that was updated by another user. */
+function _flashField(el) {
+  el.classList.add('field-synced');
+  setTimeout(() => el.classList.remove('field-synced'), 1400);
+}
+
+/** Update the "Also editing: …" presence badge in the show header. */
+function _updatePresence(users) {
+  const el = document.getElementById('presence-indicator');
+  if (!el) return;
+  if (!users.length) { el.textContent = ''; el.hidden = true; return; }
+  const names = users.map(u => `${u.name} (${u.tab})`).join(' · ');
+  el.textContent = '● ' + names;
+  el.hidden = false;
+}
+
+/** Show a dismissible banner when another user saved the schedule/postnotes. */
+function _showOtherSavedBanner(savedAt) {
+  const existing = document.getElementById('other-saved-banner');
+  if (existing) return;  // already showing
+  const banner = document.createElement('div');
+  banner.id = 'other-saved-banner';
+  banner.className = 'other-saved-banner';
+  const time = savedAt ? new Date(savedAt + 'Z').toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+  banner.innerHTML = `
+    <span>⚠ Another user saved this form${time ? ' at ' + time : ''}. Reload to see their changes.</span>
+    <div style="display:flex;gap:8px">
+      <button class="btn btn-xs btn-primary" onclick="location.reload()">Reload</button>
+      <button class="btn btn-xs btn-ghost" onclick="this.closest('.other-saved-banner').remove()">Dismiss</button>
+    </div>`;
+  document.getElementById('advance-form')?.before(banner) ||
+    document.querySelector('.tab-pane.active')?.prepend(banner);
+}
 
 /* ── Tab Switching ─────────────────────────────────────────────── */
 function switchTab(name) {
@@ -21,6 +122,11 @@ function switchTab(name) {
   const url = new URL(window.location);
   url.searchParams.set('tab', name);
   history.replaceState({}, '', url);
+  // Immediately update presence when the user switches tabs
+  if (SHOW_ID) {
+    if (name === 'advance') _pollAdvanceSync();
+    else _pollHeartbeat();
+  }
 }
 
 function initShow(showId, initialTab) {
@@ -40,6 +146,9 @@ function initShow(showId, initialTab) {
     }
   }, 30000);
 
+  // Start real-time sync polling
+  _startSync();
+
   // Warn before leaving page with unsaved changes
   window.addEventListener('beforeunload', e => {
     if (_isDirty) {
@@ -47,6 +156,21 @@ function initShow(showId, initialTab) {
       e.returnValue = '';
     }
   });
+}
+
+function _startSync() {
+  // Advance tab: 3-second field-level sync poll
+  _syncInterval = setInterval(() => {
+    if (activeTab === 'advance') _pollAdvanceSync();
+  }, 3000);
+
+  // All tabs: 15-second heartbeat for presence + "someone saved" notice
+  _heartbeatInterval = setInterval(() => {
+    if (activeTab !== 'advance') _pollHeartbeat();
+  }, 15000);
+
+  // Immediate first poll to seed the _syncSince cursor and show presence
+  _pollAdvanceSync();
 }
 
 /* ── Save Status ───────────────────────────────────────────────── */

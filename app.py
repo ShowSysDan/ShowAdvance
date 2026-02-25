@@ -85,6 +85,7 @@ def get_db():
     conn = sqlite3.connect(DATABASE)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")   # allows concurrent reads during writes
     return conn
 
 
@@ -782,6 +783,120 @@ def restore_history(show_id, hist_id):
         f"HISTORY_RESTORE show_id={show_id} hist_id={hist_id} type={form_type} by={session.get('username')}"
     )
     return jsonify({'success': True})
+
+
+# ─── Real-time Sync ───────────────────────────────────────────────────────────
+
+def _upsert_active_session(db, user_id, show_id, tab):
+    """Record that a user is actively on a show page and prune stale sessions."""
+    db.execute("""
+        INSERT INTO active_sessions (user_id, show_id, tab, last_seen)
+        VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+        ON CONFLICT(user_id, show_id) DO UPDATE SET tab=excluded.tab, last_seen=excluded.last_seen
+    """, (user_id, show_id, tab))
+    # Prune sessions idle > 60 s
+    db.execute("DELETE FROM active_sessions WHERE last_seen < datetime('now', '-60 seconds')")
+
+
+def _get_other_active_users(db, user_id, show_id):
+    """Return list of other users active on this show in the last 45 s."""
+    rows = db.execute("""
+        SELECT u.display_name, u.username, acs.tab
+        FROM active_sessions acs
+        JOIN users u ON acs.user_id = u.id
+        WHERE acs.show_id = ?
+          AND acs.user_id != ?
+          AND acs.last_seen > datetime('now', '-45 seconds')
+        ORDER BY acs.last_seen DESC
+    """, (show_id, user_id)).fetchall()
+    return [{'name': r['display_name'] or r['username'], 'tab': r['tab']} for r in rows]
+
+
+@app.route('/shows/<int:show_id>/sync/advance')
+@login_required
+def sync_advance(show_id):
+    """
+    Lightweight poll endpoint for real-time field sync.
+    Query param:  since=<YYYY-MM-DD HH:MM:SS>  — last sync timestamp
+                  tab=<advance|schedule|postnotes>  — caller's current tab
+    Returns changed advance_data fields + active-user presence list.
+    """
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+
+    since = request.args.get('since', '')
+    tab   = request.args.get('tab', 'advance')
+
+    db = get_db()
+
+    # Fields changed since last poll (exclude the current user's own saves so
+    # we don't echo back what they just wrote)
+    if since:
+        changed_rows = db.execute("""
+            SELECT ad.field_key, ad.field_value
+            FROM advance_data ad
+            WHERE ad.show_id = ?
+              AND ad.updated_at > ?
+              AND (
+                SELECT last_saved_by FROM shows WHERE id = ad.show_id
+              ) != ?
+        """, (show_id, since, session['user_id'])).fetchall()
+    else:
+        changed_rows = []
+
+    # New "since" cursor = latest updated_at across the whole show's advance data
+    ts_row = db.execute(
+        "SELECT MAX(updated_at) FROM advance_data WHERE show_id = ?", (show_id,)
+    ).fetchone()
+    new_since = ts_row[0] if ts_row and ts_row[0] else since
+
+    # Update presence and get other active users
+    _upsert_active_session(db, session['user_id'], show_id, tab)
+    others = _get_other_active_users(db, session['user_id'], show_id)
+
+    db.commit()
+    db.close()
+
+    return jsonify({
+        'since':        new_since,
+        'fields':       {r['field_key']: r['field_value'] for r in changed_rows},
+        'active_users': others,
+    })
+
+
+@app.route('/shows/<int:show_id>/heartbeat', methods=['POST'])
+@login_required
+def show_heartbeat(show_id):
+    """
+    Thin presence-only update for schedule/postnotes tabs where the advance
+    sync poll isn't running. Also detects when another user saved non-advance
+    data so the client can show a "someone else saved" notice.
+    """
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+
+    data = request.get_json(force=True) or {}
+    tab  = data.get('tab', 'advance')
+
+    db = get_db()
+    _upsert_active_session(db, session['user_id'], show_id, tab)
+    others = _get_other_active_users(db, session['user_id'], show_id)
+
+    # For schedule / postnotes: tell the client if someone else saved recently
+    # so it can show a "reload?" banner without fetching the full dataset.
+    show = db.execute('SELECT last_saved_by, last_saved_at FROM shows WHERE id=?',
+                      (show_id,)).fetchone()
+    other_saved = (show and show['last_saved_by'] and
+                   show['last_saved_by'] != session['user_id'])
+
+    db.commit()
+    db.close()
+
+    return jsonify({
+        'active_users': others,
+        'other_saved':  other_saved,
+        'last_saved_at': show['last_saved_at'] if show else None,
+    })
 
 
 # ─── PDF Export ───────────────────────────────────────────────────────────────

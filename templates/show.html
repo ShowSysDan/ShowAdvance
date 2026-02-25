@@ -114,6 +114,8 @@
     {% endif %}
   </div>
   <div class="header-actions" id="save-indicator">
+    {# Presence badge — populated by JS sync poll #}
+    <span id="presence-indicator" class="presence-indicator" hidden></span>
     <span class="save-status" id="save-status"></span>
     <button type="button" class="btn btn-ghost btn-sm" onclick="openHistory()" title="Version history">History</button>
     {% if not restricted %}

@@ -557,3 +557,43 @@ select option { background: var(--bg-surface); color: var(--text); }
 .save-status.saving  { color: var(--text-muted); }
 .save-status.saved   { color: #4ade80; }
 .save-status.error   { color: #f87171; }
+
+/* ── Presence Indicator ───────────────────────────────────────────── */
+/* "● Jane (advance)" badge shown when another user is on the same show */
+.presence-indicator {
+  font-size: 11px;
+  color: #f59e0b;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border: 1px solid #78350f44;
+  border-radius: 4px;
+  background: #78350f22;
+}
+
+/* ── Synced-field flash ───────────────────────────────────────────── */
+/* Brief yellow highlight when another user's change is merged in */
+@keyframes field-sync-flash {
+  0%   { background: #92400e55; box-shadow: 0 0 0 2px #f59e0b66; }
+  100% { background: transparent; box-shadow: none; }
+}
+.field-synced {
+  animation: field-sync-flash 1.4s ease-out forwards;
+  border-radius: 3px;
+}
+
+/* ── Other-saved Banner ───────────────────────────────────────────── */
+/* Non-blocking top-of-form notice when another user saves schedule/notes */
+.other-saved-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  margin-bottom: 12px;
+  background: #78350f33;
+  border: 1px solid #92400e;
+  border-radius: 6px;
+  font-size: 13px;
+  color: #fcd34d;
+}

@@ -152,6 +152,14 @@ CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS active_sessions (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    tab     TEXT NOT NULL DEFAULT 'advance',
+    last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, show_id)
+);
 """
 
 SEED_CONTACTS = [
@@ -431,6 +439,16 @@ def migrate_db():
         CREATE TABLE IF NOT EXISTS app_settings (
             key TEXT PRIMARY KEY,
             value TEXT DEFAULT ''
+        );
+
+        -- Tracks who is currently viewing/editing a show (for presence indicators)
+        -- Rows older than 60 s are considered stale and pruned automatically.
+        CREATE TABLE IF NOT EXISTS active_sessions (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            tab     TEXT NOT NULL DEFAULT 'advance',
+            last_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, show_id)
         );
     """)
 
