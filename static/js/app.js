@@ -8,7 +8,7 @@ let activeTab = 'advance';
 let saveTimer = null;
 let _isDirty = false;          // true whenever there are unsaved changes
 let _syncSince = '';           // ISO timestamp cursor for advance-field sync
-let _syncInterval = null;      // advance field poll handle (1 s)
+let _syncInterval = null;      // advance field poll handle (3 s)
 let _heartbeatInterval = null; // presence-only poll handle for other tabs (15 s)
 let _focusedField = null;      // field_key the current user has focused right now
 
