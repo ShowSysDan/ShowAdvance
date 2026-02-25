@@ -1,9 +1,14 @@
 """
-Run this once to create the database and seed it with contacts from the Excel.
-Usage: python init_db.py
+Database initialization and migration for ShowAdvance.
+
+Usage:
+  python init_db.py           — fresh init (skips if DB exists)
+  python init_db.py --force   — destroy and reinitialize
+  python init_db.py --migrate — run migrations on existing DB (safe for production)
 """
 import sqlite3
 import os
+import json
 from werkzeug.security import generate_password_hash
 
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advance.db')
@@ -17,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     display_name TEXT,
     role TEXT DEFAULT 'user',
+    theme TEXT DEFAULT 'dark',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -89,6 +95,101 @@ CREATE TABLE IF NOT EXISTS export_log (
     exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     filename TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS form_sections (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    section_key TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    collapsible INTEGER DEFAULT 1,
+    icon TEXT DEFAULT '◈'
+);
+
+CREATE TABLE IF NOT EXISTS form_fields (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    section_id INTEGER NOT NULL REFERENCES form_sections(id) ON DELETE CASCADE,
+    field_key TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    field_type TEXT NOT NULL DEFAULT 'text',
+    sort_order INTEGER DEFAULT 0,
+    options_json TEXT DEFAULT NULL,
+    contact_dept TEXT DEFAULT NULL,
+    conditional_show_when TEXT DEFAULT NULL,
+    help_text TEXT DEFAULT NULL,
+    placeholder TEXT DEFAULT '',
+    width_hint TEXT DEFAULT 'full',
+    is_notes_field INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS form_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    form_type TEXT NOT NULL,
+    saved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    snapshot_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    group_type TEXT NOT NULL DEFAULT 'all_access',
+    description TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS user_group_members (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id)
+);
+
+CREATE TABLE IF NOT EXISTS show_group_access (
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (show_id, group_id)
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS active_sessions (
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    show_id       INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    tab           TEXT NOT NULL DEFAULT 'advance',
+    focused_field TEXT,           -- field_key the user currently has focused
+    last_seen     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, show_id)
+);
+
+CREATE TABLE IF NOT EXISTS show_comments (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id     INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body        TEXT NOT NULL,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS show_attachments (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id      INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    uploaded_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    filename     TEXT NOT NULL,
+    mime_type    TEXT DEFAULT 'application/octet-stream',
+    file_data    BLOB NOT NULL,
+    file_size    INTEGER DEFAULT 0,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS advance_reads (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id      INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    version_read INTEGER DEFAULT 0,
+    read_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(show_id, user_id)
+);
 """
 
 SEED_CONTACTS = [
@@ -156,10 +257,288 @@ SEED_CONTACTS = [
     ('Sofia Rivera',          'Runner', 'Runners', '', ''),
 ]
 
+# (section_key, label, sort_order, collapsible, icon)
+FORM_SECTIONS_SEED = [
+    ('show_info',       'SHOW INFORMATION',     1, 0, '◈'),
+    ('arrival_parking', 'ARRIVAL & PARKING',    2, 1, '◈'),
+    ('security',        'SECURITY',             3, 1, '◈'),
+    ('hospitality',     'HOSPITALITY',          4, 1, '◈'),
+    ('front_of_house',  'FRONT OF HOUSE',       5, 1, '◈'),
+    ('general_info',    'GENERAL INFORMATION',  6, 1, '◈'),
+]
+
+# (section_key, field_key, label, field_type, sort_order,
+#  options_json, contact_dept, conditional_show_when,
+#  help_text, placeholder, width_hint, is_notes_field)
+FORM_FIELDS_SEED = [
+    # ── Show Information ──────────────────────────────────────────────────────
+    ('show_info', 'show_name',           'SHOW NAME',                  'text',             10,  None, None, None, None, '',                       'full',  0),
+    ('show_info', 'show_date',           'SHOW DATE',                  'date',             20,  None, None, None, None, '',                       'half',  0),
+    ('show_info', 'show_time',           'SHOW TIME(S)',               'text',             30,  None, None, None, None, 'e.g. 7pm and 9pm',       'half',  0),
+    ('show_info', 'venue',               'VENUE',                      'text',             40,  None, None, None, None, '',                       'full',  0),
+    ('show_info', 'production_manager',  'PRODUCTION MANAGER',         'contact_dropdown', 50,  None, 'Production',    None, None, '',            'full',  0),
+    ('show_info', 'tour_manager',        'TOUR MANAGER',               'text',             60,  None, None, None, None, 'Name · email / phone',   'full',  0),
+    ('show_info', 'promoter',            'PROMOTER',                   'text',             70,  None, None, None, None, '',                       'full',  0),
+    ('show_info', 'additional_contacts', 'ADDITIONAL CONTACTS',        'textarea',         80,  None, None, None, None, 'Name, role, phone/email...', 'full', 0),
+    ('show_info', 'programming',         'PROGRAMMING',                'contact_dropdown', 90,  None, 'Programming',   None, None, '',            'full',  0),
+    ('show_info', 'events',              'EVENTS',                     'contact_dropdown', 100, None, 'Event Manager', None, None, '',            'full',  0),
+    ('show_info', 'hospitality_contact', 'HOSPITALITY',                'contact_dropdown', 110, None, 'Hospitality',   None, None, '',            'full',  0),
+    ('show_info', 'guest_services',      'GUEST SERVICES',             'contact_dropdown', 120, None, 'Guest Services',None, None, '',            'full',  0),
+    ('show_info', 'radio_channel',       'RADIO CHANNEL',              'text',             130, None, None, None, None, "e.g. 16/Judson's",       'half',  0),
+    ('show_info', 'runner',              'RUNNER',                     'contact_dropdown', 140, None, 'Runners',       None, None, '',            'half',  0),
+    ('show_info', 'rental_works',        'RENTAL WORKS?',              'yes_no',           150, None, None, None, None, '',                       'half',  0),
+    ('show_info', 'budget_what',         'BUDGET / ESTIMATE — WHAT',   'text',             160, None, None, None, None, 'What',                   'half',  0),
+    ('show_info', 'budget_amount',       'BUDGET / ESTIMATE — AMOUNT', 'text',             170, None, None, None, None, 'Amount',                 'half',  0),
+
+    # ── Arrival & Parking ─────────────────────────────────────────────────────
+    ('arrival_parking', 'access_time',                 'ACCESS TIME TO BUILDING',                  'text',     10,  None, None, None, None, 'e.g. 3:30pm',      'half', 0),
+    ('arrival_parking', 'loading_dock',                'LOADING DOCK — WHICH BAY(S)?',             'select',   20,
+        json.dumps(['-', 'N/A', 'Bay 1', 'Bay 2', 'Bay 3', 'Bay 4', 'Bay 5', 'Bay 1+2', 'Bay 1+2+3', 'Other — See Notes']),
+        None, None, None, '', 'half', 0),
+    ('arrival_parking', 'vehicle_dpc',                 'DPC Van (15-passenger)',                   'checkbox', 30,  None, None, None, None, '', 'full', 0),
+    ('arrival_parking', 'vehicle_dpc_truck',           'DPC Truck',                                'checkbox', 40,  None, None, None, None, '', 'full', 0),
+    ('arrival_parking', 'vehicle_rental',              'Rental Vehicle',                           'checkbox', 50,  None, None, None, None, '', 'full', 0),
+    ('arrival_parking', 'vehicle_other',               'Other',                                    'checkbox', 60,  None, None, None, None, '', 'full', 0),
+    ('arrival_parking', 'vehicle_notes',               'VEHICLE NOTES',                            'text',     70,  None, None, None, None, 'Vehicle notes...', 'full', 0),
+    ('arrival_parking', 'runner_needed',               'RUNNER NEEDED?',                           'yes_no',   80,  None, None, None, None, '', 'third', 0),
+    ('arrival_parking', 'rental_car_needed',           'RENTAL CAR NEEDED?',                       'yes_no',   90,  None, None, None, None, '', 'third', 0),
+    ('arrival_parking', 'rental_drop_offs',            'RENTAL DROP-OFFS?',                        'yes_no',   100, None, None, None, None, '', 'third', 0),
+    ('arrival_parking', 'runner_time',                 'RUNNER PICKUP TIME',                       'text',     110, None, None, 'runner_needed=Yes', None, 'e.g. 2:00pm', 'half', 0),
+    ('arrival_parking', 'runner_vehicle',              'RUNNER VEHICLE',                           'select',   120,
+        json.dumps(['-', 'DPC Van', 'DPC Truck', 'Rental Vehicle', 'Other']),
+        None, 'runner_needed=Yes', None, '', 'half', 0),
+    ('arrival_parking', 'parking_validations',         'PARKING VALIDATIONS NEEDED?',              'yes_no',   130, None, None, None, None, '', 'half', 0),
+    ('arrival_parking', 'parking_validations_count',   'HOW MANY?',                                'number',   140, None, None, 'parking_validations=Yes', None, '', 'half', 0),
+    ('arrival_parking', 'special_accommodations',      'SPECIAL ACCOMMODATIONS NEEDED?',           'yes_no',   150, None, None, None, None, '', 'half', 0),
+    ('arrival_parking', 'special_accommodations_details','DETAILS',                                'textarea', 160, None, None, 'special_accommodations=Yes', None, '', 'full', 0),
+    ('arrival_parking', 'additional_space',            'ADDITIONAL HOLDING / REHEARSAL SPACE NEEDED?', 'yes_no', 170, None, None, None, None, '', 'full', 0),
+    ('arrival_parking', 'additional_space_details',    'DETAILS',                                  'textarea', 180, None, None, 'additional_space=Yes', None, '', 'full', 0),
+    ('arrival_parking', 'arrival_notes',               'ARRIVAL & PARKING NOTES',                  'textarea', 190, None, None, None, None, 'Additional arrival and parking notes...', 'full', 1),
+
+    # ── Security ──────────────────────────────────────────────────────────────
+    ('security', 'backstage_headcount',    'HOW MANY PEOPLE BACKSTAGE (Cast/Crew/Staff)?', 'number',   10, None, None, None, None, '0',          'half', 0),
+    ('security', 'credentials_badges',    'CREDENTIALS / BADGES?',                         'select',   20,
+        json.dumps(['-', 'Yes - Tour Provided', 'No - Use DPC Lanyards']),
+        None, None, None, '', 'half', 0),
+    ('security', 'extra_security',        'EXTRA SECURITY NEEDS?',                         'yes_no',   30, None, None, None, None, '',           'half', 0),
+    ('security', 'extra_security_details','DETAILS',                                        'textarea', 40, None, None, 'extra_security=Yes', None, '', 'full', 0),
+    ('security', 'security_meeting',      'SECURITY MEETING NEEDED?',                      'yes_no',   50, None, None, None, None, '',           'half', 0),
+    ('security', 'security_meeting_time', 'SECURITY MEETING TIME',                         'text',     60, None, None, 'security_meeting=Yes', None, 'e.g. 5:30pm', 'half', 0),
+    ('security', 'security_notes',        'SECURITY NOTES',                                'textarea', 70, None, None, None, None, 'Security notes...', 'full', 1),
+
+    # ── Hospitality ───────────────────────────────────────────────────────────
+    ('hospitality', 'food_beverage',         'SPECIFIC FOOD & BEVERAGE NEEDS?', 'yes_no',   10, None, None, None, None, '', 'half', 0),
+    ('hospitality', 'food_beverage_details', 'DETAILS',                          'textarea', 20, None, None, 'food_beverage=Yes', None, '', 'full', 0),
+    ('hospitality', 'allergies',             'ALLERGIES TO BE AWARE OF?',        'yes_no',   30, None, None, None, None, '', 'half', 0),
+    ('hospitality', 'allergies_details',     'DETAILS',                          'textarea', 40, None, None, 'allergies=Yes', None, '', 'full', 0),
+    ('hospitality', 'hospitality_notes',     'HOSPITALITY NOTES',                'textarea', 50, None, None, None, None, 'Hospitality notes...', 'full', 1),
+
+    # ── Front of House ────────────────────────────────────────────────────────
+    ('front_of_house', 'foh_contact',            'FOH CONTACT',              'text',     10, None, None, None, None, 'Name / contact info', 'half', 0),
+    ('front_of_house', 'foh_activations',        'SPECIAL FOH ACTIVATIONS?', 'yes_no',   20, None, None, None, None, '',                    'half', 0),
+    ('front_of_house', 'foh_activations_details','DETAILS',                  'textarea', 30, None, None, 'foh_activations=Yes', None, '', 'full', 0),
+    ('front_of_house', 'foh_notes',              'FRONT-OF-HOUSE NOTES',     'textarea', 40, None, None, None, None, 'FOH notes...', 'full', 1),
+
+    # ── General Information ───────────────────────────────────────────────────
+    ('general_info', 'load_in_needed',  'LOAD-IN TIME NEEDED?', 'yes_no',   10, None, None, None, None, '', 'full', 0),
+    ('general_info', 'load_in_details', 'DETAILS',              'textarea', 20, None, None, 'load_in_needed=Yes', None, '', 'full', 0),
+    ('general_info', 'general_notes',   'GENERAL NOTES',        'textarea', 30, None, None, None, None, 'General notes...', 'full', 1),
+]
+
+APP_SETTINGS_SEED = [
+    # Server
+    ('app_port',        '5400'),
+    # Syslog
+    ('syslog_enabled',  '0'),
+    ('syslog_host',     '127.0.0.1'),
+    ('syslog_port',     '514'),
+    ('syslog_facility', 'LOG_LOCAL0'),
+]
+
+
+def _seed_form_data(conn):
+    """Seed form_sections and form_fields if tables are empty."""
+    count = conn.execute('SELECT COUNT(*) FROM form_sections').fetchone()[0]
+    if count > 0:
+        return
+
+    section_id_map = {}
+    for (section_key, label, sort_order, collapsible, icon) in FORM_SECTIONS_SEED:
+        cur = conn.execute(
+            """INSERT OR IGNORE INTO form_sections
+               (section_key, label, sort_order, collapsible, icon)
+               VALUES (?, ?, ?, ?, ?)""",
+            (section_key, label, sort_order, collapsible, icon)
+        )
+        if cur.lastrowid:
+            section_id_map[section_key] = cur.lastrowid
+        else:
+            row = conn.execute(
+                'SELECT id FROM form_sections WHERE section_key=?', (section_key,)
+            ).fetchone()
+            section_id_map[section_key] = row[0]
+
+    for row in FORM_FIELDS_SEED:
+        (section_key, field_key, label, field_type, sort_order,
+         options_json, contact_dept, conditional_show_when,
+         help_text, placeholder, width_hint, is_notes_field) = row
+        sid = section_id_map[section_key]
+        conn.execute(
+            """INSERT OR IGNORE INTO form_fields
+               (section_id, field_key, label, field_type, sort_order,
+                options_json, contact_dept, conditional_show_when,
+                help_text, placeholder, width_hint, is_notes_field)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (sid, field_key, label, field_type, sort_order,
+             options_json, contact_dept, conditional_show_when,
+             help_text, placeholder, width_hint, is_notes_field)
+        )
+
+    print(f"  Seeded {len(FORM_SECTIONS_SEED)} sections and {len(FORM_FIELDS_SEED)} fields")
+
+
+def _seed_app_settings(conn):
+    """Seed app_settings with defaults if empty."""
+    for (key, value) in APP_SETTINGS_SEED:
+        conn.execute(
+            'INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)',
+            (key, value)
+        )
+
+
+def migrate_db():
+    """Run safe migrations on an existing database."""
+    conn = sqlite3.connect(DATABASE)
+    conn.execute('PRAGMA foreign_keys = ON')
+
+    # Create all new tables (IF NOT EXISTS = safe to rerun)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS form_sections (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            section_key TEXT UNIQUE NOT NULL,
+            label TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            collapsible INTEGER DEFAULT 1,
+            icon TEXT DEFAULT '◈'
+        );
+
+        CREATE TABLE IF NOT EXISTS form_fields (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            section_id INTEGER NOT NULL REFERENCES form_sections(id) ON DELETE CASCADE,
+            field_key TEXT UNIQUE NOT NULL,
+            label TEXT NOT NULL,
+            field_type TEXT NOT NULL DEFAULT 'text',
+            sort_order INTEGER DEFAULT 0,
+            options_json TEXT DEFAULT NULL,
+            contact_dept TEXT DEFAULT NULL,
+            conditional_show_when TEXT DEFAULT NULL,
+            help_text TEXT DEFAULT NULL,
+            placeholder TEXT DEFAULT '',
+            width_hint TEXT DEFAULT 'full',
+            is_notes_field INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS form_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            form_type TEXT NOT NULL,
+            saved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            snapshot_json TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS user_groups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT UNIQUE NOT NULL,
+            group_type TEXT NOT NULL DEFAULT 'all_access',
+            description TEXT DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS user_group_members (
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+            PRIMARY KEY (user_id, group_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS show_group_access (
+            show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+            PRIMARY KEY (show_id, group_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS app_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT DEFAULT ''
+        );
+
+        -- Tracks who is currently viewing/editing a show (for presence indicators)
+        -- Rows older than 60 s are considered stale and pruned automatically.
+        CREATE TABLE IF NOT EXISTS active_sessions (
+            user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            show_id       INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            tab           TEXT NOT NULL DEFAULT 'advance',
+            focused_field TEXT,
+            last_seen     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (user_id, show_id)
+        );
+    """)
+
+    # New feature tables (safe to rerun)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS show_comments (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id    INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            body       TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS show_attachments (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id     INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            filename    TEXT NOT NULL,
+            mime_type   TEXT DEFAULT 'application/octet-stream',
+            file_data   BLOB NOT NULL,
+            file_size   INTEGER DEFAULT 0,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS advance_reads (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id      INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            version_read INTEGER DEFAULT 0,
+            read_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(show_id, user_id)
+        );
+    """)
+
+    # ALTER TABLE for new columns (SQLite errors if column already exists)
+    for alter_sql in [
+        'ALTER TABLE shows ADD COLUMN last_saved_by INTEGER REFERENCES users(id)',
+        'ALTER TABLE shows ADD COLUMN last_saved_at TIMESTAMP',
+        "ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'dark'",
+    ]:
+        try:
+            conn.execute(alter_sql)
+        except Exception:
+            pass  # Column already exists
+
+    # Seed form data and settings if empty
+    _seed_form_data(conn)
+    _seed_app_settings(conn)
+
+    conn.commit()
+    conn.close()
+    print("✓ Migration complete")
+
+
 def init_db(force=False):
     if os.path.exists(DATABASE) and not force:
         print(f"Database already exists at {DATABASE}")
         print("Use --force flag to reinitialize (WARNING: destroys all data)")
+        print("Use --migrate flag to safely apply migrations to the existing DB")
         return
 
     conn = sqlite3.connect(DATABASE)
@@ -178,17 +557,29 @@ def init_db(force=False):
             VALUES (?, ?, ?, ?, ?)
         """, row)
 
+    # Seed form data and settings
+    _seed_form_data(conn)
+    _seed_app_settings(conn)
+
     conn.commit()
     conn.close()
 
     print("✓ Database created:", DATABASE)
     print("✓ Admin account:   username=admin  password=admin123")
     print("✓ Contacts seeded:", len(SEED_CONTACTS), "contacts imported")
+    print("✓ Form sections and fields seeded")
     print()
     print("⚠  Change the admin password after first login via Settings → Users")
 
 
 if __name__ == '__main__':
     import sys
-    force = '--force' in sys.argv
-    init_db(force=force)
+    if '--migrate' in sys.argv:
+        if not os.path.exists(DATABASE):
+            print("No database found. Run without --migrate to create a new one.")
+            sys.exit(1)
+        print(f"Running migrations on: {DATABASE}")
+        migrate_db()
+    else:
+        force = '--force' in sys.argv
+        init_db(force=force)

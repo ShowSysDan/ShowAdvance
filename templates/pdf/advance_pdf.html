@@ -26,16 +26,11 @@
   .two-col-table tr:last-child td { border-bottom: none; }
   .two-col-table .lbl { width: 40%; font-size: 7pt; font-weight: bold; color: #555; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
   .two-col-table .val { font-size: 8.5pt; color: #111; }
-  .two-col-table .val-empty { color: #aaa; font-style: italic; }
 
   /* ── Side-by-side sections ── */
   .side-by-side { display: flex; gap: 0; }
   .side-by-side .section { flex: 1; }
   .side-by-side .section:first-child { margin-right: 8px; }
-
-  /* ── Full-row multi-col ── */
-  .header-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
-  .header-grid .section { margin-bottom: 0; }
 
   /* ── Notes block ── */
   .notes-val { white-space: pre-wrap; font-size: 8pt; color: #222; padding: 4px 7px; }
@@ -50,10 +45,10 @@
 </head>
 <body>
 
-{# Helper: only render a row if value is non-empty #}
+{# ── Helpers ──────────────────────────────────────────────────── #}
 {% macro row(label, value) %}
   {% set v = value|string|trim %}
-  {% if v and v not in ['-','—','None','none','false'] %}
+  {% if v and v not in ['-','—','None','none','false',''] %}
   <tr>
     <td class="lbl">{{ label }}</td>
     <td class="val">{{ v }}</td>
@@ -61,19 +56,10 @@
   {% endif %}
 {% endmacro %}
 
-{% macro cb_row(label, checked) %}
-  {% if checked == 'true' %}
-  <tr>
-    <td class="lbl"></td>
-    <td class="val"><span class="cb checked"></span> {{ label }}</td>
-  </tr>
-  {% endif %}
-{% endmacro %}
-
 {% set d = advance_data %}
 {% macro v(key, default='') %}{{ d.get(key, default)|string|trim }}{% endmacro %}
 
-<!-- Header -->
+{# ── Document Header ──────────────────────────────────────────── #}
 <div class="doc-header">
   <div>
     <div class="doc-title">DPC <span>ADVANCE</span> SHEET</div>
@@ -88,136 +74,99 @@
   </div>
 </div>
 
-<!-- Show Info + Right Column side by side -->
-<div class="side-by-side">
-  <div class="section" style="flex:1.2">
-    <div class="section-head">Show Information</div>
-    <table class="two-col-table">
-      {{ row('Show Name',  v('show_name', show.name)) }}
-      {{ row('Date',       v('show_date', show.show_date or '')) }}
-      {{ row('Time',       v('show_time', show.show_time)) }}
-      {{ row('Venue',      v('venue',     show.venue)) }}
-      {{ row('Prod. Manager', v('production_manager')) }}
-      {{ row('Tour Manager',  v('tour_manager')) }}
-      {{ row('Promoter',      v('promoter')) }}
-      {{ row('Addl. Contacts',v('additional_contacts')) }}
-    </table>
-  </div>
-  <div class="section" style="flex:1">
-    <div class="section-head">Contacts &amp; Logistics</div>
-    <table class="two-col-table">
-      {{ row('Programming',    v('programming')) }}
-      {{ row('Events',         v('events')) }}
-      {{ row('Hospitality',    v('hospitality_contact')) }}
-      {{ row('Guest Services', v('guest_services')) }}
-      {{ row('Radio Channel',  v('radio_channel')) }}
-      {{ row('Runner',         v('runner')) }}
-      {{ row('Rental Works?',  v('rental_works')) }}
-      {{ row('Budget — What',  v('budget_what')) }}
-      {{ row('Budget — Amount',v('budget_amount')) }}
-    </table>
-  </div>
-</div>
+{# ── Dynamic Sections ─────────────────────────────────────────── #}
+{% if form_sections %}
+  {% for section in form_sections %}
+    {# Collect all non-empty values for this section #}
+    {% set ns = namespace(has_content=false, notes_fields=[], regular_rows=[]) %}
+    {% for field in section.fields %}
+      {% set val = d.get(field.field_key, '')|string|trim %}
+      {% if val and val not in ['-','—','None','none','false',''] %}
+        {% set ns.has_content = true %}
+      {% endif %}
+      {% if field.is_notes_field %}
+        {% set _ = ns.notes_fields.append(field) %}
+      {% else %}
+        {% set _ = ns.regular_rows.append(field) %}
+      {% endif %}
+    {% endfor %}
 
-<!-- Arrival & Parking -->
-{% set has_arrival = v('access_time') or v('loading_dock') not in ['','-'] or v('runner_needed') not in ['','-'] or v('parking_validations') not in ['','-'] or v('special_accommodations') not in ['','-'] or v('additional_space') not in ['','-'] or v('arrival_notes') %}
-{% if has_arrival %}
-<div class="section">
-  <div class="section-head">Arrival &amp; Parking</div>
-  <table class="two-col-table">
-    {{ row('Access Time',       v('access_time')) }}
-    {{ row('Loading Dock',      v('loading_dock')) }}
-    {% set veh_parts = [] %}
-    {% if v('vehicle_dpc') == 'true' %}{% set _ = veh_parts.append('DPC Van') %}{% endif %}
-    {% if v('vehicle_dpc_truck') == 'true' %}{% set _ = veh_parts.append('DPC Truck') %}{% endif %}
-    {% if v('vehicle_rental') == 'true' %}{% set _ = veh_parts.append('Rental Vehicle') %}{% endif %}
-    {% if v('vehicle_other') == 'true' %}{% set _ = veh_parts.append('Other') %}{% endif %}
-    {% if veh_parts %}{{ row('Vehicles', veh_parts|join(', ') + ((' · ' + v('vehicle_notes')) if v('vehicle_notes') else '')) }}{% endif %}
-    {{ row('Runner Needed',     v('runner_needed')) }}
-    {{ row('Runner Time',       v('runner_time')) }}
-    {{ row('Runner Vehicle',    v('runner_vehicle')) }}
-    {{ row('Rental Car',        v('rental_car_needed')) }}
-    {{ row('Rental Drop-Offs',  v('rental_drop_offs')) }}
-    {{ row('Parking Validations', v('parking_validations')) }}
-    {{ row('Validation Count',  v('parking_validations_count')) }}
-    {{ row('Special Accommodations', v('special_accommodations')) }}
-    {{ row('Accomm. Details',   v('special_accommodations_details')) }}
-    {{ row('Additional Space',  v('additional_space')) }}
-    {{ row('Space Details',     v('additional_space_details')) }}
-  </table>
-  {% if v('arrival_notes') %}
-  <div class="notes-val">{{ v('arrival_notes') }}</div>
-  {% endif %}
-</div>
-{% endif %}
-
-<!-- Security -->
-{% set has_sec = v('backstage_headcount') or v('credentials_badges') not in ['','-'] or v('extra_security') not in ['','-'] or v('security_meeting') not in ['','-'] or v('security_notes') %}
-{% if has_sec %}
-<div class="section">
-  <div class="section-head">Security</div>
-  <table class="two-col-table">
-    {{ row('Backstage Headcount', v('backstage_headcount')) }}
-    {{ row('Credentials / Badges', v('credentials_badges')) }}
-    {{ row('Extra Security Needs', v('extra_security')) }}
-    {{ row('Extra Security Details', v('extra_security_details')) }}
-    {{ row('Security Meeting', v('security_meeting')) }}
-    {{ row('Security Meeting Time', v('security_meeting_time')) }}
-  </table>
-  {% if v('security_notes') %}
-  <div class="notes-val">{{ v('security_notes') }}</div>
-  {% endif %}
-</div>
-{% endif %}
-
-<!-- Hospitality + FOH side by side -->
-{% set has_hosp = v('food_beverage') not in ['','-'] or v('allergies') not in ['','-'] or v('hospitality_notes') %}
-{% set has_foh  = v('foh_contact') or v('foh_activations') not in ['','-'] or v('foh_notes') %}
-{% if has_hosp or has_foh %}
-<div class="side-by-side">
-  {% if has_hosp %}
-  <div class="section">
-    <div class="section-head">Hospitality</div>
-    <table class="two-col-table">
-      {{ row('Food & Bev Needs', v('food_beverage')) }}
-      {{ row('F&B Details',      v('food_beverage_details')) }}
-      {{ row('Allergies',        v('allergies')) }}
-      {{ row('Allergy Details',  v('allergies_details')) }}
-    </table>
-    {% if v('hospitality_notes') %}
-    <div class="notes-val">{{ v('hospitality_notes') }}</div>
+    {% if ns.has_content %}
+    <div class="section">
+      <div class="section-head">{{ section.label }}</div>
+      {% if ns.regular_rows %}
+      <table class="two-col-table">
+        {% for field in ns.regular_rows %}
+          {# Gracefully handle any field type — unknown types render as plain text #}
+          {% set val = d.get(field.field_key, '')|string|trim %}
+          {% if field.field_type == 'checkbox' %}
+            {% if val == 'true' %}
+            <tr>
+              <td class="lbl"></td>
+              <td class="val"><span class="cb checked"></span> {{ field.label }}</td>
+            </tr>
+            {% endif %}
+          {% elif field.field_type == 'yes_no' %}
+            {% if val and val not in ['','None','none'] %}
+            <tr>
+              <td class="lbl">{{ field.label }}</td>
+              <td class="val">{{ val }}</td>
+            </tr>
+            {% endif %}
+          {% elif val and val not in ['-','—','None','none','false',''] %}
+          {# Handles: text, textarea, date, time, number, select, contact_dropdown, and any future types #}
+          <tr>
+            <td class="lbl">{{ field.label }}</td>
+            <td class="val">{{ val }}</td>
+          </tr>
+          {% endif %}
+        {% endfor %}
+      </table>
+      {% endif %}
+      {% for field in ns.notes_fields %}
+        {% set val = d.get(field.field_key, '')|string|trim %}
+        {% if val and val not in ['None','none'] %}
+        <div class="notes-val">{{ val }}</div>
+        {% endif %}
+      {% endfor %}
+    </div>
     {% endif %}
-  </div>
-  {% endif %}
-  {% if has_foh %}
-  <div class="section">
-    <div class="section-head">Front of House</div>
-    <table class="two-col-table">
-      {{ row('FOH Contact',     v('foh_contact')) }}
-      {{ row('FOH Activations', v('foh_activations')) }}
-      {{ row('Activation Details', v('foh_activations_details')) }}
-    </table>
-    {% if v('foh_notes') %}
-    <div class="notes-val">{{ v('foh_notes') }}</div>
-    {% endif %}
-  </div>
-  {% endif %}
-</div>
-{% endif %}
+  {% endfor %}
 
-<!-- General Info -->
-{% set has_gen = v('load_in_needed') not in ['','-'] or v('general_notes') %}
-{% if has_gen %}
-<div class="section">
-  <div class="section-head">General Information</div>
-  <table class="two-col-table">
-    {{ row('Load-In Needed', v('load_in_needed')) }}
-    {{ row('Load-In Details', v('load_in_details')) }}
-  </table>
-  {% if v('general_notes') %}
-  <div class="notes-val">{{ v('general_notes') }}</div>
-  {% endif %}
-</div>
+{% else %}
+  {# Fallback: hardcoded rendering if form_sections not passed #}
+
+  <!-- Show Info + Contacts side by side -->
+  <div class="side-by-side">
+    <div class="section" style="flex:1.2">
+      <div class="section-head">Show Information</div>
+      <table class="two-col-table">
+        {{ row('Show Name',  v('show_name', show.name)) }}
+        {{ row('Date',       v('show_date', show.show_date or '')) }}
+        {{ row('Time',       v('show_time', show.show_time)) }}
+        {{ row('Venue',      v('venue',     show.venue)) }}
+        {{ row('Prod. Manager', v('production_manager')) }}
+        {{ row('Tour Manager',  v('tour_manager')) }}
+        {{ row('Promoter',      v('promoter')) }}
+        {{ row('Addl. Contacts',v('additional_contacts')) }}
+      </table>
+    </div>
+    <div class="section" style="flex:1">
+      <div class="section-head">Contacts &amp; Logistics</div>
+      <table class="two-col-table">
+        {{ row('Programming',    v('programming')) }}
+        {{ row('Events',         v('events')) }}
+        {{ row('Hospitality',    v('hospitality_contact')) }}
+        {{ row('Guest Services', v('guest_services')) }}
+        {{ row('Radio Channel',  v('radio_channel')) }}
+        {{ row('Runner',         v('runner')) }}
+        {{ row('Rental Works?',  v('rental_works')) }}
+        {{ row('Budget — What',  v('budget_what')) }}
+        {{ row('Budget — Amount',v('budget_amount')) }}
+      </table>
+    </div>
+  </div>
+
 {% endif %}
 
 <!-- Footer -->
