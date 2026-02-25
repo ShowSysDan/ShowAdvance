@@ -33,7 +33,7 @@ This will:
 
 Open the app at `http://<your-server-ip>:5400`
 
-**Default login:** `admin` / `admin`
+**Default login:** `admin` / `admin123`
 ⚠️ Change the admin password immediately after first login — Settings → My Account.
 
 ---
