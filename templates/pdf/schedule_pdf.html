@@ -46,7 +46,9 @@
 <body>
 
 {% set d = schedule_meta %}
+{% set a = advance_data %}
 {% macro m(key, default='') %}{{ d.get(key, default)|string|trim }}{% endmacro %}
+{% macro adv(key, default='') %}{{ a.get(key, default)|string|trim }}{% endmacro %}
 
 <!-- Header -->
 <div class="doc-header">
@@ -132,16 +134,16 @@
   <div class="contacts-box">
     <div class="contacts-box-head">DPC Contacts</div>
     <table class="contacts-table">
-      {% for role, key in [
-        ('Production Manager', 'contact_production_manager'),
-        ('Programming', 'contact_programming'),
-        ('Event Manager', 'contact_event_manager'),
-        ('Hospitality', 'contact_hospitality'),
-        ('Guest Services', 'contact_guest_services'),
-        ('Runner', 'contact_runner'),
-        ('Security', 'security_email'),
+      {% for role, key, source in [
+        ('Production Manager', 'production_manager', 'advance'),
+        ('Programming', 'contact_programming', 'schedule'),
+        ('Event Manager', 'contact_event_manager', 'schedule'),
+        ('Hospitality', 'hospitality_contact', 'advance'),
+        ('Guest Services', 'contact_guest_services', 'schedule'),
+        ('Runner', 'contact_runner', 'schedule'),
+        ('Security', 'security_email', 'schedule'),
       ] %}
-      {% set val = m(key) %}
+      {% set val = adv(key) if source == 'advance' else m(key) %}
       {% if val and val not in ['-',''] %}
       <tr>
         <td class="lbl">{{ role }}</td>

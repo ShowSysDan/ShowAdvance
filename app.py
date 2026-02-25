@@ -1231,6 +1231,10 @@ def _build_schedule_pdf(show_id):
         'SELECT field_key, field_value FROM schedule_meta WHERE show_id=?', (show_id,)
     ).fetchall()
     schedule_meta = {r['field_key']: r['field_value'] for r in meta_rows}
+    adv_rows = db.execute(
+        'SELECT field_key, field_value FROM advance_data WHERE show_id=?', (show_id,)
+    ).fetchall()
+    advance_data = {r['field_key']: r['field_value'] for r in adv_rows}
     contacts = db.execute('SELECT * FROM contacts ORDER BY name').fetchall()
     contact_map = {c['id']: dict(c) for c in contacts}
 
@@ -1244,6 +1248,7 @@ def _build_schedule_pdf(show_id):
     html = render_template('pdf/schedule_pdf.html',
                            show=show, schedule_rows=sched_rows,
                            schedule_meta=schedule_meta,
+                           advance_data=advance_data,
                            contact_map=contact_map,
                            version=new_v,
                            export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
