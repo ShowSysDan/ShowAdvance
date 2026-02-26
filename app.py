@@ -288,6 +288,16 @@ def get_form_fields_for_template():
     return result
 
 
+def get_schedule_meta_fields():
+    """Returns ordered list of schedule meta field templates."""
+    db = get_db()
+    rows = db.execute(
+        'SELECT * FROM schedule_meta_fields ORDER BY sort_order, id'
+    ).fetchall()
+    db.close()
+    return [dict(r) for r in rows]
+
+
 # ─── Backup Scheduler ─────────────────────────────────────────────────────────
 
 def _ensure_backup_dirs():
@@ -642,6 +652,7 @@ def show_page(show_id):
                            advance_data=advance_data,
                            schedule_rows=[dict(r) for r in sched_rows],
                            schedule_meta=schedule_meta,
+                           sched_meta_fields=get_schedule_meta_fields(),
                            notes_data=notes_data,
                            exports=exports,
                            contacts_by_dept=contacts_by_dept,
@@ -1361,6 +1372,7 @@ def _build_schedule_pdf(show_id):
     html = render_template('pdf/schedule_pdf.html',
                            show=show, schedule_rows=sched_rows,
                            schedule_meta=schedule_meta,
+                           sched_meta_fields=get_schedule_meta_fields(),
                            advance_data=advance_data,
                            contact_map=contact_map,
                            logo_data=logo_data,
@@ -1630,6 +1642,7 @@ def settings():
     db.close()
     _is_ca = session.get('is_content_admin', False) or session.get('user_role') == 'admin'
     form_sections = get_form_fields_for_template() if _is_ca else []
+    sched_meta_fields = get_schedule_meta_fields() if _is_ca else []
 
     try:
         venue_list = json.loads(all_settings.get('venue_list', '[]'))
@@ -1645,6 +1658,7 @@ def settings():
                            users=users,
                            groups=groups_data,
                            form_sections=form_sections,
+                           sched_meta_fields=sched_meta_fields,
                            syslog_settings=all_settings,
                            departments=DEPARTMENTS,
                            is_content_admin=_is_ca,
@@ -1927,6 +1941,7 @@ def form_fields_settings():
                            users=users,
                            groups=groups_data,
                            form_sections=form_sections,
+                           sched_meta_fields=get_schedule_meta_fields(),
                            syslog_settings=all_settings,
                            departments=DEPARTMENTS,
                            active_tab='fields',
@@ -2095,6 +2110,82 @@ def reorder_form_sections():
 @login_required
 def api_form_fields():
     return jsonify(get_form_fields_for_template())
+
+
+# ─── Schedule Meta Field Editor ───────────────────────────────────────────────
+
+@app.route('/api/schedule-meta-fields')
+@login_required
+def api_schedule_meta_fields():
+    return jsonify(get_schedule_meta_fields())
+
+
+@app.route('/settings/schedule-meta-fields/add', methods=['POST'])
+@content_admin_required
+def add_sched_meta_field():
+    data = request.get_json(force=True) or {}
+    field_key = data.get('field_key', '').strip().lower().replace(' ', '_')
+    label = data.get('label', '').strip()
+    if not field_key or not label:
+        return jsonify({'success': False, 'error': 'field_key and label required.'}), 400
+    db = get_db()
+    max_order = db.execute('SELECT MAX(sort_order) FROM schedule_meta_fields').fetchone()[0] or 0
+    try:
+        cur = db.execute("""
+            INSERT INTO schedule_meta_fields
+              (field_key, label, field_type, advance_field_key, sort_order, width_hint)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (field_key, label,
+              data.get('field_type', 'text'),
+              data.get('advance_field_key', '').strip() or None,
+              max_order + 10,
+              data.get('width_hint', 'half')))
+        fid = cur.lastrowid
+        db.commit()
+        return jsonify({'success': True, 'id': fid})
+    except sqlite3.IntegrityError:
+        return jsonify({'success': False, 'error': f'field_key "{field_key}" already exists.'}), 400
+    finally:
+        db.close()
+
+
+@app.route('/settings/schedule-meta-fields/<int:fid>/edit', methods=['POST'])
+@content_admin_required
+def edit_sched_meta_field(fid):
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    db.execute("""
+        UPDATE schedule_meta_fields
+        SET label=?, field_type=?, advance_field_key=?, width_hint=?
+        WHERE id=?
+    """, (data.get('label', ''),
+          data.get('field_type', 'text'),
+          data.get('advance_field_key', '').strip() or None,
+          data.get('width_hint', 'half'),
+          fid))
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/schedule-meta-fields/<int:fid>/delete', methods=['POST'])
+@content_admin_required
+def delete_sched_meta_field(fid):
+    db = get_db()
+    db.execute('DELETE FROM schedule_meta_fields WHERE id=?', (fid,))
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/schedule-meta-fields/reorder', methods=['POST'])
+@content_admin_required
+def reorder_sched_meta_fields():
+    data = request.get_json(force=True) or {}
+    field_ids = data.get('field_ids', [])
+    db = get_db()
+    for i, fid in enumerate(field_ids):
+        db.execute('UPDATE schedule_meta_fields SET sort_order=? WHERE id=?', (i * 10, fid))
+    db.commit(); db.close()
+    return jsonify({'success': True})
 
 
 # ─── Syslog Settings ──────────────────────────────────────────────────────────

@@ -71,27 +71,24 @@
 </div>
 
 <!-- Info Bar -->
-<div class="info-bar" style="grid-template-columns: {% if wifi_qr_b64 %}repeat(4,1fr) 60px{% else %}repeat(5,1fr){% endif %}">
+{% set _smf = sched_meta_fields if sched_meta_fields is defined else [] %}
+{% set _bar_fields = _smf | selectattr('width_hint', 'ne', 'full') | list %}
+{% set _full_fields = _smf | selectattr('width_hint', 'eq', 'full') | list %}
+{% set _n_bar = _bar_fields | length + 1 %}
+<div class="info-bar" style="grid-template-columns: 1fr {% for _ in _bar_fields %}1fr {% endfor %}{% if wifi_qr_b64 %}60px{% endif %}">
   <div class="info-item">
     <div class="lbl">Venue</div>
     <div class="val">{{ show.venue or '—' }}</div>
   </div>
+  {% for f in _bar_fields %}
   <div class="info-item">
-    <div class="lbl">WiFi Network</div>
-    <div class="val">{{ m('wifi_network') or '—' }}</div>
+    <div class="lbl">{{ f.label }}</div>
+    <div class="val">
+      {% if f.advance_field_key %}{{ adv(f.advance_field_key) or m(f.field_key) or '—' }}
+      {% else %}{{ m(f.field_key) or '—' }}{% endif %}
+    </div>
   </div>
-  <div class="info-item">
-    <div class="lbl">WiFi Code</div>
-    <div class="val">{{ m('wifi_code') or '—' }}</div>
-  </div>
-  <div class="info-item">
-    <div class="lbl">Radio</div>
-    <div class="val">{{ adv('radio_channel') or m('radio_channel') or '—' }}</div>
-  </div>
-  <div class="info-item">
-    <div class="lbl">Mix</div>
-    <div class="val">{{ adv('mix_position') or m('mix_position') or '—' }}</div>
-  </div>
+  {% endfor %}
   {% if wifi_qr_b64 %}
   <div class="info-item" style="text-align:center">
     <img src="data:image/png;base64,{{ wifi_qr_b64 }}" alt="WiFi QR" style="width:52px;height:52px">
@@ -99,11 +96,14 @@
   {% endif %}
 </div>
 
-{% if m('parking_security') %}
+{% for f in _full_fields %}
+{% set fval = (adv(f.advance_field_key) if f.advance_field_key else m(f.field_key)) | trim %}
+{% if fval %}
 <div style="background:#fff8e8; border:1px solid #e8c870; padding:4px 8px; margin-bottom:10px; font-size:8pt;">
-  <strong>Parking &amp; Security:</strong> {{ m('parking_security') }}
+  <strong>{{ f.label }}:</strong> {{ fval }}
 </div>
 {% endif %}
+{% endfor %}
 
 <!-- Schedule Table -->
 <table class="sched-table">

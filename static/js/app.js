@@ -516,6 +516,7 @@ function initFieldDrag() {
       _dragSrc = row;
       row.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
+      e.stopPropagation();
     });
     row.addEventListener('dragover', e => {
       e.preventDefault();
@@ -543,6 +544,190 @@ async function _saveFieldOrder() {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   });
+}
+
+/* ── Section Drag-to-Reorder ─────────────────────────────────── */
+let _dragSectionSrc = null;
+
+function initSectionDrag() {
+  document.querySelectorAll('[data-section-id]').forEach(section => {
+    const handle = section.querySelector('.section-drag-handle');
+    if (!handle) return;
+
+    handle.addEventListener('mousedown', () => { section.draggable = true; });
+    handle.addEventListener('mouseup',   () => { section.draggable = false; });
+
+    section.addEventListener('dragstart', e => {
+      _dragSectionSrc = section;
+      section.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    section.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (!_dragSectionSrc || _dragSectionSrc === section) return;
+      const rect = section.getBoundingClientRect();
+      const mid  = rect.top + rect.height / 2;
+      section.parentNode.insertBefore(_dragSectionSrc, e.clientY < mid ? section : section.nextSibling);
+    });
+    section.addEventListener('dragend', () => {
+      section.draggable = false;
+      if (_dragSectionSrc) _dragSectionSrc.classList.remove('dragging');
+      _dragSectionSrc = null;
+      _saveSectionOrder();
+    });
+  });
+}
+
+async function _saveSectionOrder() {
+  const ids = [...document.querySelectorAll('[data-section-id]')].map(el => Number(el.dataset.sectionId));
+  await fetch('/settings/form-sections/reorder', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({section_ids: ids})
+  });
+}
+
+/* ── Schedule Meta Field Drag-to-Reorder ─────────────────────── */
+let _dragSchedSrc = null;
+
+function initSchedMetaDrag() {
+  document.querySelectorAll('.sched-meta-row[draggable]').forEach(row => {
+    row.addEventListener('dragstart', e => {
+      _dragSchedSrc = row;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+      e.stopPropagation();
+    });
+    row.addEventListener('dragover', e => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (!_dragSchedSrc || _dragSchedSrc === row) return;
+      const rect = row.getBoundingClientRect();
+      const mid  = rect.top + rect.height / 2;
+      row.parentNode.insertBefore(_dragSchedSrc, e.clientY < mid ? row : row.nextSibling);
+    });
+    row.addEventListener('dragend', () => {
+      if (_dragSchedSrc) _dragSchedSrc.classList.remove('dragging');
+      _dragSchedSrc = null;
+      _saveSchedMetaOrder();
+    });
+  });
+}
+
+async function _saveSchedMetaOrder() {
+  const ids = [...document.querySelectorAll('.sched-meta-row[draggable]')].map(r => Number(r.dataset.id));
+  await fetch('/settings/schedule-meta-fields/reorder', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({field_ids: ids})
+  });
+}
+
+/* ── Schedule Meta Field Add/Edit Modal ──────────────────────── */
+let _editSchedFieldId = null;
+let _schedAdvFieldsLoaded = false;
+
+async function openSchedFieldModal(id) {
+  _editSchedFieldId = id || null;
+  const modal = document.getElementById('sched-field-modal');
+  if (!modal) return;
+
+  // Reset form
+  const form = modal.querySelector('#sched-field-modal-form');
+  if (form) {
+    form.querySelectorAll('input,select,textarea').forEach(el => {
+      if (el.type === 'checkbox') el.checked = el.defaultChecked;
+      else el.value = el.defaultValue;
+    });
+  }
+
+  // Populate advance field dropdown once
+  const advSel = document.getElementById('sched-field-advance-ref');
+  if (advSel && !_schedAdvFieldsLoaded) {
+    try {
+      const sections = await fetch('/api/form-fields').then(r => r.json());
+      for (const sec of sections) {
+        const grp = document.createElement('optgroup');
+        grp.label = sec.label;
+        for (const f of sec.fields) {
+          const opt = document.createElement('option');
+          opt.value = f.field_key;
+          opt.textContent = `${f.label} (${f.field_key})`;
+          grp.appendChild(opt);
+        }
+        advSel.appendChild(grp);
+      }
+      _schedAdvFieldsLoaded = true;
+    } catch(_) {}
+  }
+
+  // Lock field_key input when editing
+  const fkEl = modal.querySelector('[name="field_key"]');
+  if (fkEl) {
+    fkEl.readOnly = !!id;
+    fkEl.style.opacity = id ? '0.5' : '';
+  }
+
+  if (id) {
+    try {
+      const fields = await fetch('/api/schedule-meta-fields').then(r => r.json());
+      const field = fields.find(f => f.id === id);
+      if (field) {
+        modal.querySelector('[name="label"]').value           = field.label || '';
+        modal.querySelector('[name="field_key"]').value       = field.field_key || '';
+        modal.querySelector('[name="field_type"]').value      = field.field_type || 'text';
+        modal.querySelector('[name="width_hint"]').value      = field.width_hint || 'half';
+        if (advSel) advSel.value = field.advance_field_key || '';
+      }
+    } catch(_) {}
+  }
+
+  modal.style.display = '';
+}
+
+function closeSchedFieldModal() {
+  const modal = document.getElementById('sched-field-modal');
+  if (modal) modal.style.display = 'none';
+  _editSchedFieldId = null;
+}
+
+async function saveSchedField() {
+  const modal = document.getElementById('sched-field-modal');
+  if (!modal) return;
+  const data = {
+    label:             modal.querySelector('[name="label"]').value.trim(),
+    field_type:        modal.querySelector('[name="field_type"]').value,
+    width_hint:        modal.querySelector('[name="width_hint"]').value,
+    advance_field_key: modal.querySelector('[name="advance_field_key"]').value.trim(),
+  };
+  if (!data.label) { alert('Label is required.'); return; }
+  if (!_editSchedFieldId) {
+    const fk = modal.querySelector('[name="field_key"]').value.trim();
+    if (!fk) { alert('Field key is required for new fields.'); return; }
+    data.field_key = fk;
+  }
+  const url = _editSchedFieldId
+    ? `/settings/schedule-meta-fields/${_editSchedFieldId}/edit`
+    : `/settings/schedule-meta-fields/add`;
+  try {
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(data)
+    });
+    const d = await resp.json();
+    if (d.success) { closeSchedFieldModal(); location.reload(); }
+    else alert(d.error || 'Save failed.');
+  } catch(_) { alert('Network error.'); }
+}
+
+async function deleteSchedField(fid) {
+  if (!confirm('Delete this schedule field? Saved values for this field will remain in existing shows but the field will no longer appear on the schedule.')) return;
+  const resp = await fetch(`/settings/schedule-meta-fields/${fid}/delete`, {method: 'POST'});
+  const d = await resp.json();
+  if (d.success) location.reload();
+  else alert(d.error || 'Delete failed.');
 }
 
 /* ── Field Add/Edit Modal ─────────────────────────────────────── */
