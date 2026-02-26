@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  @page { size: letter; margin: 0.6in 0.55in 0.65in; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #1a1a1a; line-height: 1.4; }
+
+  .doc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2.5px solid #000; }
+  .doc-title { font-size: 18pt; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
+  .doc-title span { color: #B8840A; }
+  .doc-org { font-size: 7pt; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
+  .doc-meta { text-align: right; font-size: 7.5pt; color: #444; }
+
+  .section { margin-bottom: 10px; border: 1px solid #ccc; }
+  .section-head { background: #1a1a1a; color: #fff; font-size: 7pt; font-weight: bold; letter-spacing: 0.1em; padding: 4px 7px; text-transform: uppercase; }
+  .section-body { padding: 6px 8px; }
+
+  .field-row { margin-bottom: 8px; }
+  .field-lbl { font-size: 6.5pt; font-weight: bold; color: #666; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 2px; }
+  .field-val { font-size: 8.5pt; white-space: pre-wrap; color: #111; }
+
+  .info-bar { display: flex; gap: 16px; margin-bottom: 12px; background: #f5f5f5; border: 1px solid #ddd; padding: 6px 10px; font-size: 8pt; }
+  .info-bar span { color: #555; }
+  .info-bar strong { color: #111; }
+
+  .sched-table { width: 100%; border-collapse: collapse; font-size: 7.5pt; }
+  .sched-table th { background: #333; color: #fff; padding: 4px 7px; text-align: left; text-transform: uppercase; font-size: 6.5pt; letter-spacing: 0.06em; }
+  .sched-table td { padding: 3px 7px; border-bottom: 1px solid #eee; vertical-align: top; }
+  .sched-table tr:last-child td { border-bottom: none; }
+
+  .doc-footer { position: fixed; bottom: 0.35in; left: 0.55in; right: 0.55in; font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; display: flex; justify-content: space-between; }
+</style>
+</head>
+<body>
+
+{% macro n(key, default='') %}{{ notes_data.get(key, default)|string|trim }}{% endmacro %}
+{% macro a(key, default='') %}{{ advance_data.get(key, default)|string|trim }}{% endmacro %}
+
+<!-- Header -->
+<div class="doc-header">
+  <div style="display:flex;align-items:center;gap:12px">
+    {% if logo_data %}
+    <img src="{{ logo_data }}" alt="Logo" style="max-height:40px;max-width:100px;object-fit:contain">
+    {% endif %}
+    <div>
+      <div class="doc-title">DPC <span>POST-SHOW</span> NOTES</div>
+      <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+    </div>
+  </div>
+  <div class="doc-meta">
+    <div>{{ export_date }}</div>
+    <div style="margin-top:3px; font-size:8pt; color:#222">
+      <strong>{{ show.name }}</strong> &nbsp;·&nbsp; {{ show.show_date or '—' }}
+    </div>
+  </div>
+</div>
+
+<!-- Show info bar -->
+<div class="info-bar">
+  <div><span>Show: </span><strong>{{ show.name }}</strong></div>
+  <div><span>Date: </span><strong>{{ show.show_date or '—' }}</strong></div>
+  {% if show.show_time %}<div><span>Time: </span><strong>{{ show.show_time }}</strong></div>{% endif %}
+  {% if show.venue %}<div><span>Venue: </span><strong>{{ show.venue }}</strong></div>{% endif %}
+</div>
+
+<!-- Notes Section -->
+<div class="section">
+  <div class="section-head">Post-Show Notes</div>
+  <div class="section-body">
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="field-row">
+        <div class="field-lbl">Production Manager</div>
+        <div class="field-val">{{ a('production_manager') or '—' }}</div>
+      </div>
+      <div class="field-row">
+        <div class="field-lbl">Crew Called</div>
+        <div class="field-val">{{ n('crew_called') or '—' }}</div>
+      </div>
+    </div>
+
+    {% for label, key in [
+      ('Show Notes (Tour/Client)', 'show_notes_tour'),
+      ('House Notes', 'house_notes'),
+      ('Equipment / Maintenance Issues', 'equipment_issues'),
+      ('Miscellaneous', 'miscellaneous'),
+    ] %}
+    {% if n(key) %}
+    <div class="field-row">
+      <div class="field-lbl">{{ label }}</div>
+      <div class="field-val">{{ n(key) }}</div>
+    </div>
+    {% endif %}
+    {% endfor %}
+
+  </div>
+</div>
+
+<!-- Production Schedule Timeline (reference) -->
+{% if schedule_rows %}
+<div class="section">
+  <div class="section-head">Production Schedule Timeline</div>
+  <table class="sched-table">
+    <thead>
+      <tr><th style="width:80px">Start</th><th style="width:80px">End</th><th>Description</th><th style="width:180px">Notes</th></tr>
+    </thead>
+    <tbody>
+      {% for row in schedule_rows %}
+      {% if row.description or row.start_time %}
+      <tr>
+        <td>{{ row.start_time or '' }}</td>
+        <td>{{ row.end_time or '' }}</td>
+        <td>{{ row.description or '' }}</td>
+        <td style="color:#555">{{ row.notes or '' }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+<!-- Footer -->
+<div class="doc-footer">
+  <span>{{ show.name }}  ·  {{ show.show_date or '—' }}</span>
+  <span>POST-SHOW NOTES  ·  Exported {{ export_date }}</span>
+  <span>Dr. Phillips Center for the Performing Arts</span>
+</div>
+
+</body>
+</html>

@@ -20,13 +20,40 @@ from flask import (Flask, render_template, request, redirect, url_for,
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
-MAX_UPLOAD_SIZE = 20 * 1024 * 1024  # 20 MB
-
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dpc-advance-secret-change-in-production')
 
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advance.db')
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
+
+# Flask-Limiter for login rate limiting
+try:
+    from flask_limiter import Limiter
+    from flask_limiter.util import get_remote_address
+    limiter = Limiter(
+        app=app,
+        key_func=get_remote_address,
+        default_limits=[],
+        storage_uri="memory://",
+    )
+    _limiter_available = True
+except ImportError:
+    limiter = None
+    _limiter_available = False
+
+
+def _get_upload_max():
+    """Read upload_max_mb from app_settings, default 20."""
+    if not os.path.exists(DATABASE):
+        return 20 * 1024 * 1024
+    try:
+        db = get_db()
+        row = db.execute("SELECT value FROM app_settings WHERE key='upload_max_mb'").fetchone()
+        db.close()
+        mb = int(row['value']) if row and row['value'] else 20
+        return mb * 1024 * 1024
+    except Exception:
+        return 20 * 1024 * 1024
 
 DEPARTMENTS = ['Production', 'Programming', 'Event Manager', 'Education Team',
                'Hospitality', 'Guest Services', 'Security', 'Runners']
@@ -80,6 +107,21 @@ def reload_syslog_handler():
         syslog_logger.addHandler(_syslog_handler)
     except Exception as e:
         app.logger.error(f'Failed to configure syslog: {e}')
+
+
+# ─── App Settings Helper ──────────────────────────────────────────────────────
+
+def get_app_setting(key, default=''):
+    """Fetch a single app_setting value from the database."""
+    if not os.path.exists(DATABASE):
+        return default
+    try:
+        db = get_db()
+        row = db.execute('SELECT value FROM app_settings WHERE key=?', (key,)).fetchone()
+        db.close()
+        return row['value'] if row and row['value'] is not None else default
+    except Exception:
+        return default
 
 
 # ─── Database ─────────────────────────────────────────────────────────────────
@@ -351,8 +393,7 @@ def _snapshot_form_history(db, show_id, form_type, snapshot_data):
 
 # ─── Auth Routes ──────────────────────────────────────────────────────────────
 
-@app.route('/login', methods=['GET', 'POST'])
-def login():
+def _login_route():
     if 'user_id' in session:
         return redirect(url_for('dashboard'))
 
@@ -361,8 +402,14 @@ def login():
         password = request.form.get('password', '')
         db = get_db()
         user = db.execute('SELECT * FROM users WHERE username = ?', (username,)).fetchone()
-        db.close()
         if user and check_password_hash(user['password_hash'], password):
+            # Update last_login timestamp
+            try:
+                db.execute('UPDATE users SET last_login=CURRENT_TIMESTAMP WHERE id=?', (user['id'],))
+                db.commit()
+            except Exception:
+                pass
+            db.close()
             session['user_id']        = user['id']
             session['username']       = user['username']
             session['display_name']   = user['display_name'] or user['username']
@@ -373,9 +420,21 @@ def login():
             syslog_logger.info(f"LOGIN user={username} ip={request.remote_addr}")
             next_url = request.form.get('next') or url_for('dashboard')
             return redirect(next_url)
+        db.close()
         flash('Invalid username or password.', 'error')
 
     return render_template('login.html', next=request.args.get('next', ''))
+
+
+if _limiter_available and limiter:
+    @app.route('/login', methods=['GET', 'POST'])
+    @limiter.limit("15 per minute", methods=["POST"])
+    def login():
+        return _login_route()
+else:
+    @app.route('/login', methods=['GET', 'POST'])
+    def login():
+        return _login_route()
 
 
 @app.route('/logout')
@@ -559,6 +618,17 @@ def show_page(show_id):
     form_sections = get_form_fields_for_template()
     restricted = session.get('is_restricted', False)
 
+    try:
+        _vl = get_app_setting('venue_list', '[]')
+        venue_list = json.loads(_vl) if _vl else []
+    except Exception:
+        venue_list = []
+    try:
+        _rl = get_app_setting('radio_channel_list', '[]')
+        radio_channel_list = json.loads(_rl) if _rl else []
+    except Exception:
+        radio_channel_list = []
+
     return render_template('show.html',
                            show=show,
                            tab=tab,
@@ -574,6 +644,8 @@ def show_page(show_id):
                            last_saved_at=last_saved_at,
                            restricted=restricted,
                            all_users=all_users,
+                           venue_list=venue_list,
+                           radio_channel_list=radio_channel_list,
                            user=get_current_user())
 
 
@@ -927,8 +999,10 @@ def upload_attachment(show_id):
     if not f or not f.filename:
         return jsonify({'success': False, 'error': 'No file provided.'}), 400
     data = f.read()
-    if len(data) > MAX_UPLOAD_SIZE:
-        return jsonify({'success': False, 'error': 'File too large (max 20 MB).'}), 413
+    max_size = _get_upload_max()
+    max_mb = max_size // (1024 * 1024)
+    if len(data) > max_size:
+        return jsonify({'success': False, 'error': f'File too large (max {max_mb} MB).'}), 413
     filename  = secure_filename(f.filename) or 'file'
     mime_type = f.content_type or 'application/octet-stream'
     db = get_db()
@@ -1184,10 +1258,13 @@ def _build_advance_pdf(show_id):
     contacts = db.execute('SELECT * FROM contacts ORDER BY name').fetchall()
     contact_map = {c['id']: dict(c) for c in contacts}
 
+    logo_data = get_app_setting('logo_data', '')
+
     new_v = (show['advance_version'] or 0) + 1
     db.execute('UPDATE shows SET advance_version=? WHERE id=?', (new_v, show_id))
-    db.execute("""INSERT INTO export_log (show_id, export_type, version, exported_by)
+    log_cur = db.execute("""INSERT INTO export_log (show_id, export_type, version, exported_by)
                   VALUES (?, 'advance', ?, ?)""", (show_id, new_v, session['user_id']))
+    log_id = log_cur.lastrowid
     db.commit()
     db.close()
 
@@ -1203,22 +1280,34 @@ def _build_advance_pdf(show_id):
                                show=show, advance_data=advance_data,
                                contact_map=contact_map,
                                form_sections=form_sections,
+                               logo_data=logo_data,
                                version=new_v,
                                export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
     except Exception as e:
-        # Fall back to a minimal safe render if the template fails
         app.logger.error(f'advance_pdf template error for show {show_id}: {e}')
         html = render_template('pdf/advance_pdf.html',
                                show=show, advance_data=advance_data,
                                contact_map=contact_map,
-                               form_sections=[],   # trigger hardcoded fallback
+                               form_sections=[],
+                               logo_data=logo_data,
                                version=new_v,
                                export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
+
+    # Store PDF bytes in export_log for re-download
+    try:
+        from weasyprint import HTML as WP_HTML
+        pdf_bytes = WP_HTML(string=html, base_url=request.url_root).write_pdf()
+        db2 = get_db()
+        db2.execute('UPDATE export_log SET pdf_data=? WHERE id=?', (pdf_bytes, log_id))
+        db2.commit()
+        db2.close()
+    except Exception:
+        pdf_bytes = None
 
     syslog_logger.info(
         f"PDF_EXPORT show_id={show_id} type=advance v={new_v} by={session.get('username')}"
     )
-    return html, new_v, dict(show)
+    return html, new_v, dict(show), pdf_bytes
 
 
 def _build_schedule_pdf(show_id):
@@ -1238,10 +1327,27 @@ def _build_schedule_pdf(show_id):
     contacts = db.execute('SELECT * FROM contacts ORDER BY name').fetchall()
     contact_map = {c['id']: dict(c) for c in contacts}
 
+    logo_data = get_app_setting('logo_data', '')
+
+    # WiFi QR Code generation
+    wifi_qr_b64 = None
+    wifi_ssid = schedule_meta.get('wifi_network') or get_app_setting('wifi_network', '')
+    wifi_pass = schedule_meta.get('wifi_code') or get_app_setting('wifi_password', '')
+    if wifi_ssid:
+        try:
+            import qrcode, io, base64
+            qr = qrcode.make(f"WIFI:S:{wifi_ssid};T:WPA;P:{wifi_pass};;")
+            buf = io.BytesIO()
+            qr.save(buf, format='PNG')
+            wifi_qr_b64 = base64.b64encode(buf.getvalue()).decode()
+        except Exception:
+            pass
+
     new_v = (show['schedule_version'] or 0) + 1
     db.execute('UPDATE shows SET schedule_version=? WHERE id=?', (new_v, show_id))
-    db.execute("""INSERT INTO export_log (show_id, export_type, version, exported_by)
+    log_cur = db.execute("""INSERT INTO export_log (show_id, export_type, version, exported_by)
                   VALUES (?, 'schedule', ?, ?)""", (show_id, new_v, session['user_id']))
+    log_id = log_cur.lastrowid
     db.commit()
     db.close()
 
@@ -1250,12 +1356,26 @@ def _build_schedule_pdf(show_id):
                            schedule_meta=schedule_meta,
                            advance_data=advance_data,
                            contact_map=contact_map,
+                           logo_data=logo_data,
+                           wifi_qr_b64=wifi_qr_b64,
                            version=new_v,
                            export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
+
+    # Store PDF bytes in export_log for re-download
+    try:
+        from weasyprint import HTML as WP_HTML
+        pdf_bytes = WP_HTML(string=html, base_url=request.url_root).write_pdf()
+        db2 = get_db()
+        db2.execute('UPDATE export_log SET pdf_data=? WHERE id=?', (pdf_bytes, log_id))
+        db2.commit()
+        db2.close()
+    except Exception:
+        pdf_bytes = None
+
     syslog_logger.info(
         f"PDF_EXPORT show_id={show_id} type=schedule v={new_v} by={session.get('username')}"
     )
-    return html, new_v, dict(show)
+    return html, new_v, dict(show), pdf_bytes
 
 
 @app.route('/shows/<int:show_id>/export/advance')
@@ -1264,9 +1384,15 @@ def export_advance(show_id):
     if not can_access_show(session['user_id'], show_id):
         abort(403)
     get_show_or_404(show_id)
-    html, version, show = _build_advance_pdf(show_id)
+    html, version, show, pdf_bytes = _build_advance_pdf(show_id)
     safe_name = show['name'].replace(' ', '_').replace('/', '-')
     filename  = f"Advance_{safe_name}_{show.get('show_date','nodate')}_v{version}.pdf"
+    if pdf_bytes:
+        resp = make_response(pdf_bytes)
+        resp.headers['Content-Type'] = 'application/pdf'
+        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return resp
+    # Fallback to HTML if weasyprint failed
     try:
         from weasyprint import HTML
         pdf = HTML(string=html, base_url=request.url_root).write_pdf()
@@ -1286,9 +1412,78 @@ def export_schedule(show_id):
     if not can_access_show(session['user_id'], show_id):
         abort(403)
     get_show_or_404(show_id)
-    html, version, show = _build_schedule_pdf(show_id)
+    html, version, show, pdf_bytes = _build_schedule_pdf(show_id)
     safe_name = show['name'].replace(' ', '_').replace('/', '-')
     filename  = f"Schedule_{safe_name}_{show.get('show_date','nodate')}_v{version}.pdf"
+    if pdf_bytes:
+        resp = make_response(pdf_bytes)
+        resp.headers['Content-Type'] = 'application/pdf'
+        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return resp
+    try:
+        from weasyprint import HTML
+        pdf = HTML(string=html, base_url=request.url_root).write_pdf()
+        resp = make_response(pdf)
+        resp.headers['Content-Type'] = 'application/pdf'
+        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        return resp
+    except Exception:
+        resp = make_response(html)
+        resp.headers['Content-Type'] = 'text/html'
+        return resp
+
+
+@app.route('/shows/<int:show_id>/export/history/<int:log_id>/download')
+@login_required
+def download_export_history(show_id, log_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    row = db.execute(
+        'SELECT * FROM export_log WHERE id=? AND show_id=?', (log_id, show_id)
+    ).fetchone()
+    db.close()
+    if not row or not row['pdf_data']:
+        abort(404)
+    filename = f"{row['export_type'].capitalize()}_v{row['version']}.pdf"
+    resp = make_response(bytes(row['pdf_data']))
+    resp.headers['Content-Type'] = 'application/pdf'
+    resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return resp
+
+
+@app.route('/shows/<int:show_id>/export/postnotes')
+@login_required
+def export_postnotes(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    show = db.execute('SELECT * FROM shows WHERE id=?', (show_id,)).fetchone()
+    if not show:
+        abort(404)
+    note_rows = db.execute(
+        'SELECT field_key, field_value FROM post_show_notes WHERE show_id=?', (show_id,)
+    ).fetchall()
+    notes_data = {r['field_key']: r['field_value'] for r in note_rows}
+    adv_rows = db.execute(
+        'SELECT field_key, field_value FROM advance_data WHERE show_id=?', (show_id,)
+    ).fetchall()
+    advance_data = {r['field_key']: r['field_value'] for r in adv_rows}
+    sched_rows = db.execute(
+        'SELECT * FROM schedule_rows WHERE show_id=? ORDER BY sort_order,id', (show_id,)
+    ).fetchall()
+    logo_data = get_app_setting('logo_data', '')
+    db.close()
+
+    html = render_template('pdf/postnotes_pdf.html',
+                           show=show,
+                           notes_data=notes_data,
+                           advance_data=advance_data,
+                           schedule_rows=sched_rows,
+                           logo_data=logo_data,
+                           export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
+    safe_name = show['name'].replace(' ', '_').replace('/', '-')
+    filename = f"PostNotes_{safe_name}_{show['show_date'] or 'nodate'}.pdf"
     try:
         from weasyprint import HTML
         pdf = HTML(string=html, base_url=request.url_root).write_pdf()
@@ -1422,21 +1617,36 @@ def settings():
         gd['shows'] = [dict(s) for s in shows]
         groups_data.append(gd)
 
-    syslog_settings = {r['key']: r['value'] for r in
-                       db.execute("SELECT key, value FROM app_settings").fetchall()}
+    all_settings = {r['key']: r['value'] for r in
+                    db.execute("SELECT key, value FROM app_settings").fetchall()}
 
     db.close()
     _is_ca = session.get('is_content_admin', False) or session.get('user_role') == 'admin'
     form_sections = get_form_fields_for_template() if _is_ca else []
+
+    try:
+        venue_list = json.loads(all_settings.get('venue_list', '[]'))
+    except Exception:
+        venue_list = []
+    try:
+        radio_channel_list = json.loads(all_settings.get('radio_channel_list', '[]'))
+    except Exception:
+        radio_channel_list = []
 
     return render_template('settings.html',
                            contacts=contacts,
                            users=users,
                            groups=groups_data,
                            form_sections=form_sections,
-                           syslog_settings=syslog_settings,
+                           syslog_settings=all_settings,
                            departments=DEPARTMENTS,
                            is_content_admin=_is_ca,
+                           venue_list=venue_list,
+                           radio_channel_list=radio_channel_list,
+                           wifi_network=all_settings.get('wifi_network', ''),
+                           wifi_password=all_settings.get('wifi_password', ''),
+                           upload_max_mb=all_settings.get('upload_max_mb', '20'),
+                           logo_data=all_settings.get('logo_data', ''),
                            user=get_current_user())
 
 
@@ -1691,20 +1901,35 @@ def form_fields_settings():
         gd['shows'] = [dict(s) for s in shows]
         groups_data.append(gd)
 
-    syslog_settings = {r['key']: r['value'] for r in
-                       db.execute("SELECT key, value FROM app_settings").fetchall()}
+    all_settings = {r['key']: r['value'] for r in
+                    db.execute("SELECT key, value FROM app_settings").fetchall()}
     db.close()
 
     _is_ca = session.get('is_content_admin', False) or session.get('user_role') == 'admin'
+    try:
+        venue_list = json.loads(all_settings.get('venue_list', '[]'))
+    except Exception:
+        venue_list = []
+    try:
+        radio_channel_list = json.loads(all_settings.get('radio_channel_list', '[]'))
+    except Exception:
+        radio_channel_list = []
+
     return render_template('settings.html',
                            contacts=contacts,
                            users=users,
                            groups=groups_data,
                            form_sections=form_sections,
-                           syslog_settings=syslog_settings,
+                           syslog_settings=all_settings,
                            departments=DEPARTMENTS,
                            active_tab='fields',
                            is_content_admin=_is_ca,
+                           venue_list=venue_list,
+                           radio_channel_list=radio_channel_list,
+                           wifi_network=all_settings.get('wifi_network', ''),
+                           wifi_password=all_settings.get('wifi_password', ''),
+                           upload_max_mb=all_settings.get('upload_max_mb', '20'),
+                           logo_data=all_settings.get('logo_data', ''),
                            user=get_current_user())
 
 
@@ -2004,6 +2229,228 @@ def api_shows():
     return jsonify([dict(s) for s in shows])
 
 
+# ─── API Time ─────────────────────────────────────────────────────────────────
+
+@app.route('/api/time')
+@login_required
+def api_time():
+    return jsonify({
+        'utc': datetime.utcnow().isoformat(),
+        'local': datetime.now().isoformat()
+    })
+
+
+# ─── God Mode (Admin) ─────────────────────────────────────────────────────────
+
+@app.route('/api/admin/god-mode')
+@admin_required
+def api_god_mode():
+    db = get_db()
+    sessions = db.execute("""
+        SELECT u.display_name, u.username, acs.tab, acs.last_seen,
+               s.name as show_name, s.id as show_id
+        FROM active_sessions acs
+        JOIN users u ON acs.user_id = u.id
+        JOIN shows s ON acs.show_id = s.id
+        WHERE acs.last_seen > datetime('now', '-5 minutes')
+        ORDER BY acs.last_seen DESC
+    """).fetchall()
+    users = db.execute("""
+        SELECT id, display_name, username, role, last_login
+        FROM users ORDER BY display_name
+    """).fetchall()
+    db.close()
+    return jsonify({
+        'sessions': [{
+            'user': r['display_name'] or r['username'],
+            'show': r['show_name'],
+            'show_id': r['show_id'],
+            'tab': r['tab'],
+            'last_seen': r['last_seen'],
+        } for r in sessions],
+        'users': [{
+            'id': u['id'],
+            'name': u['display_name'] or u['username'],
+            'username': u['username'],
+            'role': u['role'],
+            'last_login': u['last_login'] or '—',
+        } for u in users],
+    })
+
+
+# ─── File Manager (Admin) ─────────────────────────────────────────────────────
+
+@app.route('/api/admin/files')
+@admin_required
+def api_file_manager():
+    db = get_db()
+    rows = db.execute("""
+        SELECT sa.id, sa.filename, sa.mime_type, sa.file_size, sa.created_at,
+               s.id as show_id, s.name as show_name,
+               u.display_name, u.username
+        FROM show_attachments sa
+        JOIN shows s ON sa.show_id = s.id
+        LEFT JOIN users u ON sa.uploaded_by = u.id
+        ORDER BY sa.created_at DESC
+    """).fetchall()
+    total_bytes = db.execute('SELECT SUM(file_size) FROM show_attachments').fetchone()[0] or 0
+    db.close()
+    return jsonify({
+        'files': [{
+            'id':         r['id'],
+            'show_id':    r['show_id'],
+            'show_name':  r['show_name'],
+            'filename':   r['filename'],
+            'mime_type':  r['mime_type'],
+            'file_size':  r['file_size'],
+            'created_at': r['created_at'],
+            'uploader':   r['display_name'] or r['username'] or 'Unknown',
+        } for r in rows],
+        'total_bytes': total_bytes,
+    })
+
+
+# ─── Venue / Radio / WiFi / Logo Settings ────────────────────────────────────
+
+@app.route('/settings/venues', methods=['POST'])
+@admin_required
+def save_venues():
+    data = request.get_json(force=True) or {}
+    venue_list = data.get('venue_list', [])
+    db = get_db()
+    db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+               ('venue_list', json.dumps(venue_list)))
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/radio-channels', methods=['POST'])
+@admin_required
+def save_radio_channels():
+    data = request.get_json(force=True) or {}
+    channel_list = data.get('channel_list', [])
+    db = get_db()
+    db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+               ('radio_channel_list', json.dumps(channel_list)))
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/wifi', methods=['POST'])
+@admin_required
+def save_wifi_settings():
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    for key in ('wifi_network', 'wifi_password'):
+        if key in data:
+            db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+                       (key, data[key]))
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/logo', methods=['POST'])
+@admin_required
+def save_logo():
+    f = request.files.get('logo')
+    if f and f.filename:
+        import base64
+        data = f.read()
+        if len(data) > 2 * 1024 * 1024:
+            return jsonify({'success': False, 'error': 'Logo too large (max 2 MB).'}), 413
+        mime = f.content_type or 'image/png'
+        b64 = base64.b64encode(data).decode()
+        logo_data = f'data:{mime};base64,{b64}'
+    else:
+        data_uri = (request.get_json(force=True) or {}).get('logo_data', '')
+        logo_data = data_uri
+
+    db = get_db()
+    db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+               ('logo_data', logo_data))
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/logo/delete', methods=['POST'])
+@admin_required
+def delete_logo():
+    db = get_db()
+    db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('logo_data', '')")
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/upload-size', methods=['POST'])
+@admin_required
+def save_upload_size():
+    data = request.get_json(force=True) or {}
+    try:
+        mb = int(data.get('upload_max_mb', 20))
+        mb = max(1, min(mb, 500))
+    except (ValueError, TypeError):
+        mb = 20
+    db = get_db()
+    db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+               ('upload_max_mb', str(mb)))
+    db.commit(); db.close()
+    return jsonify({'success': True, 'upload_max_mb': mb})
+
+
+# ─── Public Show Page ─────────────────────────────────────────────────────────
+
+@app.route('/public')
+def public_shows():
+    db = get_db()
+    shows = db.execute("""
+        SELECT id, name, show_date, show_time, venue, advance_version, schedule_version
+        FROM shows WHERE status='active'
+        ORDER BY show_date ASC NULLS LAST
+    """).fetchall()
+    db.close()
+    return render_template('public.html', shows=shows)
+
+
+@app.route('/public/shows/<int:show_id>/advance')
+def public_advance_pdf(show_id):
+    db = get_db()
+    row = db.execute("""
+        SELECT pdf_data FROM export_log
+        WHERE show_id=? AND export_type='advance'
+        ORDER BY exported_at DESC LIMIT 1
+    """, (show_id,)).fetchone()
+    show = db.execute('SELECT * FROM shows WHERE id=? AND status="active"', (show_id,)).fetchone()
+    db.close()
+    if not show:
+        abort(404)
+    if row and row['pdf_data']:
+        resp = make_response(bytes(row['pdf_data']))
+        resp.headers['Content-Type'] = 'application/pdf'
+        resp.headers['Content-Disposition'] = f'inline; filename="Advance_{show_id}.pdf"'
+        return resp
+    abort(404)
+
+
+@app.route('/public/shows/<int:show_id>/schedule')
+def public_schedule_pdf(show_id):
+    db = get_db()
+    row = db.execute("""
+        SELECT pdf_data FROM export_log
+        WHERE show_id=? AND export_type='schedule'
+        ORDER BY exported_at DESC LIMIT 1
+    """, (show_id,)).fetchone()
+    show = db.execute('SELECT * FROM shows WHERE id=? AND status="active"', (show_id,)).fetchone()
+    db.close()
+    if not show:
+        abort(404)
+    if row and row['pdf_data']:
+        resp = make_response(bytes(row['pdf_data']))
+        resp.headers['Content-Type'] = 'application/pdf'
+        resp.headers['Content-Disposition'] = f'inline; filename="Schedule_{show_id}.pdf"'
+        return resp
+    abort(404)
+
+
 # ─── Error Handlers ───────────────────────────────────────────────────────────
 
 @app.errorhandler(403)
@@ -2024,6 +2471,11 @@ def not_found(e):
 # Initialize syslog at import time (for Gunicorn)
 if os.path.exists(DATABASE):
     reload_syslog_handler()
+    # Ensure backup dirs exist (fixes PermissionError if dirs were missing)
+    try:
+        _ensure_backup_dirs()
+    except Exception:
+        pass
 
 # Start backup scheduler (guarded against Flask reloader double-start)
 _scheduler = None

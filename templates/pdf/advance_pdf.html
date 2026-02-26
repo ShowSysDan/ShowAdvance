@@ -61,9 +61,14 @@
 
 {# ── Document Header ──────────────────────────────────────────── #}
 <div class="doc-header">
-  <div>
-    <div class="doc-title">DPC <span>ADVANCE</span> SHEET</div>
-    <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    {% if logo_data %}
+    <img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">
+    {% endif %}
+    <div>
+      <div class="doc-title">DPC <span>ADVANCE</span> SHEET</div>
+      <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+    </div>
   </div>
   <div class="doc-meta">
     <div class="version">v{{ version }}</div>
