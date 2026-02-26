@@ -194,6 +194,16 @@ CREATE TABLE IF NOT EXISTS advance_reads (
     read_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(show_id, user_id)
 );
+
+CREATE TABLE IF NOT EXISTS schedule_meta_fields (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    field_key        TEXT UNIQUE NOT NULL,
+    label            TEXT NOT NULL,
+    field_type       TEXT DEFAULT 'text',
+    advance_field_key TEXT DEFAULT NULL,
+    sort_order       INTEGER DEFAULT 0,
+    width_hint       TEXT DEFAULT 'half'
+);
 """
 
 SEED_CONTACTS = [
@@ -475,6 +485,31 @@ def _seed_form_data(conn):
     print(f"  Seeded {len(FORM_SECTIONS_SEED)} sections and {len(FORM_FIELDS_SEED)} fields")
 
 
+SCHEDULE_META_FIELDS_SEED = [
+    # (field_key, label, field_type, advance_field_key, sort_order, width_hint)
+    ('wifi_network',     'WIFI NETWORK',            'text', None,            10, 'half'),
+    ('wifi_code',        'WIFI CODE',               'text', None,            20, 'half'),
+    ('radio_channel',    'RADIO CHANNEL',           'text', 'radio_channel', 30, 'half'),
+    ('mix_position',     'MIX POSITION',            'text', 'mix_position',  40, 'half'),
+    ('parking_security', 'PARKING & SECURITY INFO', 'text', None,            50, 'full'),
+]
+
+
+def _seed_schedule_meta_fields(conn):
+    """Seed schedule_meta_fields with defaults if table is empty."""
+    count = conn.execute('SELECT COUNT(*) FROM schedule_meta_fields').fetchone()[0]
+    if count > 0:
+        return
+    for (fk, lbl, ft, afk, so, wh) in SCHEDULE_META_FIELDS_SEED:
+        conn.execute(
+            """INSERT OR IGNORE INTO schedule_meta_fields
+               (field_key, label, field_type, advance_field_key, sort_order, width_hint)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (fk, lbl, ft, afk, so, wh)
+        )
+    print(f"  Seeded {len(SCHEDULE_META_FIELDS_SEED)} schedule meta fields")
+
+
 def _seed_app_settings(conn):
     """Seed app_settings with defaults if empty."""
     for (key, value) in APP_SETTINGS_SEED:
@@ -657,9 +692,23 @@ def migrate_db():
         except Exception:
             pass  # Column already exists
 
+    # Create schedule_meta_fields table (new feature, safe to rerun)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS schedule_meta_fields (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            field_key        TEXT UNIQUE NOT NULL,
+            label            TEXT NOT NULL,
+            field_type       TEXT DEFAULT 'text',
+            advance_field_key TEXT DEFAULT NULL,
+            sort_order       INTEGER DEFAULT 0,
+            width_hint       TEXT DEFAULT 'half'
+        );
+    """)
+
     # Seed form data and settings if empty
     _seed_form_data(conn)
     _seed_app_settings(conn)
+    _seed_schedule_meta_fields(conn)
 
     # Add missing form sections (safe to run even if some already exist)
     _migrate_form_data(conn)
@@ -695,6 +744,7 @@ def init_db(force=False):
     # Seed form data and settings
     _seed_form_data(conn)
     _seed_app_settings(conn)
+    _seed_schedule_meta_fields(conn)
 
     conn.commit()
     conn.close()

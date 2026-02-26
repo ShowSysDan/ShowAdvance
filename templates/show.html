@@ -189,33 +189,25 @@
   <div class="form-section">
     <div class="form-section-header"><span class="section-icon">◈</span> VENUE & TECH INFO</div>
     <div class="form-section-body">
-      <div class="form-row cols-4">
-        <div class="field-group">
-          <label class="field-label">WIFI NETWORK</label>
-          <input type="text" class="field-input sched-meta" data-key="wifi_network" value="{{ meta('wifi_network') }}" placeholder="Network name" {% if restricted %}disabled{% endif %}>
+      {% set _smf = sched_meta_fields if sched_meta_fields is defined else [] %}
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        {% for f in _smf %}
+        <div class="field-group" {% if f.width_hint == 'full' %}style="grid-column:1 / -1"{% endif %}>
+          <label class="field-label">{{ f.label }}</label>
+          {% if f.advance_field_key %}
+            <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+              {{ adv(f.advance_field_key) or '—' }}
+            </div>
+            <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+          {% elif f.field_type == 'textarea' %}
+            <textarea class="field-input field-textarea sched-meta" data-key="{{ f.field_key }}" rows="3" {% if restricted %}disabled{% endif %}>{{ meta(f.field_key) }}</textarea>
+          {% else %}
+            <input type="text" class="field-input sched-meta" data-key="{{ f.field_key }}" value="{{ meta(f.field_key) }}" {% if restricted %}disabled{% endif %}>
+          {% endif %}
         </div>
-        <div class="field-group">
-          <label class="field-label">WIFI CODE</label>
-          <input type="text" class="field-input sched-meta" data-key="wifi_code" value="{{ meta('wifi_code') }}" placeholder="Password" {% if restricted %}disabled{% endif %}>
-        </div>
-        <div class="field-group">
-          <label class="field-label">RADIO CHANNEL</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ adv('radio_channel') or '—' }}
-          </div>
-          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-        </div>
-        <div class="field-group">
-          <label class="field-label">MIX POSITION</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ adv('mix_position') or '—' }}
-          </div>
-          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-        </div>
-      </div>
-      <div class="field-group">
-        <label class="field-label">PARKING & SECURITY INFO</label>
-        <input type="text" class="field-input sched-meta" data-key="parking_security" value="{{ meta('parking_security') }}" placeholder="e.g. Judson's Live gravel lot" {% if restricted %}disabled{% endif %}>
+        {% else %}
+        <p class="text-dim" style="font-size:12px;grid-column:1/-1">No fields configured. Add fields in Settings → Form Fields → Schedule Template.</p>
+        {% endfor %}
       </div>
     </div>
   </div>

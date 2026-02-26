@@ -260,12 +260,13 @@
     </div>
     <div class="form-section-body" style="gap:16px">
       <p class="text-dim" style="font-size:12px">
-        Drag rows to reorder fields within a section. Changes take effect immediately for all new and existing shows.
+        Drag the <strong>⠿</strong> handle to reorder sections or fields. Changes take effect immediately for all shows.
       </p>
 
       {% for section in (form_sections if form_sections is defined else []) %}
       <div class="form-section" data-section-id="{{ section.id }}" style="margin-bottom:0">
         <div class="form-section-header" style="background:var(--bg-hover)">
+          <span class="section-drag-handle drag-handle" title="Drag to reorder section" style="cursor:grab;margin-right:6px;font-size:14px;color:var(--text-muted)">⠿</span>
           <span class="section-icon">{{ section.icon }}</span>
           <strong style="font-size:12px;color:var(--text);letter-spacing:normal;text-transform:none">{{ section.label }}</strong>
           <span class="text-dim" style="font-size:10px;font-weight:400;letter-spacing:0">({{ section.fields|length }} fields)</span>
@@ -313,6 +314,48 @@
         </div>
       </div>
       {% endfor %}
+
+      {# ── Schedule Template ─────────────────────────────────────────────── #}
+      <div class="form-section" style="margin-top:16px">
+        <div class="form-section-header">
+          <span class="section-icon">◈</span> SCHEDULE TEMPLATE — VENUE &amp; TECH INFO
+          <div class="action-btns ml-auto">
+            <button class="btn btn-sm btn-ghost" onclick="openSchedFieldModal(null)">+ Add Field</button>
+          </div>
+        </div>
+        <div class="form-section-body no-pad">
+          <table class="field-editor-table">
+            <thead>
+              <tr>
+                <th style="width:28px"></th>
+                <th>LABEL</th>
+                <th style="width:90px">TYPE</th>
+                <th style="width:90px">WIDTH</th>
+                <th>FROM ADVANCE FIELD</th>
+                <th style="width:80px">ACTIONS</th>
+              </tr>
+            </thead>
+            <tbody id="sched-meta-fields-tbody">
+              {% for f in (sched_meta_fields if sched_meta_fields is defined else []) %}
+              <tr class="sched-meta-row" draggable="true" data-id="{{ f.id }}">
+                <td><span class="drag-handle" title="Drag to reorder">⠿</span></td>
+                <td>{{ f.label }}</td>
+                <td><span class="field-type-badge">{{ f.field_type }}</span></td>
+                <td class="text-dim" style="font-size:11px">{{ f.width_hint }}</td>
+                <td class="text-dim" style="font-size:11px;font-family:var(--font-mono)">{{ f.advance_field_key or '—' }}</td>
+                <td>
+                  <div class="action-btns">
+                    <button class="btn btn-xs btn-ghost" onclick="openSchedFieldModal({{ f.id }})">Edit</button>
+                    <button class="btn btn-xs btn-danger-ghost" onclick="deleteSchedField({{ f.id }})">×</button>
+                  </div>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
   </div>
 </div>
@@ -755,6 +798,55 @@
     </div>
   </div>
 </div>
+
+{# ── Schedule Meta Field Modal (admin / content_admin) ── #}
+{% if user.role == 'admin' or is_content_admin %}
+<div id="sched-field-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSchedFieldModal()">
+  <div class="modal-card" style="max-width:520px">
+    <div class="modal-header">Schedule Field <button onclick="closeSchedFieldModal()" class="modal-close">×</button></div>
+    <div class="modal-body" id="sched-field-modal-form">
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">LABEL *</label>
+          <input type="text" name="label" class="field-input" placeholder="e.g. CATERING CONTACT">
+        </div>
+        <div class="field-group">
+          <label class="field-label">FIELD KEY (new fields only)</label>
+          <input type="text" name="field_key" class="field-input" placeholder="catering_contact" style="font-family:var(--font-mono);font-size:12px">
+        </div>
+      </div>
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">FIELD TYPE</label>
+          <select name="field_type" class="field-input">
+            <option value="text">Text (single line)</option>
+            <option value="textarea">Textarea (multi-line)</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">WIDTH</label>
+          <select name="width_hint" class="field-input">
+            <option value="half">Half width</option>
+            <option value="full">Full width</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">LINK TO ADVANCE FORM FIELD (optional)</label>
+        <select name="advance_field_key" class="field-input" id="sched-field-advance-ref">
+          <option value="">— Not linked (field is editable on the schedule) —</option>
+        </select>
+        <p class="field-hint" style="margin-top:4px;font-size:11px;color:var(--text-muted)">
+          If linked, this field will be read-only and auto-populated from the advance form.
+        </p>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeSchedFieldModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveSchedField()">Save Field</button>
+    </div>
+  </div>
+</div>
 {% endif %}
 
 {% endblock %}
@@ -1057,6 +1149,8 @@ async function adminDeleteFile(showId, fileId, btn) {
 /* ── Form Field Editor init ─────────────────────────────────────── */
 (function() {
   initFieldDrag();
+  initSectionDrag();
+  initSchedMetaDrag();
   loadShowOptions();
   // Activate tab from URL hash or server-side default
   const hash = location.hash.replace('#','');
