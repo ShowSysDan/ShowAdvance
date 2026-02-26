@@ -115,7 +115,8 @@ CREATE TABLE IF NOT EXISTS form_sections (
     label TEXT NOT NULL,
     sort_order INTEGER DEFAULT 0,
     collapsible INTEGER DEFAULT 1,
-    icon TEXT DEFAULT '◈'
+    icon TEXT DEFAULT '◈',
+    default_open INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS form_fields (
@@ -592,7 +593,8 @@ def migrate_db():
             label TEXT NOT NULL,
             sort_order INTEGER DEFAULT 0,
             collapsible INTEGER DEFAULT 1,
-            icon TEXT DEFAULT '◈'
+            icon TEXT DEFAULT '◈',
+            default_open INTEGER DEFAULT 1
         );
 
         CREATE TABLE IF NOT EXISTS form_fields (
@@ -704,6 +706,7 @@ def migrate_db():
         'ALTER TABLE users ADD COLUMN last_login TIMESTAMP',
         'ALTER TABLE export_log ADD COLUMN pdf_data BLOB',
         "ALTER TABLE export_log ADD COLUMN filename TEXT DEFAULT ''",
+        'ALTER TABLE form_sections ADD COLUMN default_open INTEGER DEFAULT 1',
     ]:
         try:
             conn.execute(alter_sql)

@@ -474,7 +474,13 @@ function evaluateAllConditionals() {
 
 /* ── Section Collapse ─────────────────────────────────────────── */
 function toggleSection(header) {
-  header.closest('.form-section').classList.toggle('collapsed');
+  const section = header.closest('.form-section');
+  section.classList.toggle('collapsed');
+  const key = section.dataset.key;
+  if (key) {
+    localStorage.setItem('adv_sec_' + key,
+      section.classList.contains('collapsed') ? 'closed' : 'open');
+  }
 }
 
 /* ── Notes Toggle ─────────────────────────────────────────────── */
@@ -843,6 +849,10 @@ function openSectionModal(sid) {
       modal.querySelector('[name="icon"]').value  = row.dataset.icon  || '◈';
       const collEl = modal.querySelector('[name="collapsible"]');
       if (collEl) collEl.checked = (row.dataset.collapsible === '1');
+      const defOpen = row.dataset.defaultOpen !== '0';
+      modal.querySelectorAll('[name="default_open"]').forEach(r => {
+        r.checked = (r.value === (defOpen ? '1' : '0'));
+      });
     }
   } else {
     const secForm = modal.querySelector('#section-modal-form');
@@ -869,6 +879,7 @@ async function saveSection() {
   const data = {};
   modal.querySelectorAll('[name]').forEach(el => {
     if (el.type === 'checkbox') data[el.name] = el.checked;
+    else if (el.type === 'radio') { if (el.checked) data[el.name] = el.value; }
     else data[el.name] = el.value;
   });
   const url = _editSectionId

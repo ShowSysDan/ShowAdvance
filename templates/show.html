@@ -223,7 +223,8 @@
   </div>
 
   {% for section in form_sections %}
-  <div class="form-section">
+  <div class="form-section{% if section.collapsible and section.default_open == 0 %} collapsed{% endif %}"
+       data-key="{{ section.section_key }}" data-default-open="{{ '0' if section.default_open == 0 else '1' }}">
     <div class="form-section-header{% if section.collapsible %} collapsible{% endif %}"
          {% if section.collapsible %}onclick="toggleSection(this)"{% endif %}>
       <span class="section-icon">{{ section.icon }}</span> {{ section.label }}
@@ -641,6 +642,14 @@
   const ALL_USERS = {{ all_users | tojson }};
   let _currentHistId = null;
   initShow({{ show.id }}, INITIAL_TAB);
+
+  /* ── Restore section open/closed states from localStorage ───── */
+  document.querySelectorAll('.form-section[data-key]').forEach(sec => {
+    const saved = localStorage.getItem('adv_sec_' + sec.dataset.key);
+    if (saved === 'open')   sec.classList.remove('collapsed');
+    else if (saved === 'closed') sec.classList.add('collapsed');
+    // no saved state → server-rendered default_open class is used as-is
+  });
 
   /* ── Performances (multiple dates/times) ────────────────────── */
   function openPerfForm() {

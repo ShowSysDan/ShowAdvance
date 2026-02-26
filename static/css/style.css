@@ -196,6 +196,80 @@ button.section-label:hover { color: var(--text); }
 .empty-state p { margin-top: 16px; font-size: 14px; }
 .toggle-archived { text-decoration: none; }
 
+/* ── Dashboard Toolbar ──────────────────────────────────────────── */
+.dash-toolbar {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 20px; flex-wrap: wrap;
+}
+.dash-search-wrap { position: relative; flex: 0 0 260px; }
+.dash-search-icon {
+  position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+  color: var(--text-muted); pointer-events: none;
+}
+.dash-search-input {
+  width: 100%; padding: 7px 30px 7px 34px;
+  background: var(--bg-surface); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text);
+  font-family: var(--font-main); font-size: 13px;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.dash-search-input:focus {
+  outline: none; border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+.dash-search-input::placeholder { color: var(--text-muted); }
+.dash-clear-btn {
+  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 16px; line-height: 1; padding: 0 2px;
+}
+.dash-clear-btn:hover { color: var(--text); }
+.dash-venue-pills { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.venue-pill {
+  padding: 4px 11px; border-radius: 20px;
+  border: 1px solid var(--border); background: var(--bg-surface);
+  color: var(--text-muted); font-family: var(--font-cond);
+  font-size: 11px; font-weight: 700; letter-spacing: 0.05em;
+  cursor: pointer; transition: all 0.15s;
+}
+.venue-pill.active {
+  background: var(--accent-glow); border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.venue-pill:hover:not(.active) { border-color: var(--border-light); color: var(--text); }
+
+/* ── Venue Columns ──────────────────────────────────────────────── */
+.venue-columns {
+  display: flex; gap: 14px; align-items: flex-start;
+  overflow-x: auto; padding-bottom: 20px;
+}
+.venue-col { flex: 0 0 300px; min-width: 0; }
+.venue-col-header {
+  display: flex; align-items: center; justify-content: space-between;
+  margin-bottom: 10px; padding: 0 2px;
+}
+.venue-col-name {
+  font-family: var(--font-cond); font-size: 11px; font-weight: 700;
+  letter-spacing: 0.12em; color: var(--text-muted); text-transform: uppercase;
+}
+.venue-col-count {
+  font-family: var(--font-cond); font-size: 10px; font-weight: 700;
+  color: var(--text-muted); background: var(--bg-surface);
+  border: 1px solid var(--border); border-radius: 10px; padding: 1px 7px;
+}
+.venue-col-body { display: flex; flex-direction: column; gap: 10px; }
+.venue-col-empty {
+  font-size: 12px; color: var(--text-muted);
+  padding: 16px 4px; text-align: center;
+}
+.multi-date-badge {
+  display: inline-block; font-size: 9px; font-family: var(--font-cond);
+  font-weight: 700; letter-spacing: 0.06em;
+  background: var(--accent-glow); border: 1px solid var(--accent-dim);
+  color: var(--accent); border-radius: 3px; padding: 1px 5px;
+  margin-left: 6px; vertical-align: middle;
+}
+
 /* ── Form Shared ────────────────────────────────────────────────── */
 .field-group { display: flex; flex-direction: column; gap: 5px; }
 .field-group.required .field-label::after { content: ' *'; color: var(--accent); }
