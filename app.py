@@ -543,9 +543,23 @@ def dashboard():
 
     db.close()
     restricted = session.get('is_restricted', False)
+
+    # Group active shows by venue for column layout
+    _venue_map = {}
+    for s in active:
+        v = (s['venue'] or '').strip() or 'Unassigned'
+        _venue_map.setdefault(v, []).append(s)
+    _names = sorted([v for v in _venue_map if v != 'Unassigned'], key=str.lower)
+    if 'Unassigned' in _venue_map:
+        _names.append('Unassigned')
+    for v in _names:
+        _venue_map[v].sort(key=lambda s: (s['show_date'] is None, s['show_date'] or ''))
+    venue_groups = [(v, _venue_map[v]) for v in _names]
+
     return render_template('dashboard.html',
                            active_shows=active,
                            archived_shows=archived,
+                           venue_groups=venue_groups,
                            restricted=restricted,
                            user=get_current_user())
 
