@@ -799,8 +799,7 @@
   </div>
 </div>
 
-{# ── Schedule Meta Field Modal (admin / content_admin) ── #}
-{% if user.role == 'admin' or is_content_admin %}
+{# ── Schedule Meta Field Modal ── #}
 <div id="sched-field-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeSchedFieldModal()">
   <div class="modal-card" style="max-width:520px">
     <div class="modal-header">Schedule Field <button onclick="closeSchedFieldModal()" class="modal-close">×</button></div>
