@@ -273,7 +273,8 @@
           <div class="action-btns ml-auto">
             <button class="btn btn-xs btn-ghost" onclick="openSectionModal({{ section.id }})"
                     data-id="{{ section.id }}" data-label="{{ section.label }}"
-                    data-icon="{{ section.icon }}" data-collapsible="{{ '1' if section.collapsible else '0' }}">Edit</button>
+                    data-icon="{{ section.icon }}" data-collapsible="{{ '1' if section.collapsible else '0' }}"
+                    data-default-open="{{ '0' if section.default_open == 0 else '1' }}">Edit</button>
             <button class="btn btn-xs btn-danger-ghost" onclick="deleteSection({{ section.id }})">Delete</button>
           </div>
         </div>
@@ -790,6 +791,18 @@
             Collapsible section
           </label>
         </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">DEFAULT STATE</label>
+        <div style="display:flex;gap:16px;margin-top:4px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="radio" name="default_open" value="1" checked> Open by default
+          </label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:13px;cursor:pointer">
+            <input type="radio" name="default_open" value="0"> Closed by default
+          </label>
+        </div>
+        <p class="field-hint" style="margin-top:4px">Whether this section starts expanded or collapsed on first view. Users can override this per-session.</p>
       </div>
     </div>
     <div class="modal-footer">

@@ -2196,11 +2196,12 @@ def add_form_section():
     max_order = db.execute('SELECT MAX(sort_order) FROM form_sections').fetchone()[0] or 0
     try:
         cur = db.execute("""
-            INSERT INTO form_sections (section_key, label, sort_order, collapsible, icon)
-            VALUES (?,?,?,?,?)
+            INSERT INTO form_sections (section_key, label, sort_order, collapsible, icon, default_open)
+            VALUES (?,?,?,?,?,?)
         """, (section_key, label, max_order + 10,
               1 if data.get('collapsible', True) else 0,
-              data.get('icon', '◈')))
+              data.get('icon', '◈'),
+              0 if str(data.get('default_open', '1')) == '0' else 1))
         sid = cur.lastrowid
         db.commit()
         return jsonify({'success': True, 'id': sid})
@@ -2216,10 +2217,12 @@ def edit_form_section(sid):
     data = request.get_json(force=True) or {}
     db = get_db()
     db.execute("""
-        UPDATE form_sections SET label=?, collapsible=?, icon=? WHERE id=?
+        UPDATE form_sections SET label=?, collapsible=?, icon=?, default_open=? WHERE id=?
     """, (data.get('label',''),
           1 if data.get('collapsible', True) else 0,
-          data.get('icon','◈'), sid))
+          data.get('icon','◈'),
+          0 if str(data.get('default_open', '1')) == '0' else 1,
+          sid))
     db.commit(); db.close()
     return jsonify({'success': True})
 
