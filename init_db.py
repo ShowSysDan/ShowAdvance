@@ -259,12 +259,19 @@ SEED_CONTACTS = [
 
 # (section_key, label, sort_order, collapsible, icon)
 FORM_SECTIONS_SEED = [
-    ('show_info',       'SHOW INFORMATION',     1, 0, '◈'),
-    ('arrival_parking', 'ARRIVAL & PARKING',    2, 1, '◈'),
-    ('security',        'SECURITY',             3, 1, '◈'),
-    ('hospitality',     'HOSPITALITY',          4, 1, '◈'),
-    ('front_of_house',  'FRONT OF HOUSE',       5, 1, '◈'),
-    ('general_info',    'GENERAL INFORMATION',  6, 1, '◈'),
+    ('show_info',        'SHOW INFORMATION',         1,  0, '◈'),
+    ('arrival_parking',  'ARRIVAL & PARKING',        2,  1, '◈'),
+    ('security',         'SECURITY',                 3,  1, '◈'),
+    ('hospitality',      'HOSPITALITY',              4,  1, '◈'),
+    ('front_of_house',   'FRONT OF HOUSE',           5,  1, '◈'),
+    ('audio_section',    'AUDIO',                    6,  1, '◈'),
+    ('video_section',    'VIDEO / PROJECTION',       7,  1, '◈'),
+    ('backline_section', 'BACKLINE',                 8,  1, '◈'),
+    ('stage_props',      'STAGE & PROPS',            9,  1, '◈'),
+    ('wardrobe',         'WARDROBE',                 10, 1, '◈'),
+    ('special_elements', 'SPECIAL / OTHER ELEMENTS', 11, 1, '◈'),
+    ('labor_needs',      'LABOR NEEDS',              12, 1, '◈'),
+    ('general_info',     'GENERAL INFORMATION',      13, 1, '◈'),
 ]
 
 # (section_key, field_key, label, field_type, sort_order,
@@ -285,8 +292,10 @@ FORM_FIELDS_SEED = [
     ('show_info', 'hospitality_contact', 'HOSPITALITY',                'contact_dropdown', 110, None, 'Hospitality',   None, None, '',            'full',  0),
     ('show_info', 'guest_services',      'GUEST SERVICES',             'contact_dropdown', 120, None, 'Guest Services',None, None, '',            'full',  0),
     ('show_info', 'radio_channel',       'RADIO CHANNEL',              'text',             130, None, None, None, None, "e.g. 16/Judson's",       'half',  0),
-    ('show_info', 'runner',              'RUNNER',                     'contact_dropdown', 140, None, 'Runners',       None, None, '',            'half',  0),
     ('show_info', 'rental_works',        'RENTAL WORKS?',              'yes_no',           150, None, None, None, None, '',                       'half',  0),
+    ('show_info', 'rentalworks_order_num','RENTALWORKS ORDER #',       'text',             155, None, None, 'rental_works=Yes', None, 'Order number', 'half', 0),
+    ('show_info', 'mix_position',        'MIX POSITION',               'text',             158, None, None, None, None, 'e.g. FOH',               'half',  0),
+    ('show_info', 'show_length',         'SHOW LENGTH',                'text',             159, None, None, None, None, 'e.g. 1hr 45min',         'half',  0),
     ('show_info', 'budget_what',         'BUDGET / ESTIMATE — WHAT',   'text',             160, None, None, None, None, 'What',                   'half',  0),
     ('show_info', 'budget_amount',       'BUDGET / ESTIMATE — AMOUNT', 'text',             170, None, None, None, None, 'Amount',                 'half',  0),
 
@@ -295,14 +304,14 @@ FORM_FIELDS_SEED = [
     ('arrival_parking', 'loading_dock',                'LOADING DOCK — WHICH BAY(S)?',             'select',   20,
         json.dumps(['-', 'N/A', 'Bay 1', 'Bay 2', 'Bay 3', 'Bay 4', 'Bay 5', 'Bay 1+2', 'Bay 1+2+3', 'Other — See Notes']),
         None, None, None, '', 'half', 0),
-    ('arrival_parking', 'vehicle_dpc',                 'DPC Van (15-passenger)',                   'checkbox', 30,  None, None, None, None, '', 'full', 0),
-    ('arrival_parking', 'vehicle_dpc_truck',           'DPC Truck',                                'checkbox', 40,  None, None, None, None, '', 'full', 0),
-    ('arrival_parking', 'vehicle_rental',              'Rental Vehicle',                           'checkbox', 50,  None, None, None, None, '', 'full', 0),
-    ('arrival_parking', 'vehicle_other',               'Other',                                    'checkbox', 60,  None, None, None, None, '', 'full', 0),
-    ('arrival_parking', 'vehicle_notes',               'VEHICLE NOTES',                            'text',     70,  None, None, None, None, 'Vehicle notes...', 'full', 0),
+    ('arrival_parking', 'vehicle_type',                'VEHICLE TYPE',                             'select',   30,
+        json.dumps(['-', 'DPC Van (15-passenger)', 'DPC Truck', 'Rental Vehicle', 'Other']),
+        None, None, None, '', 'half', 0),
+    ('arrival_parking', 'vehicle_notes',               'VEHICLE NOTES',                            'text',     35,  None, None, 'vehicle_type=Other', None, 'Describe vehicle...', 'half', 0),
     ('arrival_parking', 'runner_needed',               'RUNNER NEEDED?',                           'yes_no',   80,  None, None, None, None, '', 'third', 0),
     ('arrival_parking', 'rental_car_needed',           'RENTAL CAR NEEDED?',                       'yes_no',   90,  None, None, None, None, '', 'third', 0),
     ('arrival_parking', 'rental_drop_offs',            'RENTAL DROP-OFFS?',                        'yes_no',   100, None, None, None, None, '', 'third', 0),
+    ('arrival_parking', 'runner_contact',              'RUNNER',                                   'contact_dropdown', 105, None, 'Runners', 'runner_needed=Yes', None, '', 'half', 0),
     ('arrival_parking', 'runner_time',                 'RUNNER PICKUP TIME',                       'text',     110, None, None, 'runner_needed=Yes', None, 'e.g. 2:00pm', 'half', 0),
     ('arrival_parking', 'runner_vehicle',              'RUNNER VEHICLE',                           'select',   120,
         json.dumps(['-', 'DPC Van', 'DPC Truck', 'Rental Vehicle', 'Other']),
@@ -339,6 +348,61 @@ FORM_FIELDS_SEED = [
     ('front_of_house', 'foh_activations_details','DETAILS',                  'textarea', 30, None, None, 'foh_activations=Yes', None, '', 'full', 0),
     ('front_of_house', 'foh_notes',              'FRONT-OF-HOUSE NOTES',     'textarea', 40, None, None, None, None, 'FOH notes...', 'full', 1),
 
+    # ── Audio ─────────────────────────────────────────────────────────────────
+    ('audio_section', 'audio_foh_engineer',   'FOH ENGINEER?',         'yes_no',   10, None, None, None, None, '',               'half', 0),
+    ('audio_section', 'audio_microphones',    'MICROPHONES',           'select',   20,
+        json.dumps(['-', 'Venue Provided', 'Tour Provided', 'N/A']),
+        None, None, None, '', 'half', 0),
+    ('audio_section', 'audio_mic_count',      'MIC COUNT',             'number',   30, None, None, None, None, '0',              'third', 0),
+    ('audio_section', 'audio_mic_types',      'MIC TYPES',             'text',     40, None, None, None, None, 'e.g. SM58, DI',  'full',  0),
+    ('audio_section', 'audio_monitors',       'MONITORS',              'select',   50,
+        json.dumps(['-', 'Venue Provided', 'Tour Provided', 'In-Ears', 'N/A']),
+        None, None, None, '', 'half', 0),
+    ('audio_section', 'audio_inears',         'IN-EARS?',              'yes_no',   60, None, None, None, None, '',               'half', 0),
+    ('audio_section', 'audio_playback',       'PLAYBACK?',             'yes_no',   70, None, None, None, None, '',               'half', 0),
+    ('audio_section', 'audio_recording',      'RECORDING?',            'yes_no',   80, None, None, None, None, '',               'half', 0),
+    ('audio_section', 'audio_notes',          'AUDIO NOTES',           'textarea', 90, None, None, None, None, 'Audio notes...', 'full', 1),
+
+    # ── Video / Projection ───────────────────────────────────────────────────
+    ('video_section', 'video_projector_needed', 'PROJECTOR / VIDEO NEEDED?', 'yes_no',   10, None, None, None, None, '', 'half', 0),
+    ('video_section', 'video_notes',            'VIDEO NOTES',               'textarea', 20, None, None, None, None, 'Video/projection notes...', 'full', 1),
+
+    # ── Backline ─────────────────────────────────────────────────────────────
+    ('backline_section', 'backline_piano',         'PIANO?',                    'yes_no',   10, None, None, None, None, '', 'half', 0),
+    ('backline_section', 'backline_piano_notes',   'PIANO DETAILS',             'text',     20, None, None, 'backline_piano=Yes', None, 'Type, tuning...', 'half', 0),
+    ('backline_section', 'backline_tuning',        'PIANO TUNING NEEDED?',      'yes_no',   30, None, None, 'backline_piano=Yes', None, '', 'half', 0),
+    ('backline_section', 'backline_tuning_time',   'TUNING TIME',               'text',     40, None, None, 'backline_tuning=Yes', None, 'e.g. 4:00pm', 'half', 0),
+    ('backline_section', 'backline_own_gear',      'TOUR BRINGS OWN GEAR?',     'yes_no',   50, None, None, None, None, '', 'half', 0),
+    ('backline_section', 'backline_own_gear_list', 'GEAR LIST',                 'textarea', 60, None, None, 'backline_own_gear=Yes', None, 'List tour gear...', 'full', 0),
+    ('backline_section', 'backline_rental_needed', 'RENTAL GEAR NEEDED?',       'yes_no',   70, None, None, None, None, '', 'half', 0),
+    ('backline_section', 'backline_notes',         'BACKLINE NOTES',            'textarea', 80, None, None, None, None, 'Backline notes...', 'full', 1),
+
+    # ── Stage & Props ─────────────────────────────────────────────────────────
+    ('stage_props', 'stage_plot',              'STAGE PLOT?',               'yes_no',   10, None, None, None, None, '', 'half', 0),
+    ('stage_props', 'music_stands',            'MUSIC STANDS?',             'yes_no',   20, None, None, None, None, '', 'half', 0),
+    ('stage_props', 'musician_chairs',         'MUSICIAN CHAIRS?',          'yes_no',   30, None, None, None, None, '', 'half', 0),
+    ('stage_props', 'other_equipment',         'OTHER EQUIPMENT?',          'yes_no',   40, None, None, None, None, '', 'half', 0),
+    ('stage_props', 'other_equipment_list',    'EQUIPMENT LIST',            'textarea', 50, None, None, 'other_equipment=Yes', None, 'List required equipment...', 'full', 0),
+    ('stage_props', 'stage_notes',             'STAGE & PROPS NOTES',       'textarea', 60, None, None, None, None, 'Stage notes...', 'full', 1),
+
+    # ── Wardrobe ─────────────────────────────────────────────────────────────
+    ('wardrobe', 'wardrobe_dressing_room', 'DRESSING ROOM NEEDED?',     'yes_no',   10, None, None, None, None, '', 'third', 0),
+    ('wardrobe', 'wardrobe_equipment',     'WARDROBE EQUIPMENT?',        'yes_no',   20, None, None, None, None, '', 'third', 0),
+    ('wardrobe', 'wardrobe_towels',        'TOWELS NEEDED?',             'yes_no',   30, None, None, None, None, '', 'third', 0),
+    ('wardrobe', 'wardrobe_notes',         'WARDROBE NOTES',             'textarea', 40, None, None, None, None, 'Wardrobe notes...', 'full', 1),
+
+    # ── Special / Other Elements ──────────────────────────────────────────────
+    ('special_elements', 'special_elements_desc', 'SPECIAL ELEMENTS',      'textarea', 10, None, None, None, None, 'Describe any special requirements, effects, or elements...', 'full', 0),
+    ('special_elements', 'haze_fog_needed',        'HAZE / FOG NEEDED?',    'yes_no',   20, None, None, None, None, '', 'half', 0),
+    ('special_elements', 'special_notes',          'SPECIAL NOTES',         'textarea', 30, None, None, None, None, 'Additional special notes...', 'full', 1),
+
+    # ── Labor Needs ───────────────────────────────────────────────────────────
+    ('labor_needs', 'labor_load_in',          'LOAD-IN LABOR?',            'yes_no',   10, None, None, None, None, '', 'third', 0),
+    ('labor_needs', 'labor_show_call',        'SHOW CALL LABOR?',          'yes_no',   20, None, None, None, None, '', 'third', 0),
+    ('labor_needs', 'labor_load_out',         'LOAD-OUT LABOR?',           'yes_no',   30, None, None, None, None, '', 'third', 0),
+    ('labor_needs', 'labor_estimate_needed',  'ESTIMATE NEEDED?',          'yes_no',   40, None, None, None, None, '', 'half', 0),
+    ('labor_needs', 'labor_notes',            'LABOR NOTES',               'textarea', 50, None, None, None, None, 'Labor requirements...', 'full', 1),
+
     # ── General Information ───────────────────────────────────────────────────
     ('general_info', 'load_in_needed',  'LOAD-IN TIME NEEDED?', 'yes_no',   10, None, None, None, None, '', 'full', 0),
     ('general_info', 'load_in_details', 'DETAILS',              'textarea', 20, None, None, 'load_in_needed=Yes', None, '', 'full', 0),
@@ -347,12 +411,22 @@ FORM_FIELDS_SEED = [
 
 APP_SETTINGS_SEED = [
     # Server
-    ('app_port',        '5400'),
+    ('app_port',              '5400'),
     # Syslog
-    ('syslog_enabled',  '0'),
-    ('syslog_host',     '127.0.0.1'),
-    ('syslog_port',     '514'),
-    ('syslog_facility', 'LOG_LOCAL0'),
+    ('syslog_enabled',        '0'),
+    ('syslog_host',           '127.0.0.1'),
+    ('syslog_port',           '514'),
+    ('syslog_facility',       'LOG_LOCAL0'),
+    # Venue / Channel lists (JSON arrays)
+    ('venue_list',            json.dumps(["Judson's Live", "Walt Disney Theater", "Alexis & Jim Pugh Theater", "Dr. Phillips CenterStage"])),
+    ('radio_channel_list',    json.dumps(["16/Judson's", "17/Walt Disney", "18/Alexis", "19/CenterStage"])),
+    # WiFi defaults
+    ('wifi_network',          ''),
+    ('wifi_password',         ''),
+    # Upload limit
+    ('upload_max_mb',         '20'),
+    # Logo (base64 encoded image data, empty = no logo)
+    ('logo_data',             ''),
 ]
 
 
@@ -403,6 +477,57 @@ def _seed_app_settings(conn):
         conn.execute(
             'INSERT OR IGNORE INTO app_settings (key, value) VALUES (?, ?)',
             (key, value)
+        )
+
+
+def _migrate_form_data(conn):
+    """Add any missing form sections and fields from the current seed data."""
+    # Build a map of existing section keys
+    existing_sections = {r[0]: r[1] for r in conn.execute(
+        'SELECT section_key, id FROM form_sections'
+    ).fetchall()}
+
+    # Add missing sections
+    for (section_key, label, sort_order, collapsible, icon) in FORM_SECTIONS_SEED:
+        if section_key not in existing_sections:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO form_sections
+                   (section_key, label, sort_order, collapsible, icon)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (section_key, label, sort_order, collapsible, icon)
+            )
+            if cur.lastrowid:
+                existing_sections[section_key] = cur.lastrowid
+
+    # Rebuild section map after inserts
+    existing_sections = {r[0]: r[1] for r in conn.execute(
+        'SELECT section_key, id FROM form_sections'
+    ).fetchall()}
+
+    # Build set of existing field keys
+    existing_fields = {r[0] for r in conn.execute(
+        'SELECT field_key FROM form_fields'
+    ).fetchall()}
+
+    # Add missing fields
+    for row in FORM_FIELDS_SEED:
+        (section_key, field_key, label, field_type, sort_order,
+         options_json, contact_dept, conditional_show_when,
+         help_text, placeholder, width_hint, is_notes_field) = row
+        if field_key in existing_fields:
+            continue
+        sid = existing_sections.get(section_key)
+        if not sid:
+            continue
+        conn.execute(
+            """INSERT OR IGNORE INTO form_fields
+               (section_id, field_key, label, field_type, sort_order,
+                options_json, contact_dept, conditional_show_when,
+                help_text, placeholder, width_hint, is_notes_field)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (sid, field_key, label, field_type, sort_order,
+             options_json, contact_dept, conditional_show_when,
+             help_text, placeholder, width_hint, is_notes_field)
         )
 
 
@@ -519,6 +644,9 @@ def migrate_db():
         'ALTER TABLE shows ADD COLUMN last_saved_by INTEGER REFERENCES users(id)',
         'ALTER TABLE shows ADD COLUMN last_saved_at TIMESTAMP',
         "ALTER TABLE users ADD COLUMN theme TEXT DEFAULT 'dark'",
+        'ALTER TABLE users ADD COLUMN last_login TIMESTAMP',
+        'ALTER TABLE export_log ADD COLUMN pdf_data BLOB',
+        "ALTER TABLE export_log ADD COLUMN filename TEXT DEFAULT ''",
     ]:
         try:
             conn.execute(alter_sql)
@@ -528,6 +656,9 @@ def migrate_db():
     # Seed form data and settings if empty
     _seed_form_data(conn)
     _seed_app_settings(conn)
+
+    # Add missing form sections (safe to run even if some already exist)
+    _migrate_form_data(conn)
 
     conn.commit()
     conn.close()

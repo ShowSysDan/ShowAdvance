@@ -24,6 +24,8 @@
   {% if user.role == 'admin' %}
   <button class="tab-btn" onclick="switchSettingsTab('syslog')">Syslog</button>
   <button class="tab-btn" onclick="switchSettingsTab('backups')">Backups</button>
+  <button class="tab-btn" onclick="switchSettingsTab('files')">Files</button>
+  <button class="tab-btn" onclick="switchSettingsTab('godmode')">God Mode</button>
   {% endif %}
   <button class="tab-btn" onclick="switchSettingsTab('account')">My Account</button>
 </div>
@@ -341,6 +343,85 @@
     </div>
   </div>
 
+  {# Venue / Radio / WiFi / Logo / Upload settings #}
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> VENUE & CHANNEL LISTS</div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">One item per line. Used as dropdown options in the advance form.</p>
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">VENUES (one per line)</label>
+          <textarea id="venue-list-input" class="field-input field-textarea" rows="5"
+            placeholder="Judson's Live&#10;Walt Disney Theater">{{ venue_list | join('\n') }}</textarea>
+          <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="saveVenueList()">Save Venues</button>
+          <span id="venue-save-msg" class="field-msg" style="margin-left:8px"></span>
+        </div>
+        <div class="field-group">
+          <label class="field-label">RADIO CHANNELS (one per line)</label>
+          <textarea id="radio-list-input" class="field-input field-textarea" rows="5"
+            placeholder="16/Judson's&#10;17/Walt Disney">{{ radio_channel_list | join('\n') }}</textarea>
+          <button class="btn btn-primary btn-sm" style="margin-top:8px" onclick="saveRadioList()">Save Channels</button>
+          <span id="radio-save-msg" class="field-msg" style="margin-left:8px"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> WIFI DEFAULTS</div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">Default WiFi info used in schedule PDFs when not overridden per-show. A QR code will be generated automatically.</p>
+      <form onsubmit="event.preventDefault(); saveWifiSettings(this)" style="max-width:400px">
+        <div class="field-group">
+          <label class="field-label">WIFI NETWORK NAME</label>
+          <input type="text" name="wifi_network" class="field-input" value="{{ wifi_network }}" placeholder="NetworkName">
+        </div>
+        <div class="field-group">
+          <label class="field-label">WIFI PASSWORD</label>
+          <input type="text" name="wifi_password" class="field-input" value="{{ wifi_password }}" placeholder="Password">
+        </div>
+        <div class="wifi-save-msg field-msg"></div>
+        <button type="submit" class="btn btn-primary">Save WiFi Settings</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> ORGANIZATION LOGO</div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">Logo shown in PDF headers. Max 2 MB (PNG/JPG/SVG).</p>
+      {% if logo_data %}
+      <div style="margin-bottom:12px">
+        <img src="{{ logo_data }}" alt="Logo" style="max-height:60px;max-width:200px;border:1px solid var(--border);border-radius:4px;padding:4px">
+        <button class="btn btn-xs btn-danger-ghost" style="margin-left:8px" onclick="deleteLogo()">Remove</button>
+      </div>
+      {% endif %}
+      <form onsubmit="event.preventDefault(); uploadLogo(this)" enctype="multipart/form-data">
+        <div class="field-group">
+          <label class="field-label">UPLOAD NEW LOGO</label>
+          <input type="file" name="logo" class="field-input" accept="image/*">
+        </div>
+        <div class="logo-save-msg field-msg"></div>
+        <button type="submit" class="btn btn-primary">Upload Logo</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> UPLOAD SIZE LIMIT</div>
+    <div class="form-section-body">
+      <form onsubmit="event.preventDefault(); saveUploadSize(this)" style="max-width:250px">
+        <div class="field-group">
+          <label class="field-label">MAX UPLOAD SIZE (MB)</label>
+          <input type="number" name="upload_max_mb" class="field-input"
+                 value="{{ upload_max_mb }}" min="1" max="500" placeholder="20">
+        </div>
+        <div class="upload-size-msg field-msg"></div>
+        <button type="submit" class="btn btn-primary">Save</button>
+      </form>
+    </div>
+  </div>
+
   <div class="form-section">
     <div class="form-section-header"><span class="section-icon">◈</span> SYSLOG SETTINGS</div>
     <div class="form-section-body">
@@ -426,6 +507,47 @@
   </div>
 </div>
 {% endif %}{# end admin-only tabs #}
+
+{# ── FILES (admin only) ───────────────────────────────────────────────────── #}
+{% if user.role == 'admin' %}
+<div id="stab-files" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> FILE MANAGER
+      <span id="files-storage-info" class="text-dim ml-auto" style="font-size:11px"></span>
+    </div>
+    <div class="form-section-body no-pad">
+      <div id="global-file-list">
+        <p class="text-dim" style="padding:16px;font-size:12px">Loading...</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ── GOD MODE (admin only) ────────────────────────────────────────────────── #}
+<div id="stab-godmode" class="stab-pane" style="display:none">
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> ACTIVE SESSIONS
+      <button class="btn btn-sm btn-ghost ml-auto" onclick="loadGodMode()">Refresh</button>
+    </div>
+    <div class="form-section-body no-pad">
+      <div id="god-sessions-list">
+        <p class="text-dim" style="padding:16px;font-size:12px">Loading...</p>
+      </div>
+    </div>
+  </div>
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> USER LAST LOGIN</div>
+    <div class="form-section-body no-pad">
+      <table class="data-table" id="god-users-table">
+        <thead><tr><th>USER</th><th>USERNAME</th><th>ROLE</th><th>LAST LOGIN</th></tr></thead>
+        <tbody><tr><td colspan="4" class="text-dim" style="padding:16px;font-size:12px">Loading...</td></tr></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {# ── MY ACCOUNT ────────────────────────────────────────────────────────────── #}
 <div id="stab-account" class="stab-pane" style="display:none">
@@ -640,7 +762,7 @@
 {% block scripts %}
 <script>
 /* ── Settings Tab Switcher ─────────────────────────────────────── */
-const ALL_STABS = ['contacts','users','groups','fields','syslog','backups','account'];
+const ALL_STABS = ['contacts','users','groups','fields','syslog','backups','account','files','godmode'];
 
 function switchSettingsTab(name) {
   ALL_STABS.forEach(t => {
@@ -651,6 +773,8 @@ function switchSettingsTab(name) {
     b.classList.toggle('active', b.getAttribute('onclick') === `switchSettingsTab('${name}')`);
   });
   history.replaceState({}, '', '#' + name);
+  if (name === 'godmode') loadGodMode();
+  if (name === 'files') loadFileManager();
   if (name === 'backups') loadBackupStatus();
 }
 
@@ -783,15 +907,162 @@ async function loadShowOptions() {
   } catch(e) {}
 }
 
+/* ── Venue / Radio / WiFi / Logo / Upload ──────────────────────── */
+
+async function saveVenueList() {
+  const raw = document.getElementById('venue-list-input').value;
+  const list = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  const msg = document.getElementById('venue-save-msg');
+  const resp = await fetch('/settings/venues', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({venue_list: list})
+  });
+  const d = await resp.json();
+  msg.textContent = d.success ? '✓ Saved' : (d.error || 'Error');
+  msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)';
+}
+
+async function saveRadioList() {
+  const raw = document.getElementById('radio-list-input').value;
+  const list = raw.split('\n').map(s => s.trim()).filter(Boolean);
+  const msg = document.getElementById('radio-save-msg');
+  const resp = await fetch('/settings/radio-channels', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({channel_list: list})
+  });
+  const d = await resp.json();
+  msg.textContent = d.success ? '✓ Saved' : (d.error || 'Error');
+  msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)';
+}
+
+async function saveWifiSettings(form) {
+  const fd = new FormData(form);
+  const msg = form.querySelector('.wifi-save-msg');
+  const resp = await fetch('/settings/wifi', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({wifi_network: fd.get('wifi_network'), wifi_password: fd.get('wifi_password')})
+  });
+  const d = await resp.json();
+  if (msg) { msg.textContent = d.success ? '✓ Saved' : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
+}
+
+async function uploadLogo(form) {
+  const fd = new FormData(form);
+  const msg = form.querySelector('.logo-save-msg');
+  const resp = await fetch('/settings/logo', {method:'POST', body: fd});
+  const d = await resp.json();
+  if (msg) { msg.textContent = d.success ? '✓ Logo saved — reload to see.' : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
+  if (d.success) setTimeout(() => location.reload(), 1200);
+}
+
+async function deleteLogo() {
+  if (!confirm('Remove the logo?')) return;
+  const resp = await fetch('/settings/logo/delete', {method:'POST'});
+  const d = await resp.json();
+  if (d.success) location.reload();
+}
+
+async function saveUploadSize(form) {
+  const fd = new FormData(form);
+  const msg = form.querySelector('.upload-size-msg');
+  const resp = await fetch('/settings/upload-size', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({upload_max_mb: parseInt(fd.get('upload_max_mb'))})
+  });
+  const d = await resp.json();
+  if (msg) { msg.textContent = d.success ? `✓ Max set to ${d.upload_max_mb} MB` : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
+}
+
+/* ── God Mode ───────────────────────────────────────────────────── */
+async function loadGodMode() {
+  try {
+    const resp = await fetch('/api/admin/god-mode');
+    const data = await resp.json();
+
+    // Sessions
+    const sessEl = document.getElementById('god-sessions-list');
+    if (sessEl) {
+      if (!data.sessions.length) {
+        sessEl.innerHTML = '<p class="text-dim" style="padding:16px;font-size:12px">No active sessions in the last 5 minutes.</p>';
+      } else {
+        sessEl.innerHTML = `<table class="data-table"><thead><tr><th>USER</th><th>SHOW</th><th>TAB</th><th>LAST SEEN</th></tr></thead><tbody>` +
+          data.sessions.map(s => `<tr>
+            <td>${s.user}</td>
+            <td><a href="/shows/${s.show_id}" style="color:var(--accent)">${s.show}</a></td>
+            <td><span class="field-type-badge">${s.tab}</span></td>
+            <td class="text-dim" style="font-size:11px">${s.last_seen ? s.last_seen.substring(0,16).replace('T',' ') : '—'}</td>
+          </tr>`).join('') +
+          '</tbody></table>';
+      }
+    }
+
+    // Users
+    const tbody = document.querySelector('#god-users-table tbody');
+    if (tbody && data.users) {
+      tbody.innerHTML = data.users.map(u => `<tr>
+        <td>${u.name}</td>
+        <td class="mono text-sm">${u.username}</td>
+        <td><span class="role-badge role-${u.role}">${u.role.toUpperCase()}</span></td>
+        <td class="text-dim" style="font-size:11px">${u.last_login === '—' ? '—' : u.last_login.substring(0,16).replace('T',' ')}</td>
+      </tr>`).join('');
+    }
+  } catch(e) {
+    const el = document.getElementById('god-sessions-list');
+    if (el) el.innerHTML = '<p class="text-dim" style="padding:16px;font-size:12px">Failed to load data.</p>';
+  }
+}
+
+/* ── File Manager ───────────────────────────────────────────────── */
+function _fmtBytes(b) {
+  if (b > 1048576) return (b/1048576).toFixed(1) + ' MB';
+  if (b > 1024)    return Math.round(b/1024) + ' KB';
+  return b + ' B';
+}
+
+async function loadFileManager() {
+  const el = document.getElementById('global-file-list');
+  const infoEl = document.getElementById('files-storage-info');
+  if (!el) return;
+  try {
+    const resp = await fetch('/api/admin/files');
+    const data = await resp.json();
+    if (infoEl) infoEl.textContent = `Total: ${_fmtBytes(data.total_bytes)} across ${data.files.length} files`;
+    if (!data.files.length) {
+      el.innerHTML = '<p class="text-dim" style="padding:16px;font-size:12px">No attachments found.</p>';
+      return;
+    }
+    el.innerHTML = `<table class="data-table"><thead><tr><th>SHOW</th><th>FILE</th><th>SIZE</th><th>UPLOADED BY</th><th>DATE</th><th></th></tr></thead><tbody>` +
+      data.files.map(f => `<tr>
+        <td style="font-size:11px"><a href="/shows/${f.show_id}" style="color:var(--accent)">${f.show_name}</a></td>
+        <td style="font-size:11px"><a href="/shows/${f.show_id}/attachments/${f.id}/download">${f.filename}</a></td>
+        <td style="font-size:11px" class="text-dim">${_fmtBytes(f.file_size)}</td>
+        <td style="font-size:11px">${f.uploader}</td>
+        <td style="font-size:11px" class="text-dim">${f.created_at ? f.created_at.substring(0,16).replace('T',' ') : ''}</td>
+        <td><button class="btn btn-xs btn-danger-ghost" onclick="adminDeleteFile(${f.show_id},${f.id},this)">×</button></td>
+      </tr>`).join('') +
+      '</tbody></table>';
+  } catch(e) {
+    el.innerHTML = '<p class="text-dim" style="padding:16px;font-size:12px">Failed to load files.</p>';
+  }
+}
+
+async function adminDeleteFile(showId, fileId, btn) {
+  if (!confirm('Delete this file?')) return;
+  const resp = await fetch(`/shows/${showId}/attachments/${fileId}/delete`, {method:'POST'});
+  const d = await resp.json();
+  if (d.success) btn.closest('tr').remove();
+  else alert(d.error || 'Delete failed.');
+}
+
 /* ── Form Field Editor init ─────────────────────────────────────── */
-document.addEventListener('DOMContentLoaded', () => {
+(function() {
   initFieldDrag();
   loadShowOptions();
   // Activate tab from URL hash or server-side default
   const hash = location.hash.replace('#','');
-  const validTabs = ['contacts','users','groups','fields','syslog','backups','account'];
+  const validTabs = ['contacts','users','groups','fields','syslog','backups','account','files','godmode'];
   const defaultTab = {{ '"contacts"' if (user.role == 'admin' or is_content_admin) else '"users"' }};
   switchSettingsTab(validTabs.includes(hash) ? hash : {% if active_tab %}'{{ active_tab }}'{% else %}defaultTab{% endif %});
-});
+})();
 </script>
 {% endblock %}

@@ -192,6 +192,13 @@ function switchTab(name) {
   document.querySelectorAll('.tab-btn').forEach(b => {
     if (b.getAttribute('onclick') === `switchTab('${name}')`) b.classList.add('active');
   });
+  // Sync left-nav sub-items
+  document.querySelectorAll('.nav-item.sub').forEach(a => {
+    try {
+      const p = new URL(a.href).searchParams.get('tab');
+      a.classList.toggle('active', p === name);
+    } catch(_) {}
+  });
   const url = new URL(window.location);
   url.searchParams.set('tab', name);
   history.replaceState({}, '', url);
@@ -216,6 +223,7 @@ function initShow(showId, initialTab) {
   bindPostNotesForm();
   initComments();
   evaluateAllConditionals();
+  _bindScheduleTimeParsing();
 
   // 30-second safety-net: flush any unsaved changes that the debounce
   // may have missed (e.g. browser regained focus, slow typing bursts).
@@ -1149,29 +1157,50 @@ function handleFileDragLeave(e) {
   e.currentTarget.classList.remove('drag-over');
 }
 
-async function uploadFile(file) {
-  if (file.size > 20 * 1024 * 1024) {
-    alert('File too large (max 20 MB).');
-    return;
-  }
+function uploadFile(file) {
   const zone = document.getElementById('upload-zone');
-  if (zone) zone.classList.add('uploading');
+  const progressWrap = document.getElementById('upload-progress-wrap');
+  const progressBar  = document.getElementById('upload-progress-bar');
+  const progressLabel = document.getElementById('upload-progress-label');
+
   const formData = new FormData();
   formData.append('file', file);
-  try {
-    const resp = await fetch(`/shows/${SHOW_ID}/attachments`, {method:'POST', body: formData});
-    const d = await resp.json();
-    if (d.success) {
-      await loadAttachments();
-      showSaveToast('✓ File attached');
-    } else {
-      alert(d.error || 'Upload failed.');
+
+  if (zone) zone.classList.add('uploading');
+  if (progressWrap) progressWrap.style.display = '';
+  if (progressBar)  progressBar.style.width = '0%';
+  if (progressLabel) progressLabel.textContent = '0%';
+
+  const xhr = new XMLHttpRequest();
+  xhr.upload.addEventListener('progress', e => {
+    if (e.lengthComputable && progressBar && progressLabel) {
+      const pct = Math.round(e.loaded / e.total * 100);
+      progressBar.style.width = pct + '%';
+      progressLabel.textContent = pct + '%';
     }
-  } catch(_) {
-    alert('Network error during upload.');
-  } finally {
+  });
+  xhr.addEventListener('load', () => {
     if (zone) zone.classList.remove('uploading');
-  }
+    if (progressWrap) progressWrap.style.display = 'none';
+    try {
+      const d = JSON.parse(xhr.responseText);
+      if (d.success) {
+        loadAttachments();
+        showSaveToast('✓ File attached');
+      } else {
+        alert(d.error || 'Upload failed.');
+      }
+    } catch(_) {
+      alert('Upload failed.');
+    }
+  });
+  xhr.addEventListener('error', () => {
+    if (zone) zone.classList.remove('uploading');
+    if (progressWrap) progressWrap.style.display = 'none';
+    alert('Network error during upload.');
+  });
+  xhr.open('POST', `/shows/${SHOW_ID}/attachments`);
+  xhr.send(formData);
 }
 
 async function deleteAttachment(aid) {
@@ -1180,6 +1209,85 @@ async function deleteAttachment(aid) {
   const d = await resp.json();
   if (d.success) loadAttachments();
   else alert(d.error || 'Delete failed.');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TIME PARSING
+═══════════════════════════════════════════════════════════════ */
+
+/**
+ * parseTimeToHHMM(str) — normalise various time formats to "HH:MM" (24hr).
+ * Accepts: "4pm", "4 PM", "4P.M.", "1600", "16:00", "4:00 PM", "4:00pm", "4"
+ * Returns: "HH:MM" string, or the original string if unparseable.
+ */
+function parseTimeToHHMM(str) {
+  if (!str || !str.toString().trim()) return str;
+  let s = str.toString().trim();
+
+  // Remove dots from AM/PM indicators (e.g. "4P.M." → "4PM")
+  s = s.replace(/\b([AaPp])\.([Mm])\./g, '$1$2');
+
+  // Extract AM/PM suffix
+  const ampmMatch = s.match(/([AaPp][Mm])\s*$/);
+  const ampm = ampmMatch ? ampmMatch[1].toUpperCase() : null;
+  if (ampm) s = s.slice(0, s.length - ampmMatch[0].length).trim();
+
+  // Parse HH:MM or HHMM or H
+  let hours, minutes;
+  const colonMatch = s.match(/^(\d{1,2}):(\d{2})$/);
+  const compactMatch = s.match(/^(\d{3,4})$/);
+  const simpleMatch = s.match(/^(\d{1,2})$/);
+
+  if (colonMatch) {
+    hours = parseInt(colonMatch[1]);
+    minutes = parseInt(colonMatch[2]);
+  } else if (compactMatch) {
+    const n = compactMatch[1];
+    if (n.length <= 2) {
+      hours = parseInt(n);
+      minutes = 0;
+    } else {
+      hours = parseInt(n.slice(0, n.length - 2));
+      minutes = parseInt(n.slice(-2));
+    }
+  } else if (simpleMatch) {
+    hours = parseInt(simpleMatch[1]);
+    minutes = 0;
+  } else {
+    return str; // unparseable
+  }
+
+  if (isNaN(hours) || isNaN(minutes)) return str;
+
+  // Apply AM/PM
+  if (ampm === 'AM') {
+    if (hours === 12) hours = 0;
+  } else if (ampm === 'PM') {
+    if (hours !== 12) hours += 12;
+  }
+
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return str;
+  return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+}
+
+// Bind time normalisation to schedule table time cells on blur
+function _bindScheduleTimeParsing() {
+  const table = document.getElementById('schedule-table');
+  if (!table) return;
+  table.addEventListener('blur', function(e) {
+    const td = e.target.closest('td');
+    if (!td) return;
+    const tr = td.closest('tr');
+    if (!tr) return;
+    const cells = tr.querySelectorAll('.sched-cell');
+    if (e.target === cells[0] || e.target === cells[1]) {
+      const parsed = parseTimeToHHMM(e.target.value);
+      if (parsed !== e.target.value) {
+        e.target.value = parsed;
+        e.target.dispatchEvent(new Event('input', {bubbles: true}));
+      }
+    }
+  }, true);
 }
 
 /* ═══════════════════════════════════════════════════════════════

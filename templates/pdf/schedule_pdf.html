@@ -52,9 +52,14 @@
 
 <!-- Header -->
 <div class="doc-header">
-  <div>
-    <div class="doc-title">DPC <span>PRODUCTION</span> SCHEDULE</div>
-    <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+  <div style="display:flex;align-items:center;gap:12px">
+    {% if logo_data %}
+    <img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">
+    {% endif %}
+    <div>
+      <div class="doc-title">DPC <span>PRODUCTION</span> SCHEDULE</div>
+      <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+    </div>
   </div>
   <div class="doc-meta">
     <div class="version">v{{ version }}</div>
@@ -66,7 +71,7 @@
 </div>
 
 <!-- Info Bar -->
-<div class="info-bar">
+<div class="info-bar" style="grid-template-columns: {% if wifi_qr_b64 %}repeat(4,1fr) 60px{% else %}repeat(5,1fr){% endif %}">
   <div class="info-item">
     <div class="lbl">Venue</div>
     <div class="val">{{ show.venue or '—' }}</div>
@@ -80,13 +85,18 @@
     <div class="val">{{ m('wifi_code') or '—' }}</div>
   </div>
   <div class="info-item">
-    <div class="lbl">Radio Channel</div>
-    <div class="val">{{ m('radio_channel') or '—' }}</div>
+    <div class="lbl">Radio</div>
+    <div class="val">{{ adv('radio_channel') or m('radio_channel') or '—' }}</div>
   </div>
   <div class="info-item">
-    <div class="lbl">Mix Position</div>
-    <div class="val">{{ m('mix_position') or 'FOH' }}</div>
+    <div class="lbl">Mix</div>
+    <div class="val">{{ adv('mix_position') or m('mix_position') or '—' }}</div>
   </div>
+  {% if wifi_qr_b64 %}
+  <div class="info-item" style="text-align:center">
+    <img src="data:image/png;base64,{{ wifi_qr_b64 }}" alt="WiFi QR" style="width:52px;height:52px">
+  </div>
+  {% endif %}
 </div>
 
 {% if m('parking_security') %}
@@ -134,16 +144,16 @@
   <div class="contacts-box">
     <div class="contacts-box-head">DPC Contacts</div>
     <table class="contacts-table">
-      {% for role, key, source in [
-        ('Production Manager', 'production_manager', 'advance'),
-        ('Programming', 'contact_programming', 'schedule'),
-        ('Event Manager', 'contact_event_manager', 'schedule'),
-        ('Hospitality', 'hospitality_contact', 'advance'),
-        ('Guest Services', 'contact_guest_services', 'schedule'),
-        ('Runner', 'contact_runner', 'schedule'),
-        ('Security', 'security_email', 'schedule'),
+      {% for role, key in [
+        ('Production Manager', 'production_manager'),
+        ('Hospitality',        'hospitality_contact'),
+        ('Programming',        'programming'),
+        ('Event Manager',      'events'),
+        ('Education',          'education_contact'),
+        ('Guest Services',     'guest_services'),
+        ('Runner',             'runner_contact'),
       ] %}
-      {% set val = adv(key) if source == 'advance' else m(key) %}
+      {% set val = adv(key) %}
       {% if val and val not in ['-',''] %}
       <tr>
         <td class="lbl">{{ role }}</td>
@@ -151,6 +161,10 @@
       </tr>
       {% endif %}
       {% endfor %}
+      {% set sec = m('security_email') %}
+      {% if sec and sec not in ['-',''] %}
+      <tr><td class="lbl">Security</td><td>{{ sec }}</td></tr>
+      {% endif %}
     </table>
   </div>
 </div>

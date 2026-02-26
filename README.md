@@ -1,27 +1,55 @@
-# ShowAdvance
+# ShowAdvance — Production Management System
 
-Production advance sheet and scheduling management for live events and performing arts venues.
-
----
-
-## What It Does
-
-ShowAdvance replaces Excel-based production advance workflows with a web app that multiple staff members can use simultaneously. Every show gets a structured advance form, a production schedule, and versioned PDF exports — all in one place.
+ShowAdvance is a web-based production advance and day-of-show management tool built for Dr. Phillips Center for the Performing Arts (DPC). It provides a central place to fill out advance forms, build production schedules, record post-show notes, and share documents with crew and clients.
 
 ---
 
-## Install
+## Table of Contents
 
-### Requirements
-- Python 3.9+
-- Linux or macOS (Windows via WSL)
+1. [System Requirements](#system-requirements)
+2. [Installation](#installation)
+3. [First Login](#first-login)
+4. [User Guide](#user-guide)
+   - [Dashboard](#dashboard)
+   - [Advance Sheet](#advance-sheet)
+   - [Production Schedule](#production-schedule)
+   - [Post-Show Notes](#post-show-notes)
+   - [Comments](#comments)
+   - [Export & Files](#export--files)
+   - [Public Show Page](#public-show-page)
+5. [Admin & Settings Guide](#admin--settings-guide)
+   - [Contacts](#contacts)
+   - [Users & Roles](#users--roles)
+   - [Groups & Show Access](#groups--show-access)
+   - [Form Field Customisation](#form-field-customisation)
+   - [Venues & Radio Channels](#venues--radio-channels)
+   - [WiFi Defaults](#wifi-defaults)
+   - [Organisation Logo](#organisation-logo)
+   - [Upload Size Limit](#upload-size-limit)
+   - [Syslog Settings](#syslog-settings)
+   - [Database Backups](#database-backups)
+   - [File Manager](#file-manager)
+   - [God Mode](#god-mode)
+6. [Troubleshooting](#troubleshooting)
 
-### Quick Install (recommended)
+---
 
-Run the install script as root for full systemd service setup (auto-starts on boot):
+## System Requirements
+
+| Component | Minimum |
+|-----------|---------|
+| Python | 3.9+ (3.11 recommended) |
+| OS | Linux (systemd) |
+| RAM | 512 MB |
+| Disk | 1 GB (for database and backups) |
+| Network | LAN access for crew devices |
+
+Python packages installed automatically: Flask, Werkzeug, gunicorn, WeasyPrint (PDF generation), APScheduler (backups), flask-limiter (login rate limiting), qrcode[pil] + Pillow (WiFi QR codes).
+
+### WeasyPrint system dependencies (Ubuntu/Debian)
 
 ```bash
-sudo ./install.sh
+sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libffi-dev libcairo2
 ```
 
 This will:
@@ -38,205 +66,216 @@ Open the app at `http://<your-server-ip>:5400`
 
 ---
 
-### Manual Install (non-root / development)
+## Installation
 
 ```bash
-# Create and activate virtual environment
-python3 -m venv venv
-source venv/bin/activate
+# Full install with systemd service (recommended):
+sudo ./install.sh
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Initialize the database
-python init_db.py
-
-# Start the app
-python app.py
+# Without root (manual start only):
+./install.sh
 ```
 
-Open `http://localhost:5400`
+The installer: creates a Python venv, installs dependencies, initialises/migrates the SQLite database, creates backup directories, writes a systemd service unit, generates a SECRET_KEY, and starts the service.
+
+After installation the app is available at `http://<server-ip>:<port>` (default port **5400**).
+
+### Updating
+
+Re-run `./install.sh` (or `sudo ./install.sh`). It detects the existing database and runs migrations automatically — no data is lost.
 
 ---
 
-### Dependencies (`requirements.txt`)
+## First Login
 
-| Package | Purpose |
-|---|---|
-| `flask >= 3.0` | Web framework |
-| `werkzeug >= 3.0` | Password hashing, utilities |
-| `weasyprint >= 60` | PDF generation (HTML → PDF) |
-| `APScheduler >= 3.10` | Automatic database backups |
-| `gunicorn >= 21` | Production WSGI server |
+Default credentials: **admin / admin**
+
+**Change the admin password immediately** via Settings → My Account → Change Password.
 
 ---
 
-## Usage
+## User Guide
 
 ### Dashboard
-The dashboard lists all upcoming shows sorted by date. Shows whose date has passed are automatically moved to the **Archived** tab. Archived shows can be restored or permanently deleted (admin only).
 
-### Creating a Show
-Click **New Show** and enter the show name, venue, and date/time. The show is immediately visible to all logged-in users.
+Lists all active and archived shows. Click a show to open it. **New Show** creates a new show.
 
 ### Advance Sheet
-Each show has a fully editable advance form organized into collapsible sections (e.g. Show Information, Arrival & Parking, Hospitality, Security, Front of House, General Information). Sections and fields are fully customizable in Settings.
 
-- **Auto-saves** 1.5 seconds after you stop typing, or press `Ctrl+S` / `Cmd+S`
-- A toast notification confirms every save
-- While a field is being edited by another user, their name appears next to the field in real time
+Contains all pre-show information: show details, contacts, arrival & parking, security, hospitality, audio, video, backline, stage, wardrobe, special elements, and labor needs.
+
+**Saving:** Changes are auto-saved as you type. The **Save** button forces an immediate save.
+
+**Conditional fields:** Fields appear/hide based on related field values (e.g. "Rentalworks Order #" appears when "Rental Works?" = Yes).
+
+**Contacts:** Contact dropdowns populate from the Contacts list in Settings.
+
+**Venues / Radio Channels:** If configured in Settings, these show as dropdowns instead of free-text fields.
+
+**Version History:** Click **History** to view, preview, and restore previous snapshots.
+
+**Real-time collaboration:** Multiple users can work simultaneously. Changes sync every 5 seconds and each user's active field is highlighted.
 
 ### Production Schedule
-A timeline table attached to each show with:
-- Add / remove / reorder rows (time, description, notes)
-- Venue & tech info (WiFi credentials, radio channel, mix position)
-- Contact assignments for all departments and artist/tour contacts
 
-### Export PDFs
-- **Advance Sheet PDF** — two-column layout; empty fields are omitted automatically
-- **Production Schedule PDF** — landscape format with full timeline and all contacts
-- Every export **auto-increments the version number** (v1 → v2 → v3 …)
-- Full export log shows who exported, when, and which version
+**Venue & Tech Info** — WiFi network/code, parking/security info. Radio Channel and Mix Position are read-only from the Advance Sheet.
 
-### Form History & Versioning
-Every save creates a versioned snapshot. Open the **History** panel on any advance form to browse previous versions, see what changed, and restore any prior version.
+**Timeline** — Time rows with Start, End, Description, Notes. Times are auto-normalised to 24-hour format on blur (e.g. "4pm" → "16:00", "1600" → "16:00").
+
+**Show Contacts** — All DPC contacts (PM, Hospitality, Programming, Event Manager, Education, Guest Services, Runner) are read-only, pulled from the Advance Sheet. Security Email is editable.
 
 ### Post-Show Notes
-A dedicated notes area on each show for wrap-up notes, issues, and follow-ups.
+
+Record production manager (read-only from advance), crew call time, show notes, house notes, equipment issues, and miscellaneous notes. A collapsible schedule timeline is shown for reference.
+
+Click **Export PDF** to generate a Post-Show Notes PDF.
+
+### Comments
+
+Show-specific comment thread with `@mention` autocomplete. Visible to all authorised users.
+
+### Export & Files
+
+| Action | Description |
+|--------|-------------|
+| Export Advance → vN | Generates Advance Sheet PDF |
+| Export Schedule → vN | Generates Production Schedule PDF with timeline, contacts, WiFi QR code, and logo |
+| Export PDF (postnotes tab) | Generates Post-Show Notes PDF |
+| ↓ (history) | Re-downloads a previously generated PDF |
+
+PDFs are stored in the database — use the **↓** button in Export History to re-download without generating a new version.
+
+**Attachments:** Drag-and-drop or click **+ Attach File**. Upload progress bar shown. Files stored in database.
+
+**Read Receipts:** Tracks who opened the advance at which version.
+
+### Public Show Page
+
+`/public` — no login required. Lists all active shows with download links for the latest advance and schedule PDFs. Share with clients, tour managers, and crew who don't have an account.
 
 ---
 
-## Multi-User / Real-Time Collaboration
+## Admin & Settings Guide
 
-Multiple staff members can work on the same show simultaneously:
+### Contacts
 
-- **Live presence indicators** — each field shows who is currently editing it
-- **No overwrite conflicts** — changes sync automatically across all open sessions
-- **Concurrent user capacity** — 4 Gunicorn workers handle ~80 requests/second; 30–50+ simultaneous users is typical without any queuing
+Add, edit, delete DPC contacts. Fields: name, title, department, phone, email. Contacts appear in dropdowns on advance and schedule forms.
 
----
+### Users & Roles
 
-## Settings
+| Role | Access |
+|------|--------|
+| `admin` | Full access: all shows, settings, user management |
+| `user` | Access controlled by group membership |
 
-| Section | What You Can Do |
-|---|---|
-| **Contacts** | Add, edit, delete contacts; filter by department; contacts populate dropdowns on all forms |
-| **Form Sections** | Add, rename, reorder, or delete advance form sections |
-| **Form Fields** | Add fields with custom types (text, textarea, checkbox, dropdown, etc.), help text, placeholder, and layout width |
-| **Users** *(admin)* | Add users, reset passwords, delete accounts |
-| **My Account** | Change your own password |
-| **Server** *(admin)* | Change the app port (triggers automatic service restart) |
-| **Syslog** *(admin)* | Forward app logs to a remote syslog server |
+Add users via Settings → Users. Admins can reset passwords.
 
----
+### Groups & Show Access
 
-## Backups
+| Group Type | Behaviour |
+|------------|-----------|
+| `all_access` | Can see and edit all shows |
+| `restricted` | Can only view/export assigned shows |
 
-The app automatically backs up `advance.db`:
-- **Hourly** — keeps the last 24 hourly backups
-- **Daily** — keeps the last 30 daily backups
+1. Create group: Settings → Groups → **+ New Group**
+2. Add members
+3. For restricted groups: assign shows via **Assign show...**
 
-Backups are stored in `backups/hourly/` and `backups/daily/`. The backup schedule runs in the background using APScheduler and requires no configuration.
+### Form Field Customisation
 
-To restore: stop the app, replace `advance.db` with the desired backup file, restart.
+Settings → Form Fields (admin or content_admin).
 
----
+- Drag rows to reorder fields
+- Edit field label, type, conditional logic, width
+- Add fields and sections
+- Changes are immediate across all shows
 
-## Production Deployment
+Field types: `text`, `textarea`, `date`, `time`, `number`, `yes_no`, `select`, `checkbox`, `contact_dropdown`
 
-The install script handles everything, but for a manual production setup:
+Conditional: `field_key=Value` (e.g. `runner_needed=Yes`)
 
+### Venues & Radio Channels
+
+Settings → Syslog → **Venue & Channel Lists**
+
+One item per line. These populate the Venue and Radio Channel dropdowns on the advance form.
+
+### WiFi Defaults
+
+Settings → Syslog → **WiFi Defaults**
+
+Set default WiFi SSID and password. Appears on Schedule PDFs as text and QR code.
+
+### Organisation Logo
+
+Settings → Syslog → **Organisation Logo**
+
+Upload PNG/JPG/SVG logo (max 2 MB). Shown in PDF headers.
+
+### Upload Size Limit
+
+Settings → Syslog → **Upload Size Limit**
+
+Maximum file attachment size (default 20 MB, max 500 MB).
+
+### Syslog Settings
+
+Settings → Syslog. Send audit events to a remote syslog server via UDP.
+
+Events: LOGIN/LOGOUT · SHOW_CREATE/ARCHIVE/DELETE/RESTORE · FORM_SAVE · PDF_EXPORT · USER_CREATE/DELETE/PASSWORD_CHANGE · GROUP_ASSIGN/REMOVE · BACKUP_CREATED · SETTINGS_CHANGE
+
+### Database Backups
+
+Settings → Backups. Automatic hourly (keeps 24) and daily at midnight (keeps 30) SQLite backups in `backups/`. Click **Run Backup Now** for immediate backup.
+
+**Restore:**
 ```bash
-# Set a strong secret key (or put it in a .env file)
-export SECRET_KEY="replace-with-a-long-random-secret"
-
-# Run with Gunicorn (4 workers recommended)
-venv/bin/gunicorn --workers 4 --bind 0.0.0.0:5400 --chdir /path/to/ShowAdvance app:app
+cp backups/daily/advance_YYYYMMDD_0000.db advance.db
+sudo systemctl restart showadvance
 ```
 
-To change the port, use **Settings → Server** in the UI — no config file edits needed. The service restarts automatically and picks up the new port.
+### File Manager
 
----
+Settings → Files (admin only). View and delete all file attachments across all shows.
 
-## Tech Stack
+### God Mode
 
-| Layer | Technology |
-|---|---|
-| Backend | Python / Flask |
-| Database | SQLite (`advance.db`) |
-| PDF generation | WeasyPrint (HTML → PDF) |
-| Frontend | Vanilla JS + CSS (no npm, no build step) |
-| Process manager | systemd + Gunicorn |
-| Background tasks | APScheduler |
+Settings → God Mode (admin only).
 
----
-
-## Project Structure
-
-```
-ShowAdvance/
-├── app.py              # Flask application and all routes
-├── init_db.py          # Database initialization and migrations
-├── install.sh          # Full install / upgrade script (systemd)
-├── start.sh            # Service launcher (reads port from DB)
-├── requirements.txt    # Python dependencies
-├── advance.db          # SQLite database (created on first run)
-├── backups/            # Automatic hourly and daily DB backups
-├── static/
-│   ├── css/style.css
-│   └── js/app.js       # Auto-save, real-time sync, UI logic
-└── templates/
-    ├── dashboard.html
-    ├── show.html
-    ├── settings.html
-    ├── login.html
-    └── pdf/
-        ├── advance_pdf.html
-        └── schedule_pdf.html
-```
-
----
-
-## User Roles
-
-| Permission | Regular User | Admin |
-|---|---|---|
-| View all shows | ✓ | ✓ |
-| Edit advance / schedule | ✓ | ✓ |
-| Export PDFs | ✓ | ✓ |
-| Create shows | ✓ | ✓ |
-| Delete / archive shows | — | ✓ |
-| Manage users | — | ✓ |
-| Change server settings | — | ✓ |
+- **Active Sessions** — users on a show page in the last 5 minutes (user, show, tab, last seen)
+- **User Last Login** — last login timestamp per user
 
 ---
 
 ## Troubleshooting
 
-**Service won't start**
+**Settings page tabs don't work** — Clear browser cache and reload.
+
+**Backup fails with PermissionError:**
 ```bash
-journalctl -u showadvance -n 50
+sudo chown -R <service_user>:<service_user> /path/to/ShowAdvance/backups
+# Or re-run: sudo ./install.sh
 ```
 
-**Port already in use**
-Change the port via Settings → Server in the UI, or edit `advance.db` directly:
+**PDF generation fails:** Install WeasyPrint system dependencies:
 ```bash
-sqlite3 advance.db "UPDATE app_settings SET value='5401' WHERE key='app_port';"
+sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libcairo2 libffi-dev
 ```
 
-**Reset admin password**
+**Port change doesn't take effect:** Restart the service:
 ```bash
-python3 -c "
-from werkzeug.security import generate_password_hash
-import sqlite3
-db = sqlite3.connect('advance.db')
-db.execute(\"UPDATE users SET password=? WHERE username='admin'\", (generate_password_hash('newpassword'),))
-db.commit()
-"
+sudo systemctl restart showadvance
 ```
 
-**WeasyPrint PDF errors on Linux**
-Install system fonts and Cairo:
+**Service logs:**
 ```bash
-sudo apt install libcairo2 libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info
+journalctl -u showadvance -f
+journalctl -u showadvance -n 100
 ```
+
+**Database migration errors:**
+```bash
+venv/bin/python init_db.py --migrate
+```
+
+**Login rate limiting:** After 15 failed login attempts per minute from an IP, further attempts return HTTP 429. Wait 60 seconds or restart the app.

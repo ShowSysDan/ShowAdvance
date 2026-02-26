@@ -61,9 +61,20 @@
 
     {% elif field.field_type == 'select' %}
       <select class="field-input adv-field" data-key="{{ field.field_key }}" {% if restricted %}disabled{% endif %}>
-        {% for opt in field.options %}
-        <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
-        {% endfor %}
+        {% if field.field_key == 'venue' and venue_list %}
+          {% for opt in venue_list %}
+          <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        {% elif field.field_key == 'radio_channel' and radio_channel_list %}
+          <option value="">— Select —</option>
+          {% for opt in radio_channel_list %}
+          <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        {% else %}
+          {% for opt in field.options %}
+          <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        {% endif %}
       </select>
 
     {% elif field.field_type == 'contact_dropdown' %}
@@ -189,11 +200,17 @@
         </div>
         <div class="field-group">
           <label class="field-label">RADIO CHANNEL</label>
-          <input type="text" class="field-input sched-meta" data-key="radio_channel" value="{{ meta('radio_channel', advance_data.get('radio_channel','')) }}" placeholder="e.g. 16/Judson's" {% if restricted %}disabled{% endif %}>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ adv('radio_channel') or '—' }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
         </div>
         <div class="field-group">
           <label class="field-label">MIX POSITION</label>
-          <input type="text" class="field-input sched-meta" data-key="mix_position" value="{{ meta('mix_position') }}" placeholder="e.g. FOH" {% if restricted %}disabled{% endif %}>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ adv('mix_position') or '—' }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
         </div>
       </div>
       <div class="field-group">
@@ -264,42 +281,38 @@
 
       <h3 class="sub-section-label mt-md">DPC CONTACTS</h3>
       <div class="form-row cols-2">
-        {# Production Manager and Hospitality come from the Advance Sheet #}
-        <div class="field-group">
-          <label class="field-label">PRODUCTION MANAGER</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ adv('production_manager') or '—' }}
-          </div>
-          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-        </div>
-        <div class="field-group">
-          <label class="field-label">HOSPITALITY</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ adv('hospitality_contact') or '—' }}
-          </div>
-          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-        </div>
-        {% for role, dept in [
-          ('Programming', 'Programming'),
-          ('Event Manager', 'Event Manager'),
-          ('Education', 'Education Team'),
-          ('Guest Services', 'Guest Services'),
-          ('Runner', 'Runners')
+        {# All DPC contacts come from the Advance Sheet (read-only here) #}
+        {% for label, key in [
+          ('PRODUCTION MANAGER', 'production_manager'),
+          ('HOSPITALITY',        'hospitality_contact'),
+          ('PROGRAMMING',        'programming'),
+          ('EVENT MANAGER',      'events'),
+          ('EDUCATION',          'education_contact'),
+          ('GUEST SERVICES',     'guest_services'),
+          ('RUNNER',             'runner_contact'),
         ] %}
         <div class="field-group">
-          <label class="field-label">{{ role.upper() }}</label>
-          <select class="field-input sched-meta" data-key="contact_{{ role.lower().replace(' ','_') }}" {% if restricted %}disabled{% endif %}>
-            <option value="">— Select —</option>
-            <option value="-">N/A</option>
-            {% for c in contacts_by_dept.get(dept, []) %}
-            <option value="{{ c.name }}" data-phone="{{ c.phone }}" data-email="{{ c.email }}"
-              {% if meta('contact_'+role.lower().replace(' ','_')) == c.name %}selected{% endif %}>
-              {{ c.name }}{% if c.phone %} · {{ c.phone }}{% endif %}
-            </option>
-            {% endfor %}
-          </select>
+          <label class="field-label">{{ label }}</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ adv(key) or '—' }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
         </div>
         {% endfor %}
+        <div class="field-group">
+          <label class="field-label">MIX POSITION</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ adv('mix_position') or '—' }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
+        <div class="field-group">
+          <label class="field-label">RADIO CHANNEL</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ adv('radio_channel') or '—' }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
         <div class="field-group">
           <label class="field-label">SECURITY EMAIL</label>
           <input type="text" class="field-input sched-meta" data-key="security_email"
@@ -320,7 +333,10 @@
 <form id="postnotes-form" autocomplete="off">
 
   <div class="form-section">
-    <div class="form-section-header"><span class="section-icon">◈</span> POST-SHOW NOTES</div>
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> POST-SHOW NOTES
+      <a href="{{ url_for('export_postnotes', show_id=show.id) }}" class="btn btn-sm btn-ghost ml-auto" target="_blank">Export PDF</a>
+    </div>
     <div class="form-section-body">
       <div class="show-info-readonly">
         <span>{{ show.name }}</span> · <span>{{ show.show_date or '—' }}</span> · <span>{{ show.show_time or '—' }}</span> · <span>{{ show.venue or '—' }}</span>
@@ -329,8 +345,10 @@
       <div class="form-row cols-2">
         <div class="field-group">
           <label class="field-label">PRODUCTION MANAGER</label>
-          <input type="text" class="field-input notes-field" data-key="pm"
-                 value="{{ note('pm', advance_data.get('production_manager','')) }}" {% if restricted %}disabled{% endif %}>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ advance_data.get('production_manager') or note('pm') or '—' }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
         </div>
         <div class="field-group">
           <label class="field-label">CREW CALLED</label>
@@ -353,6 +371,33 @@
       {% endfor %}
     </div>
   </div>
+
+  {# Read-only production schedule timeline for reference #}
+  {% if schedule_rows %}
+  <div class="form-section">
+    <div class="form-section-header collapsible" onclick="toggleSection(this)">
+      <span class="section-icon">◈</span> PRODUCTION SCHEDULE (Reference)
+      <svg class="collapse-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"/></svg>
+    </div>
+    <div class="form-section-body no-pad" style="display:none">
+      <table class="data-table" style="font-size:12px">
+        <thead><tr><th>START</th><th>END</th><th>DESCRIPTION</th><th>NOTES</th></tr></thead>
+        <tbody>
+          {% for row in schedule_rows %}
+          {% if row.description or row.start_time %}
+          <tr>
+            <td>{{ row.start_time or '' }}</td>
+            <td>{{ row.end_time or '' }}</td>
+            <td>{{ row.description or '' }}</td>
+            <td class="text-dim">{{ row.notes or '' }}</td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
 
 </form>
 </div>{# end tab-postnotes #}
@@ -430,7 +475,7 @@
     <div class="form-section-header"><span class="section-icon">◈</span> EXPORT HISTORY</div>
     <div class="form-section-body no-pad">
       <table class="data-table">
-        <thead><tr><th>TYPE</th><th>VERSION</th><th>EXPORTED BY</th><th>DATE</th></tr></thead>
+        <thead><tr><th>TYPE</th><th>VERSION</th><th>EXPORTED BY</th><th>DATE</th><th>PDF</th></tr></thead>
         <tbody>
           {% for e in exports %}
           <tr>
@@ -438,6 +483,14 @@
             <td><span class="mono">v{{ e.version }}</span></td>
             <td>{{ e.exporter or '—' }}</td>
             <td class="text-dim">{{ e.exported_at[:16].replace('T',' ') }}</td>
+            <td>
+              {% if e.pdf_data %}
+              <a href="{{ url_for('download_export_history', show_id=show.id, log_id=e.id) }}"
+                 class="btn btn-xs btn-ghost" title="Re-download PDF">↓</a>
+              {% else %}
+              <span class="text-dim" style="font-size:10px">—</span>
+              {% endif %}
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -459,6 +512,12 @@
       <div id="upload-zone" class="upload-zone"
            ondrop="handleFileDrop(event)" ondragover="handleFileDragOver(event)" ondragleave="handleFileDragLeave(event)">
         <span class="upload-zone-hint">Drop a file here to attach it to this show</span>
+        <div id="upload-progress-wrap" style="display:none;width:100%;margin-top:8px">
+          <div style="background:var(--bg-hover);border-radius:4px;height:6px;overflow:hidden">
+            <div id="upload-progress-bar" style="background:var(--accent);height:100%;width:0%;transition:width 0.2s"></div>
+          </div>
+          <span id="upload-progress-label" style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;text-align:center">0%</span>
+        </div>
       </div>
       <div id="attachments-list">
         <p class="text-dim" style="font-size:12px;margin:0">Loading...</p>
