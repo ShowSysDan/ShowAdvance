@@ -660,7 +660,14 @@ function openSectionModal(sid) {
       if (collEl) collEl.checked = (row.dataset.collapsible === '1');
     }
   } else {
-    modal.querySelector('#section-modal-form')?.reset();
+    const secForm = modal.querySelector('#section-modal-form');
+    if (secForm) {
+      if (typeof secForm.reset === 'function') secForm.reset();
+      else secForm.querySelectorAll('input,select,textarea').forEach(el => {
+        if (el.type === 'checkbox') el.checked = el.defaultChecked;
+        else el.value = el.defaultValue;
+      });
+    }
   }
   modal.style.display = '';
 }
