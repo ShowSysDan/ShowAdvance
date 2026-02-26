@@ -553,7 +553,10 @@ function openFieldModal(fid, sectionId) {
   const modal = document.getElementById('field-modal');
   if (!modal) return;
   const form = modal.querySelector('#field-modal-form');
-  if (form) form.reset();
+  if (form) {
+    if (typeof form.reset === 'function') form.reset();
+    else form.querySelectorAll('input,select,textarea').forEach(el => { el.value = el.defaultValue || ''; });
+  }
 
   if (fid) {
     // Load existing field data
