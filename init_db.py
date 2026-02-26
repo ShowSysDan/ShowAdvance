@@ -78,6 +78,15 @@ CREATE TABLE IF NOT EXISTS post_show_notes (
     UNIQUE(show_id, field_key)
 );
 
+CREATE TABLE IF NOT EXISTS show_performances (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    perf_date DATE,
+    perf_time TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS contacts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -649,6 +658,15 @@ def migrate_db():
 
     # New feature tables (safe to rerun)
     conn.executescript("""
+        CREATE TABLE IF NOT EXISTS show_performances (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            perf_date DATE,
+            perf_time TEXT DEFAULT '',
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         CREATE TABLE IF NOT EXISTS show_comments (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             show_id    INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
@@ -704,6 +722,18 @@ def migrate_db():
             width_hint       TEXT DEFAULT 'half'
         );
     """)
+
+    # Seed show_performances from existing show_date/show_time if empty
+    perf_count = conn.execute('SELECT COUNT(*) FROM show_performances').fetchone()[0]
+    if perf_count == 0:
+        shows_with_dates = conn.execute(
+            'SELECT id, show_date, show_time FROM shows WHERE show_date IS NOT NULL'
+        ).fetchall()
+        for s in shows_with_dates:
+            conn.execute("""
+                INSERT OR IGNORE INTO show_performances (show_id, perf_date, perf_time, sort_order)
+                VALUES (?, ?, ?, 0)
+            """, (s[0], s[1], s[2] or ''))
 
     # Seed form data and settings if empty
     _seed_form_data(conn)
