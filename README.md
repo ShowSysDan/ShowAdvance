@@ -52,6 +52,18 @@ Python packages installed automatically: Flask, Werkzeug, gunicorn, WeasyPrint (
 sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libffi-dev libcairo2
 ```
 
+This will:
+1. Create a Python virtual environment
+2. Install all dependencies from `requirements.txt`
+3. Initialize the database (`advance.db`)
+4. Configure and start a systemd service
+5. Generate a secure `SECRET_KEY` automatically
+
+Open the app at `http://<your-server-ip>:5400`
+
+**Default login:** `admin` / `admin123`
+⚠️ Change the admin password immediately after first login — Settings → My Account.
+
 ---
 
 ## Installation
