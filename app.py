@@ -559,14 +559,21 @@ def show_page(show_id):
     # Last-saved-by info
     last_saved_display_name = None
     last_saved_at = None
-    if show['last_saved_by']:
+    try:
+        _last_saved_by_id = show['last_saved_by']
+    except (IndexError, KeyError):
+        _last_saved_by_id = None
+    if _last_saved_by_id:
         saver = db.execute(
             'SELECT display_name, username FROM users WHERE id=?',
-            (show['last_saved_by'],)
+            (_last_saved_by_id,)
         ).fetchone()
         if saver:
             last_saved_display_name = saver['display_name'] or saver['username']
-        last_saved_at = show['last_saved_at']
+        try:
+            last_saved_at = show['last_saved_at']
+        except (IndexError, KeyError):
+            last_saved_at = None
 
     # Advance data
     adv_rows = db.execute(
@@ -2476,6 +2483,12 @@ if os.path.exists(DATABASE):
         _ensure_backup_dirs()
     except Exception:
         pass
+    # Auto-run DB migrations on startup (idempotent — safe to run every time)
+    try:
+        from init_db import migrate_db
+        migrate_db()
+    except Exception as _mig_err:
+        print(f"[startup] Migration warning: {_mig_err}")
 
 # Start backup scheduler (guarded against Flask reloader double-start)
 _scheduler = None
