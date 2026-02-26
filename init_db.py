@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS users (
     display_name TEXT,
     role TEXT DEFAULT 'user',
     theme TEXT DEFAULT 'dark',
+    last_login TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -36,6 +37,8 @@ CREATE TABLE IF NOT EXISTS shows (
     advance_version INTEGER DEFAULT 0,
     schedule_version INTEGER DEFAULT 0,
     created_by INTEGER REFERENCES users(id),
+    last_saved_by INTEGER REFERENCES users(id),
+    last_saved_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -93,7 +96,8 @@ CREATE TABLE IF NOT EXISTS export_log (
     version INTEGER,
     exported_by INTEGER REFERENCES users(id),
     exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    filename TEXT DEFAULT ''
+    filename TEXT DEFAULT '',
+    pdf_data BLOB
 );
 
 CREATE TABLE IF NOT EXISTS form_sections (

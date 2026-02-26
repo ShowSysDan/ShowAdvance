@@ -1061,7 +1061,7 @@ async function adminDeleteFile(showId, fileId, btn) {
   // Activate tab from URL hash or server-side default
   const hash = location.hash.replace('#','');
   const validTabs = ['contacts','users','groups','fields','syslog','backups','account','files','godmode'];
-  const defaultTab = {{ '"contacts"' if (user.role == 'admin' or is_content_admin) else '"users"' }};
+  const defaultTab = {{ ("'contacts'" if (user.role == 'admin' or is_content_admin) else "'users'") }};
   switchSettingsTab(validTabs.includes(hash) ? hash : {% if active_tab %}'{{ active_tab }}'{% else %}defaultTab{% endif %});
 })();
 </script>

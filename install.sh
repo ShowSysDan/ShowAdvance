@@ -111,8 +111,10 @@ if [ "$(id -u)" -eq 0 ]; then
     fi
     info "Service will run as user: ${RUN_USER}"
 
-    # Ensure backup directories are owned by the service user
+    # Ensure all app files are owned by the service user
     chown -R "${RUN_USER}:${RUN_USER}" "${APP_DIR}/backups" 2>/dev/null || true
+    chown "${RUN_USER}:${RUN_USER}" "${APP_DIR}/advance.db" 2>/dev/null || true
+    chown "${RUN_USER}:${RUN_USER}" "${APP_DIR}" 2>/dev/null || true
 
     # Generate SECRET_KEY if not already present
     if [ ! -f "$ENV_FILE" ] || ! grep -q '^SECRET_KEY=' "$ENV_FILE" 2>/dev/null; then
