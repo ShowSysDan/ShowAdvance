@@ -33,7 +33,7 @@
           {% endif %}
         </div>
         <div class="show-info">
-          <div class="show-name">{{ s.name }}</div>
+          <div class="show-name">{{ s.name }}{% if s.perf_count > 1 %}<span class="badge-archived" style="background:var(--accent-dim,#2d4a6b);color:var(--accent);font-size:10px;margin-left:6px;vertical-align:middle">{{ s.perf_count }} DATES</span>{% endif %}</div>
           <div class="show-meta">{{ s.venue or '—' }}{% if s.show_time %} · {{ s.show_time }}{% endif %}</div>
         </div>
       </div>

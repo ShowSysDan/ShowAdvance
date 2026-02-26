@@ -158,6 +158,70 @@
 <div id="tab-advance" class="tab-pane {% if tab == 'advance' %}active{% endif %}">
 <form id="advance-form" autocomplete="off">
 
+  {# ── Show Dates & Times ───────────────────────────────────────────────────── #}
+  <div class="form-section" id="performances-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> SHOW DATES &amp; TIMES
+      {% if not restricted %}
+      <div class="action-btns ml-auto">
+        <button type="button" class="btn btn-sm btn-ghost" onclick="openPerfForm()">+ Add Date</button>
+      </div>
+      {% endif %}
+    </div>
+    <div class="form-section-body" id="performances-body">
+
+      <table class="field-editor-table" id="perf-table" {% if not performances %}style="display:none"{% endif %}>
+        <thead><tr>
+          <th>DATE</th><th>TIME(S)</th>
+          {% if not restricted %}<th style="width:80px"></th>{% endif %}
+        </tr></thead>
+        <tbody id="perf-tbody">
+          {% for p in performances %}
+          <tr data-id="{{ p.id }}">
+            <td>{{ p.perf_date or '—' }}</td>
+            <td class="text-dim" style="font-size:12px">{{ p.perf_time or '—' }}</td>
+            {% if not restricted %}
+            <td>
+              <div class="action-btns">
+                <button type="button" class="btn btn-xs btn-ghost"
+                  onclick="editPerf({{ p.id }}, '{{ p.perf_date or '' }}', {{ p.perf_time | tojson }})">Edit</button>
+                <button type="button" class="btn btn-xs btn-danger-ghost"
+                  onclick="deletePerf({{ p.id }})">×</button>
+              </div>
+            </td>
+            {% endif %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <p id="perf-empty-msg" class="text-dim" style="font-size:12px;margin:0{% if performances %};display:none{% endif %}">
+        No dates set yet.{% if not restricted %} Use "+ Add Date" above.{% endif %}
+      </p>
+
+      {% if not restricted %}
+      <div id="perf-form" style="display:none;margin-top:12px;padding:12px;background:var(--bg-hover);border-radius:6px;max-width:480px">
+        <input type="hidden" id="perf-edit-id" value="">
+        <div class="form-row cols-2" style="margin-bottom:8px">
+          <div class="field-group">
+            <label class="field-label">DATE</label>
+            <input type="date" id="perf-date-input" class="field-input">
+          </div>
+          <div class="field-group">
+            <label class="field-label">TIME(S)</label>
+            <input type="text" id="perf-time-input" class="field-input" placeholder="e.g. 7pm and 9pm">
+          </div>
+        </div>
+        <div class="action-btns">
+          <button type="button" class="btn btn-primary btn-sm" onclick="savePerf()">Save</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="closePerfForm()">Cancel</button>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+  </div>
+
   {% for section in form_sections %}
   <div class="form-section">
     <div class="form-section-header{% if section.collapsible %} collapsible{% endif %}"
@@ -577,6 +641,95 @@
   const ALL_USERS = {{ all_users | tojson }};
   let _currentHistId = null;
   initShow({{ show.id }}, INITIAL_TAB);
+
+  /* ── Performances (multiple dates/times) ────────────────────── */
+  function openPerfForm() {
+    document.getElementById('perf-edit-id').value = '';
+    document.getElementById('perf-date-input').value = '';
+    document.getElementById('perf-time-input').value = '';
+    document.getElementById('perf-form').style.display = '';
+    document.getElementById('perf-date-input').focus();
+  }
+  function editPerf(id, date, time) {
+    document.getElementById('perf-edit-id').value = id;
+    document.getElementById('perf-date-input').value = date || '';
+    document.getElementById('perf-time-input').value = time || '';
+    document.getElementById('perf-form').style.display = '';
+    document.getElementById('perf-date-input').focus();
+  }
+  function closePerfForm() {
+    document.getElementById('perf-form').style.display = 'none';
+  }
+  async function savePerf() {
+    const id = document.getElementById('perf-edit-id').value;
+    const perf_date = document.getElementById('perf-date-input').value || null;
+    const perf_time = document.getElementById('perf-time-input').value || '';
+    const url = id
+      ? `/shows/{{ show.id }}/performances/${id}`
+      : `/shows/{{ show.id }}/performances`;
+    const method = id ? 'PUT' : 'POST';
+    const resp = await fetch(url, {
+      method,
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({perf_date, perf_time})
+    });
+    const json = await resp.json();
+    if (!json.success) { alert('Error: ' + (json.error || 'Unknown')); return; }
+    closePerfForm();
+    _refreshPerfRow(json.performance, !id);
+    _updateHeaderDate();
+  }
+  async function deletePerf(id) {
+    if (!confirm('Remove this date?')) return;
+    const resp = await fetch(`/shows/{{ show.id }}/performances/${id}`, {method: 'DELETE'});
+    const json = await resp.json();
+    if (!json.success) { alert('Error: ' + (json.error || 'Unknown')); return; }
+    const row = document.querySelector(`#perf-tbody tr[data-id="${id}"]`);
+    if (row) row.remove();
+    _checkPerfEmpty();
+    _updateHeaderDate();
+  }
+  function _refreshPerfRow(p, isNew) {
+    const tbody = document.getElementById('perf-tbody');
+    const existingRow = tbody.querySelector(`tr[data-id="${p.id}"]`);
+    const timeCell = `<td class="text-dim" style="font-size:12px">${p.perf_time || '—'}</td>`;
+    const actionsCell = `<td><div class="action-btns">
+      <button type="button" class="btn btn-xs btn-ghost"
+        onclick="editPerf(${p.id}, '${p.perf_date || ''}', ${JSON.stringify(p.perf_time || '')})">Edit</button>
+      <button type="button" class="btn btn-xs btn-danger-ghost"
+        onclick="deletePerf(${p.id})">×</button>
+    </div></td>`;
+    if (existingRow) {
+      existingRow.cells[0].textContent = p.perf_date || '—';
+      existingRow.cells[1].outerHTML = timeCell;
+      existingRow.cells[2].outerHTML = actionsCell;
+    } else {
+      const tr = document.createElement('tr');
+      tr.dataset.id = p.id;
+      tr.innerHTML = `<td>${p.perf_date || '—'}</td>${timeCell}${actionsCell}`;
+      tbody.appendChild(tr);
+    }
+    document.getElementById('perf-table').style.display = '';
+    _checkPerfEmpty();
+  }
+  function _checkPerfEmpty() {
+    const empty = document.getElementById('perf-tbody').children.length === 0;
+    document.getElementById('perf-empty-msg').style.display = empty ? '' : 'none';
+    document.getElementById('perf-table').style.display = empty ? 'none' : '';
+  }
+  function _updateHeaderDate() {
+    const rows = [...document.querySelectorAll('#perf-tbody tr')];
+    if (!rows.length) return;
+    const firstDate = rows[0].cells[0].textContent.trim();
+    const firstTime = rows[0].cells[1].textContent.trim();
+    const sub = document.querySelector('.page-sub');
+    if (sub) {
+      let parts = ['{{ show.venue or '' }}'];
+      if (firstDate && firstDate !== '—') parts.unshift(firstDate);
+      if (firstTime && firstTime !== '—') parts.splice(1, 0, firstTime);
+      sub.textContent = parts.filter(Boolean).join(' · ');
+    }
+  }
 
   /* ── Version History ────────────────────────────────────────── */
   function openHistory() {

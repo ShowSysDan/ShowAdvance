@@ -351,17 +351,52 @@ def start_scheduler():
 # ─── General Helpers ──────────────────────────────────────────────────────────
 
 def auto_archive_past_shows():
-    """Move shows whose date has passed into 'archived' status."""
+    """Move shows whose last performance date has passed into 'archived' status."""
     db = get_db()
     today = date.today().isoformat()
     db.execute("""
         UPDATE shows SET status = 'archived'
         WHERE status = 'active'
-          AND show_date IS NOT NULL
-          AND show_date < ?
-    """, (today,))
+          AND (
+            -- Has performances: archive only when ALL have passed
+            (id IN (SELECT DISTINCT show_id FROM show_performances)
+             AND id NOT IN (
+               SELECT DISTINCT show_id FROM show_performances
+               WHERE perf_date IS NULL OR perf_date >= ?
+             ))
+            OR
+            -- No performances: use legacy show_date field
+            (id NOT IN (SELECT DISTINCT show_id FROM show_performances)
+             AND show_date IS NOT NULL
+             AND show_date < ?)
+          )
+    """, (today, today))
     db.commit()
     db.close()
+
+
+def _sync_show_primary_date(db, show_id):
+    """Keep shows.show_date/show_time in sync with the earliest performance."""
+    first = db.execute("""
+        SELECT perf_date, perf_time FROM show_performances
+        WHERE show_id = ?
+        ORDER BY CASE WHEN perf_date IS NULL THEN 1 ELSE 0 END, perf_date, id
+        LIMIT 1
+    """, (show_id,)).fetchone()
+    if first:
+        db.execute("""
+            UPDATE shows SET show_date=?, show_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?
+        """, (first['perf_date'], first['perf_time'], show_id))
+        for key, val in [('show_date', first['perf_date'] or ''),
+                         ('show_time', first['perf_time'] or '')]:
+            db.execute("""
+                INSERT OR REPLACE INTO advance_data (show_id, field_key, field_value, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            """, (show_id, key, val))
+    else:
+        db.execute("""
+            UPDATE shows SET show_date=NULL, show_time='', updated_at=CURRENT_TIMESTAMP WHERE id=?
+        """, (show_id,))
 
 
 def get_show_or_404(show_id):
@@ -471,13 +506,15 @@ def dashboard():
 
     if accessible is None:
         active = db.execute("""
-            SELECT s.*, u.display_name as creator
+            SELECT s.*, u.display_name as creator,
+              (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count
             FROM shows s LEFT JOIN users u ON s.created_by = u.id
             WHERE s.status = 'active'
             ORDER BY s.show_date ASC NULLS LAST
         """).fetchall()
         archived = db.execute("""
-            SELECT s.*, u.display_name as creator
+            SELECT s.*, u.display_name as creator,
+              (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count
             FROM shows s LEFT JOIN users u ON s.created_by = u.id
             WHERE s.status = 'archived'
             ORDER BY s.show_date DESC
@@ -487,13 +524,15 @@ def dashboard():
         if accessible:
             placeholders = ','.join('?' * len(accessible))
             active = db.execute(f"""
-                SELECT s.*, u.display_name as creator
+                SELECT s.*, u.display_name as creator,
+                  (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count
                 FROM shows s LEFT JOIN users u ON s.created_by = u.id
                 WHERE s.status = 'active' AND s.id IN ({placeholders})
                 ORDER BY s.show_date ASC NULLS LAST
             """, accessible).fetchall()
             archived = db.execute(f"""
-                SELECT s.*, u.display_name as creator
+                SELECT s.*, u.display_name as creator,
+                  (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count
                 FROM shows s LEFT JOIN users u ON s.created_by = u.id
                 WHERE s.status = 'archived' AND s.id IN ({placeholders})
                 ORDER BY s.show_date DESC LIMIT 30
@@ -543,6 +582,12 @@ def new_show():
                     INSERT OR REPLACE INTO advance_data (show_id, field_key, field_value)
                     VALUES (?, ?, ?)
                 """, (show_id, key, val))
+
+        if show_date:
+            db.execute("""
+                INSERT INTO show_performances (show_id, perf_date, perf_time, sort_order)
+                VALUES (?, ?, ?, 0)
+            """, (show_id, show_date, show_time))
 
         db.commit()
         db.close()
@@ -607,6 +652,12 @@ def show_page(show_id):
     ).fetchall()
     notes_data = {r['field_key']: r['field_value'] for r in note_rows}
 
+    # Performances
+    performances = db.execute("""
+        SELECT * FROM show_performances WHERE show_id = ?
+        ORDER BY CASE WHEN perf_date IS NULL THEN 1 ELSE 0 END, perf_date, id
+    """, (show_id,)).fetchall()
+
     # Export log
     exports = db.execute("""
         SELECT e.*, u.display_name as exporter
@@ -650,6 +701,7 @@ def show_page(show_id):
                            show=show,
                            tab=tab,
                            advance_data=advance_data,
+                           performances=[dict(p) for p in performances],
                            schedule_rows=[dict(r) for r in sched_rows],
                            schedule_meta=schedule_meta,
                            sched_meta_fields=get_schedule_meta_fields(),
@@ -711,6 +763,79 @@ def save_advance(show_id):
     db.commit()
     db.close()
     syslog_logger.info(f"FORM_SAVE show_id={show_id} type=advance by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+# ─── Performances (multiple dates/times per show) ─────────────────────────────
+
+@app.route('/shows/<int:show_id>/performances', methods=['POST'])
+@login_required
+def add_performance(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    get_show_or_404(show_id)
+    data = request.get_json(force=True) or {}
+    perf_date = data.get('perf_date') or None
+    perf_time = data.get('perf_time', '')
+    db = get_db()
+    cur = db.execute("""
+        INSERT INTO show_performances (show_id, perf_date, perf_time, sort_order)
+        VALUES (?, ?, ?,
+          (SELECT COALESCE(MAX(sort_order)+1, 0) FROM show_performances WHERE show_id=?))
+    """, (show_id, perf_date, perf_time, show_id))
+    perf_id = cur.lastrowid
+    _sync_show_primary_date(db, show_id)
+    db.commit()
+    perf = db.execute('SELECT * FROM show_performances WHERE id=?', (perf_id,)).fetchone()
+    db.close()
+    return jsonify({'success': True, 'performance': dict(perf)})
+
+
+@app.route('/shows/<int:show_id>/performances/<int:perf_id>', methods=['PUT'])
+@login_required
+def update_performance(show_id, perf_id):
+    if not can_access_show(session['user_id'], show_id):
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    db = get_db()
+    perf = db.execute(
+        'SELECT * FROM show_performances WHERE id=? AND show_id=?', (perf_id, show_id)
+    ).fetchone()
+    if not perf:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    data = request.get_json(force=True) or {}
+    db.execute("""
+        UPDATE show_performances SET perf_date=?, perf_time=? WHERE id=?
+    """, (data.get('perf_date') or None, data.get('perf_time', ''), perf_id))
+    _sync_show_primary_date(db, show_id)
+    db.commit()
+    perf = db.execute('SELECT * FROM show_performances WHERE id=?', (perf_id,)).fetchone()
+    db.close()
+    return jsonify({'success': True, 'performance': dict(perf)})
+
+
+@app.route('/shows/<int:show_id>/performances/<int:perf_id>', methods=['DELETE'])
+@login_required
+def delete_performance(show_id, perf_id):
+    if not can_access_show(session['user_id'], show_id):
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    db = get_db()
+    perf = db.execute(
+        'SELECT * FROM show_performances WHERE id=? AND show_id=?', (perf_id, show_id)
+    ).fetchone()
+    if not perf:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    db.execute('DELETE FROM show_performances WHERE id=?', (perf_id,))
+    _sync_show_primary_date(db, show_id)
+    db.commit()
+    db.close()
     return jsonify({'success': True})
 
 
