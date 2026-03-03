@@ -504,20 +504,26 @@ def dashboard():
     accessible = get_accessible_shows(session['user_id'])
     db = get_db()
 
+    _eff_date = """COALESCE(s.show_date,
+        (SELECT MIN(perf_date) FROM show_performances
+         WHERE show_id=s.id AND perf_date IS NOT NULL))"""
+
     if accessible is None:
-        active = db.execute("""
+        active = db.execute(f"""
             SELECT s.*, u.display_name as creator,
-              (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count
+              (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count,
+              {_eff_date} as show_date
             FROM shows s LEFT JOIN users u ON s.created_by = u.id
             WHERE s.status = 'active'
-            ORDER BY s.show_date ASC NULLS LAST
+            ORDER BY {_eff_date} ASC NULLS LAST
         """).fetchall()
-        archived = db.execute("""
+        archived = db.execute(f"""
             SELECT s.*, u.display_name as creator,
-              (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count
+              (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count,
+              {_eff_date} as show_date
             FROM shows s LEFT JOIN users u ON s.created_by = u.id
             WHERE s.status = 'archived'
-            ORDER BY s.show_date DESC
+            ORDER BY {_eff_date} DESC
             LIMIT 30
         """).fetchall()
     else:
@@ -525,17 +531,19 @@ def dashboard():
             placeholders = ','.join('?' * len(accessible))
             active = db.execute(f"""
                 SELECT s.*, u.display_name as creator,
-                  (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count
+                  (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count,
+                  {_eff_date} as show_date
                 FROM shows s LEFT JOIN users u ON s.created_by = u.id
                 WHERE s.status = 'active' AND s.id IN ({placeholders})
-                ORDER BY s.show_date ASC NULLS LAST
+                ORDER BY {_eff_date} ASC NULLS LAST
             """, accessible).fetchall()
             archived = db.execute(f"""
                 SELECT s.*, u.display_name as creator,
-                  (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count
+                  (SELECT COUNT(*) FROM show_performances WHERE show_id=s.id) as perf_count,
+                  {_eff_date} as show_date
                 FROM shows s LEFT JOIN users u ON s.created_by = u.id
                 WHERE s.status = 'archived' AND s.id IN ({placeholders})
-                ORDER BY s.show_date DESC LIMIT 30
+                ORDER BY {_eff_date} DESC LIMIT 30
             """, accessible).fetchall()
         else:
             active = []

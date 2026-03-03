@@ -251,140 +251,155 @@
 {# ── FORM FIELDS (admin or content_admin) ─────────────────────────────────── #}
 {% if user.role == 'admin' or is_content_admin %}
 <div id="stab-fields" class="stab-pane" style="display:none">
-  <div class="form-section">
-    <div class="form-section-header">
-      <span class="section-icon">◈</span> ADVANCE FORM FIELDS
-      <div class="action-btns ml-auto">
-        <button class="btn btn-sm btn-ghost" onclick="openSectionModal(null)">+ Add Section</button>
-      </div>
-    </div>
-    <div class="form-section-body" style="gap:16px">
-      <p class="text-dim" style="font-size:12px">
-        Drag the <strong>⠿</strong> handle to reorder sections or fields. Changes take effect immediately for all shows.
-      </p>
 
-      {% for section in (form_sections if form_sections is defined else []) %}
-      <div class="form-section" data-section-id="{{ section.id }}" style="margin-bottom:0">
-        <div class="form-section-header" style="background:var(--bg-hover)">
-          <span class="section-drag-handle drag-handle" title="Drag to reorder section" style="cursor:grab;margin-right:6px;font-size:14px;color:var(--text-muted)">⠿</span>
-          <span class="section-icon">{{ section.icon }}</span>
-          <strong style="font-size:12px;color:var(--text);letter-spacing:normal;text-transform:none">{{ section.label }}</strong>
-          <span class="text-dim" style="font-size:10px;font-weight:400;letter-spacing:0">({{ section.fields|length }} fields)</span>
-          <div class="action-btns ml-auto">
-            <button class="btn btn-xs btn-ghost" onclick="openSectionModal({{ section.id }})"
-                    data-id="{{ section.id }}" data-label="{{ section.label }}"
-                    data-icon="{{ section.icon }}" data-collapsible="{{ '1' if section.collapsible else '0' }}"
-                    data-default-open="{{ '0' if section.default_open == 0 else '1' }}">Edit</button>
-            <button class="btn btn-xs btn-danger-ghost" onclick="deleteSection({{ section.id }})">Delete</button>
-          </div>
-        </div>
-        <div class="form-section-body no-pad">
-          <table class="field-editor-table">
-            <thead>
-              <tr>
-                <th style="width:28px"></th>
-                <th>LABEL</th>
-                <th style="width:120px">TYPE</th>
-                <th style="width:140px">CONDITION</th>
-                <th style="width:80px">ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody data-section-id="{{ section.id }}">
-              {% for field in section.fields %}
-              <tr class="field-row" draggable="true" data-id="{{ field.id }}">
-                <td><span class="drag-handle" title="Drag to reorder">⠿</span></td>
-                <td>
-                  {{ field.label }}
-                  {% if field.is_notes_field %}<span class="text-dim" style="font-size:10px"> (notes)</span>{% endif %}
-                </td>
-                <td><span class="field-type-badge">{{ field.field_type }}</span></td>
-                <td class="text-dim" style="font-size:11px;font-family:var(--font-mono)">{{ field.conditional_show_when or '—' }}</td>
-                <td>
-                  <div class="action-btns">
-                    <button class="btn btn-xs btn-ghost" onclick="openFieldModal({{ field.id }}, {{ section.id }})">Edit</button>
-                    <button class="btn btn-xs btn-danger-ghost" onclick="deleteField({{ field.id }})">×</button>
-                  </div>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-          <div style="padding:10px 14px;border-top:1px solid var(--border)">
-            <button class="btn btn-sm btn-ghost" onclick="openFieldModal(null, {{ section.id }})">+ Add Field</button>
-          </div>
+  {# Sub-tab nav within Form Fields #}
+  <div class="tab-nav" style="margin-bottom:16px">
+    <button class="tab-btn active" id="ftab-btn-advance" onclick="switchFieldsTab('advance')">Advance Fields</button>
+    <button class="tab-btn" id="ftab-btn-schedule" onclick="switchFieldsTab('schedule')">Schedule Fields</button>
+    <button class="tab-btn" id="ftab-btn-templates" onclick="switchFieldsTab('templates')">Day Templates</button>
+  </div>
+
+  {# ── Page 1: Advance Form Fields ──────────────────────────────────────── #}
+  <div id="ftab-advance" class="ftab-pane">
+    <div class="form-section">
+      <div class="form-section-header">
+        <span class="section-icon">◈</span> ADVANCE FORM FIELDS
+        <div class="action-btns ml-auto">
+          <button class="btn btn-sm btn-ghost" onclick="openSectionModal(null)">+ Add Section</button>
         </div>
       </div>
-      {% endfor %}
+      <div class="form-section-body" style="gap:16px">
+        <p class="text-dim" style="font-size:12px">
+          Drag the <strong>⠿</strong> handle to reorder sections or fields. Changes take effect immediately for all shows.
+        </p>
 
-      {# ── Schedule Template ─────────────────────────────────────────────── #}
-      <div class="form-section" style="margin-top:16px">
-        <div class="form-section-header">
-          <span class="section-icon">◈</span> SCHEDULE TEMPLATE — VENUE &amp; TECH INFO
-          <div class="action-btns ml-auto">
-            <button class="btn btn-sm btn-ghost" onclick="openSchedFieldModal(null)">+ Add Field</button>
-          </div>
-        </div>
-        <div class="form-section-body no-pad">
-          <table class="field-editor-table">
-            <thead>
-              <tr>
-                <th style="width:28px"></th>
-                <th>LABEL</th>
-                <th style="width:90px">TYPE</th>
-                <th style="width:90px">WIDTH</th>
-                <th>FROM ADVANCE FIELD</th>
-                <th style="width:80px">ACTIONS</th>
-              </tr>
-            </thead>
-            <tbody id="sched-meta-fields-tbody">
-              {% for f in (sched_meta_fields if sched_meta_fields is defined else []) %}
-              <tr class="sched-meta-row" draggable="true" data-id="{{ f.id }}">
-                <td><span class="drag-handle" title="Drag to reorder">⠿</span></td>
-                <td>{{ f.label }}</td>
-                <td><span class="field-type-badge">{{ f.field_type }}</span></td>
-                <td class="text-dim" style="font-size:11px">{{ f.width_hint }}</td>
-                <td class="text-dim" style="font-size:11px;font-family:var(--font-mono)">{{ f.advance_field_key or '—' }}</td>
-                <td>
-                  <div class="action-btns">
-                    <button class="btn btn-xs btn-ghost" onclick="openSchedFieldModal({{ f.id }})">Edit</button>
-                    <button class="btn btn-xs btn-danger-ghost" onclick="deleteSchedField({{ f.id }})">×</button>
-                  </div>
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {# ── Schedule Day Templates ─────────────────────────────────────────── #}
-      <div class="form-section" style="margin-top:16px">
-        <div class="form-section-header">
-          <span class="section-icon">◈</span> SCHEDULE DAY TEMPLATES
-          <div class="action-btns ml-auto">
-            <button class="btn btn-sm btn-ghost" onclick="openSchedTemplateModal(null)">+ New Template</button>
-          </div>
-        </div>
-        <div class="form-section-body" style="gap:10px">
-          <p class="text-dim" style="font-size:12px">Pre-built timelines (Load In, Concert, etc.) you can apply to any schedule day with one click.</p>
-          {% if sched_templates %}
-          {% for t in sched_templates %}
-          <div class="section-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg-hover);border-radius:4px">
-            <span style="font-size:12px;font-weight:600">{{ t.name }}</span>
+        {% for section in (form_sections if form_sections is defined else []) %}
+        <div class="form-section" data-section-id="{{ section.id }}" style="margin-bottom:0">
+          <div class="form-section-header" style="background:var(--bg-hover)">
+            <span class="section-drag-handle drag-handle" title="Drag to reorder section" style="cursor:grab;margin-right:6px;font-size:14px;color:var(--text-muted)">⠿</span>
+            <span class="section-icon">{{ section.icon }}</span>
+            <strong style="font-size:12px;color:var(--text);letter-spacing:normal;text-transform:none">{{ section.label }}</strong>
+            <span class="text-dim" style="font-size:10px;font-weight:400;letter-spacing:0">({{ section.fields|length }} fields)</span>
             <div class="action-btns ml-auto">
-              <button class="btn btn-xs btn-ghost" onclick="openSchedTemplateModal({{ t.id }})">Edit</button>
-              <button class="btn btn-xs btn-danger-ghost" onclick="deleteSchedTemplate({{ t.id }})">Delete</button>
+              <button class="btn btn-xs btn-ghost" onclick="openSectionModal({{ section.id }})"
+                      data-id="{{ section.id }}" data-label="{{ section.label }}"
+                      data-icon="{{ section.icon }}" data-collapsible="{{ '1' if section.collapsible else '0' }}"
+                      data-default-open="{{ '0' if section.default_open == 0 else '1' }}">Edit</button>
+              <button class="btn btn-xs btn-danger-ghost" onclick="deleteSection({{ section.id }})">Delete</button>
             </div>
           </div>
-          {% endfor %}
-          {% else %}
-          <p class="text-dim" style="font-size:12px">No templates yet. Click + New Template to create one.</p>
-          {% endif %}
+          <div class="form-section-body no-pad">
+            <table class="field-editor-table">
+              <thead>
+                <tr>
+                  <th style="width:28px"></th>
+                  <th>LABEL</th>
+                  <th style="width:120px">TYPE</th>
+                  <th style="width:140px">CONDITION</th>
+                  <th style="width:80px">ACTIONS</th>
+                </tr>
+              </thead>
+              <tbody data-section-id="{{ section.id }}">
+                {% for field in section.fields %}
+                <tr class="field-row" draggable="true" data-id="{{ field.id }}">
+                  <td><span class="drag-handle" title="Drag to reorder">⠿</span></td>
+                  <td>
+                    {{ field.label }}
+                    {% if field.is_notes_field %}<span class="text-dim" style="font-size:10px"> (notes)</span>{% endif %}
+                  </td>
+                  <td><span class="field-type-badge">{{ field.field_type }}</span></td>
+                  <td class="text-dim" style="font-size:11px;font-family:var(--font-mono)">{{ field.conditional_show_when or '—' }}</td>
+                  <td>
+                    <div class="action-btns">
+                      <button class="btn btn-xs btn-ghost" onclick="openFieldModal({{ field.id }}, {{ section.id }})">Edit</button>
+                      <button class="btn btn-xs btn-danger-ghost" onclick="deleteField({{ field.id }})">×</button>
+                    </div>
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+            <div style="padding:10px 14px;border-top:1px solid var(--border)">
+              <button class="btn btn-sm btn-ghost" onclick="openFieldModal(null, {{ section.id }})">+ Add Field</button>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>{# end ftab-advance #}
+
+  {# ── Page 2: Schedule Fields ──────────────────────────────────────────── #}
+  <div id="ftab-schedule" class="ftab-pane" style="display:none">
+    <div class="form-section">
+      <div class="form-section-header">
+        <span class="section-icon">◈</span> SCHEDULE TEMPLATE — VENUE &amp; TECH INFO
+        <div class="action-btns ml-auto">
+          <button class="btn btn-sm btn-ghost" onclick="openSchedFieldModal(null)">+ Add Field</button>
         </div>
       </div>
-
+      <div class="form-section-body no-pad">
+        <table class="field-editor-table">
+          <thead>
+            <tr>
+              <th style="width:28px"></th>
+              <th>LABEL</th>
+              <th style="width:90px">TYPE</th>
+              <th style="width:90px">WIDTH</th>
+              <th>FROM ADVANCE FIELD</th>
+              <th style="width:80px">ACTIONS</th>
+            </tr>
+          </thead>
+          <tbody id="sched-meta-fields-tbody">
+            {% for f in (sched_meta_fields if sched_meta_fields is defined else []) %}
+            <tr class="sched-meta-row" draggable="true" data-id="{{ f.id }}">
+              <td><span class="drag-handle" title="Drag to reorder">⠿</span></td>
+              <td>{{ f.label }}</td>
+              <td><span class="field-type-badge">{{ f.field_type }}</span></td>
+              <td class="text-dim" style="font-size:11px">{{ f.width_hint }}</td>
+              <td class="text-dim" style="font-size:11px;font-family:var(--font-mono)">{{ f.advance_field_key or '—' }}</td>
+              <td>
+                <div class="action-btns">
+                  <button class="btn btn-xs btn-ghost" onclick="openSchedFieldModal({{ f.id }})">Edit</button>
+                  <button class="btn btn-xs btn-danger-ghost" onclick="deleteSchedField({{ f.id }})">×</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>
+  </div>{# end ftab-schedule #}
+
+  {# ── Page 3: Day Templates ────────────────────────────────────────────── #}
+  <div id="ftab-templates" class="ftab-pane" style="display:none">
+    <div class="form-section">
+      <div class="form-section-header">
+        <span class="section-icon">◈</span> SCHEDULE DAY TEMPLATES
+        <div class="action-btns ml-auto">
+          <button class="btn btn-sm btn-ghost" onclick="openSchedTemplateModal(null)">+ New Template</button>
+        </div>
+      </div>
+      <div class="form-section-body" style="gap:10px">
+        <p class="text-dim" style="font-size:12px">Pre-built timelines (Load In, Concert, etc.) you can apply to any schedule day with one click.</p>
+        {% if sched_templates %}
+        {% for t in sched_templates %}
+        <div class="section-row" style="display:flex;align-items:center;gap:10px;padding:8px 10px;background:var(--bg-hover);border-radius:4px">
+          <span style="font-size:12px;font-weight:600">{{ t.name }}</span>
+          <div class="action-btns ml-auto">
+            <button class="btn btn-xs btn-ghost" onclick="openSchedTemplateModal({{ t.id }})">Edit</button>
+            <button class="btn btn-xs btn-danger-ghost" onclick="deleteSchedTemplate({{ t.id }})">Delete</button>
+          </div>
+        </div>
+        {% endfor %}
+        {% else %}
+        <p class="text-dim" style="font-size:12px">No templates yet. Click + New Template to create one.</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>{# end ftab-templates #}
+
 </div>
 {% endif %}{# end fields admin/content_admin #}
 
@@ -901,6 +916,16 @@
 
 {% block scripts %}
 <script>
+/* ── Form Fields Sub-tab Switcher ──────────────────────────────── */
+function switchFieldsTab(name) {
+  ['advance','schedule','templates'].forEach(t => {
+    const pane = document.getElementById('ftab-' + t);
+    const btn  = document.getElementById('ftab-btn-' + t);
+    if (pane) pane.style.display = (t === name) ? '' : 'none';
+    if (btn)  btn.classList.toggle('active', t === name);
+  });
+}
+
 /* ── Settings Tab Switcher ─────────────────────────────────────── */
 const ALL_STABS = ['contacts','users','groups','fields','syslog','backups','account','files','godmode'];
 

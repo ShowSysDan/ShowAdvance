@@ -224,6 +224,7 @@ function initShow(showId, initialTab) {
   initComments();
   evaluateAllConditionals();
   _bindScheduleTimeParsing();
+  _initRowDrag();
 
   // 30-second safety-net: flush any unsaved changes that the debounce
   // may have missed (e.g. browser regained focus, slow typing bursts).
@@ -357,19 +358,84 @@ function addScheduleRow(perfId) {
   const tr = document.createElement('tr');
   tr.className = 'schedule-row';
   tr.innerHTML = `
-    <td><input type="text" class="sched-cell" placeholder="3:00pm" value=""></td>
-    <td><input type="text" class="sched-cell" placeholder="4:00pm" value=""></td>
+    <td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>
+    <td><input type="text" class="sched-cell" placeholder="15:00" value=""></td>
+    <td><input type="text" class="sched-cell" placeholder="16:00" value=""></td>
     <td><input type="text" class="sched-cell" placeholder="Description" value=""></td>
     <td><input type="text" class="sched-cell" placeholder="Notes" value=""></td>
     <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
   `;
   tbody.appendChild(tr);
-  tr.querySelector('.sched-cell').focus();
+  _bindRowDrag(tr);
+  tr.querySelectorAll('.sched-cell')[0].focus();
 }
 
 function removeRow(btn) {
   btn.closest('tr').remove();
   scheduleSave();
+}
+
+/* ── Sort schedule rows by start time ──────────────────────────── */
+function sortSchedRowsByTime(perfId) {
+  const tbodyId = (perfId !== null && perfId !== undefined) ? `schedule-rows-${perfId}` : 'schedule-rows-null';
+  const tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll('.schedule-row'));
+  rows.sort((a, b) => {
+    const ta = a.querySelectorAll('.sched-cell')[0]?.value || '';
+    const tb = b.querySelectorAll('.sched-cell')[0]?.value || '';
+    const na = parseTimeToHHMM(ta);
+    const nb = parseTimeToHHMM(tb);
+    // Empty times sort to the end
+    if (!ta && !tb) return 0;
+    if (!ta) return 1;
+    if (!tb) return -1;
+    return na < nb ? -1 : na > nb ? 1 : 0;
+  });
+  rows.forEach(r => tbody.appendChild(r));
+  scheduleSave();
+}
+
+/* ── Drag-to-reorder schedule rows ─────────────────────────────── */
+let _dragSrc = null;
+
+function _bindRowDrag(tr) {
+  tr.draggable = true;
+  tr.addEventListener('dragstart', function(e) {
+    _dragSrc = this;
+    e.dataTransfer.effectAllowed = 'move';
+    this.classList.add('row-dragging');
+  });
+  tr.addEventListener('dragend', function() {
+    this.classList.remove('row-dragging');
+    document.querySelectorAll('.schedule-row.row-drag-over').forEach(r => r.classList.remove('row-drag-over'));
+    _dragSrc = null;
+    scheduleSave();
+  });
+  tr.addEventListener('dragover', function(e) {
+    if (!_dragSrc || _dragSrc === this) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    document.querySelectorAll('.schedule-row.row-drag-over').forEach(r => r.classList.remove('row-drag-over'));
+    this.classList.add('row-drag-over');
+  });
+  tr.addEventListener('drop', function(e) {
+    if (!_dragSrc || _dragSrc === this) return;
+    e.preventDefault();
+    const tbody = this.parentNode;
+    const rows = Array.from(tbody.querySelectorAll('.schedule-row'));
+    const srcIdx = rows.indexOf(_dragSrc);
+    const tgtIdx = rows.indexOf(this);
+    if (srcIdx < tgtIdx) {
+      tbody.insertBefore(_dragSrc, this.nextSibling);
+    } else {
+      tbody.insertBefore(_dragSrc, this);
+    }
+  });
+}
+
+function _initRowDrag() {
+  document.querySelectorAll('.schedule-row').forEach(tr => _bindRowDrag(tr));
 }
 
 function switchSchedDay(perfId, btn) {
@@ -381,6 +447,7 @@ function switchSchedDay(perfId, btn) {
   btn.classList.remove('btn-ghost');
   document.querySelectorAll('.sched-day-pane').forEach(p => {
     const show = p.dataset.perfId == perfId;
+    p.classList.toggle('hidden', !show);
     p.style.display = show ? '' : 'none';
   });
 }
@@ -397,13 +464,15 @@ function copySchedDay(sourcePerfId, targetPerfId) {
     const tr = document.createElement('tr');
     tr.className = 'schedule-row';
     tr.innerHTML = `
-      <td><input type="text" class="sched-cell" placeholder="3:00pm" value="${cells[0]?.value || ''}"></td>
-      <td><input type="text" class="sched-cell" placeholder="4:00pm" value="${cells[1]?.value || ''}"></td>
+      <td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>
+      <td><input type="text" class="sched-cell" placeholder="15:00" value="${cells[0]?.value || ''}"></td>
+      <td><input type="text" class="sched-cell" placeholder="16:00" value="${cells[1]?.value || ''}"></td>
       <td><input type="text" class="sched-cell" placeholder="Description" value="${cells[2]?.value || ''}"></td>
       <td><input type="text" class="sched-cell" placeholder="Notes" value="${cells[3]?.value || ''}"></td>
       <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
     `;
     tgt.appendChild(tr);
+    _bindRowDrag(tr);
   });
   scheduleSave();
 }
@@ -415,13 +484,15 @@ function pullAdvanceTime(perfId, perfTime) {
   const tr = document.createElement('tr');
   tr.className = 'schedule-row';
   tr.innerHTML = `
-    <td><input type="text" class="sched-cell" value="${perfTime}"></td>
-    <td><input type="text" class="sched-cell" placeholder="4:00pm" value=""></td>
+    <td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>
+    <td><input type="text" class="sched-cell" value="${parseTimeToHHMM(perfTime)}"></td>
+    <td><input type="text" class="sched-cell" placeholder="16:00" value=""></td>
     <td><input type="text" class="sched-cell" value="SHOW START"></td>
     <td><input type="text" class="sched-cell" placeholder="Notes" value=""></td>
     <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
   `;
   tbody.insertBefore(tr, tbody.firstChild);
+  _bindRowDrag(tr);
   scheduleSave();
 }
 
@@ -439,13 +510,15 @@ async function applySchedTemplate(templateId, perfId) {
     const tr = document.createElement('tr');
     tr.className = 'schedule-row';
     tr.innerHTML = `
-      <td><input type="text" class="sched-cell" placeholder="3:00pm" value="${r.start_time || ''}"></td>
-      <td><input type="text" class="sched-cell" placeholder="4:00pm" value="${r.end_time || ''}"></td>
+      <td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>
+      <td><input type="text" class="sched-cell" placeholder="15:00" value="${r.start_time || ''}"></td>
+      <td><input type="text" class="sched-cell" placeholder="16:00" value="${r.end_time || ''}"></td>
       <td><input type="text" class="sched-cell" placeholder="Description" value="${r.description || ''}"></td>
       <td><input type="text" class="sched-cell" placeholder="Notes" value="${r.notes || ''}"></td>
       <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
     `;
     tbody.appendChild(tr);
+    _bindRowDrag(tr);
   });
   scheduleSave();
 }
@@ -1644,14 +1717,14 @@ function parseTimeToHHMM(str) {
   return String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
 }
 
-// Bind time normalisation to schedule table time cells on blur
+// Bind time normalisation to all schedule time cells on blur
 function _bindScheduleTimeParsing() {
-  const table = document.getElementById('schedule-table');
-  if (!table) return;
-  table.addEventListener('blur', function(e) {
+  const form = document.getElementById('schedule-form');
+  if (!form) return;
+  form.addEventListener('blur', function(e) {
     const td = e.target.closest('td');
     if (!td) return;
-    const tr = td.closest('tr');
+    const tr = td.closest('tr.schedule-row');
     if (!tr) return;
     const cells = tr.querySelectorAll('.sched-cell');
     if (e.target === cells[0] || e.target === cells[1]) {

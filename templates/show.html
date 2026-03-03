@@ -315,7 +315,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
         <span class="section-icon">◈</span>
         TIMELINE{% if performances | length > 1 %} — DAY {{ loop.index }}{% if p.perf_date %}: {{ p.perf_date }}{% endif %}{% if p.perf_time %} {{ p.perf_time }}{% endif %}{% endif %}
         {% if not restricted %}
-        <div style="display:flex;gap:6px;align-items:center;margin-left:auto">
+        <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
           {# Apply template dropdown #}
           {% if sched_templates %}
           <select class="field-input" style="width:auto;font-size:11px;padding:3px 6px;height:auto"
@@ -343,6 +343,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
           <button type="button" class="btn btn-sm btn-ghost"
                   onclick="pullAdvanceTime({{ p.id }}, '{{ p.perf_time | e }}')">Pull time</button>
           {% endif %}
+          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime({{ p.id }})" title="Sort rows by start time">⇅ Sort</button>
           <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow({{ p.id }})">+ Add Row</button>
         </div>
         {% endif %}
@@ -351,8 +352,9 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
         <table class="schedule-table">
           <thead>
             <tr>
-              <th style="width:110px">START</th>
-              <th style="width:110px">END</th>
+              {% if not restricted %}<th style="width:24px"></th>{% endif %}
+              <th style="width:100px">START</th>
+              <th style="width:100px">END</th>
               <th>DESCRIPTION</th>
               <th style="width:160px">NOTES</th>
               {% if not restricted %}<th style="width:40px"></th>{% endif %}
@@ -361,18 +363,20 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
           <tbody id="schedule-rows-{{ p.id }}">
             {% if day_rows %}
               {% for row in day_rows %}
-              <tr class="schedule-row">
-                <td><input type="text" class="sched-cell" placeholder="3:00pm" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="4:00pm" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
+              <tr class="schedule-row" draggable="true">
+                {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+                <td><input type="text" class="sched-cell" placeholder="15:00" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
+                <td><input type="text" class="sched-cell" placeholder="16:00" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
                 <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
                 <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
                 {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)" title="Remove">×</button></td>{% endif %}
               </tr>
               {% endfor %}
             {% else %}
-              <tr class="schedule-row">
-                <td><input type="text" class="sched-cell" placeholder="3:00pm" value="" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="4:00pm" value="" {% if restricted %}disabled{% endif %}></td>
+              <tr class="schedule-row" draggable="true">
+                {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+                <td><input type="text" class="sched-cell" placeholder="15:00" value="" {% if restricted %}disabled{% endif %}></td>
+                <td><input type="text" class="sched-cell" placeholder="16:00" value="" {% if restricted %}disabled{% endif %}></td>
                 <td><input type="text" class="sched-cell" placeholder="Crew Called" value="" {% if restricted %}disabled{% endif %}></td>
                 <td><input type="text" class="sched-cell" placeholder="" value="" {% if restricted %}disabled{% endif %}></td>
                 {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
@@ -384,6 +388,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
       {% if not restricted %}
       <div class="form-section-footer">
         <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow({{ p.id }})">+ Add Row</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedRowsByTime({{ p.id }})">⇅ Sort by time</button>
       </div>
       {% endif %}
     </div>
@@ -395,7 +400,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
       <div class="form-section-header">
         <span class="section-icon">◈</span> TIMELINE
         {% if not restricted %}
-        <div style="display:flex;gap:6px;align-items:center;margin-left:auto">
+        <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
           {% if sched_templates %}
           <select class="field-input" style="width:auto;font-size:11px;padding:3px 6px;height:auto"
                   onchange="applySchedTemplate(this.value, null); this.value=''">
@@ -405,6 +410,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
             {% endfor %}
           </select>
           {% endif %}
+          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime(null)" title="Sort rows by start time">⇅ Sort</button>
           <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow(null)">+ Add Row</button>
         </div>
         {% endif %}
@@ -412,7 +418,8 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
       <div class="form-section-body no-pad">
         <table class="schedule-table">
           <thead><tr>
-            <th style="width:110px">START</th><th style="width:110px">END</th>
+            {% if not restricted %}<th style="width:22px"></th>{% endif %}
+            <th style="width:90px">START</th><th style="width:90px">END</th>
             <th>DESCRIPTION</th><th style="width:160px">NOTES</th>
             {% if not restricted %}<th style="width:40px"></th>{% endif %}
           </tr></thead>
@@ -420,18 +427,20 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
             {% set null_rows = schedule_rows | selectattr('perf_id', 'none') | list %}
             {% if null_rows %}
               {% for row in null_rows %}
-              <tr class="schedule-row">
-                <td><input type="text" class="sched-cell" placeholder="3:00pm" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="4:00pm" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
+              <tr class="schedule-row" draggable="true">
+                {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+                <td><input type="text" class="sched-cell" placeholder="15:00" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
+                <td><input type="text" class="sched-cell" placeholder="16:00" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
                 <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
                 <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
                 {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
               </tr>
               {% endfor %}
             {% else %}
-              <tr class="schedule-row">
-                <td><input type="text" class="sched-cell" placeholder="3:00pm" value="" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="4:00pm" value="" {% if restricted %}disabled{% endif %}></td>
+              <tr class="schedule-row" draggable="true">
+                {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+                <td><input type="text" class="sched-cell" placeholder="15:00" value="" {% if restricted %}disabled{% endif %}></td>
+                <td><input type="text" class="sched-cell" placeholder="16:00" value="" {% if restricted %}disabled{% endif %}></td>
                 <td><input type="text" class="sched-cell" placeholder="Crew Called" value="" {% if restricted %}disabled{% endif %}></td>
                 <td><input type="text" class="sched-cell" placeholder="" value="" {% if restricted %}disabled{% endif %}></td>
                 {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
@@ -443,6 +452,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
       {% if not restricted %}
       <div class="form-section-footer">
         <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow(null)">+ Add Row</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedRowsByTime(null)">⇅ Sort by time</button>
       </div>
       {% endif %}
     </div>
@@ -533,7 +543,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
         <div class="field-group">
           <label class="field-label">CREW CALLED</label>
           <input type="text" class="field-input notes-field" data-key="crew_called"
-                 value="{{ note('crew_called') }}" placeholder="e.g. 3:00pm" {% if restricted %}disabled{% endif %}>
+                 value="{{ note('crew_called') }}" placeholder="e.g. 15:00" {% if restricted %}disabled{% endif %}>
         </div>
       </div>
 

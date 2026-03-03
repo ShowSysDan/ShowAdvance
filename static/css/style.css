@@ -386,6 +386,11 @@ button.section-label:hover { color: var(--text); }
 .sched-day-tabs { display: flex; gap: 6px; margin-bottom: 0; padding: 12px 16px 0; background: var(--bg-surface); border: 1px solid var(--border); border-bottom: none; border-radius: 6px 6px 0 0; flex-wrap: wrap; }
 .sched-day-pane .form-section { border-top: none; border-radius: 0 0 6px 6px; }
 .sched-day-pane.hidden, .sched-day-pane[style*="display:none"] { display: none !important; }
+.drag-col { width: 22px; padding: 0 4px !important; }
+.row-drag-handle { cursor: grab; color: var(--text-muted); font-size: 14px; user-select: none; display: inline-block; padding: 0 2px; }
+.row-drag-handle:active { cursor: grabbing; }
+.schedule-row.row-dragging { opacity: 0.4; }
+.schedule-row.row-drag-over { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* ── Export Tab ──────────────────────────────────────────────────── */
 .export-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 24px; }
