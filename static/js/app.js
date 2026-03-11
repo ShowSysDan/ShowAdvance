@@ -1746,6 +1746,253 @@ function _bindScheduleTimeParsing() {
    READ RECEIPTS
 ═══════════════════════════════════════════════════════════════ */
 
+/* ═══════════════════════════════════════════════════════════════
+   FIELD KEY AUTO-POPULATE + AVAILABILITY CHECK
+═══════════════════════════════════════════════════════════════ */
+
+(function initFieldKeyAutoPopulate() {
+  // Wait for DOM to be ready
+  function setup() {
+    const modal = document.getElementById('field-modal');
+    if (!modal) return;
+
+    const labelInput = modal.querySelector('[name="label"]');
+    const keyInput   = modal.querySelector('[name="field_key"]');
+    if (!labelInput || !keyInput) return;
+
+    let _manuallyEdited = false;
+    let _debounceTimer  = null;
+
+    function slugify(str) {
+      return str.toLowerCase()
+        .replace(/[^a-z0-9\s_]/g, '')
+        .trim()
+        .replace(/\s+/g, '_');
+    }
+
+    function checkAvailability(key) {
+      const statusEl = document.getElementById('field-key-status');
+      if (!statusEl || !key) { if (statusEl) statusEl.style.display = 'none'; return; }
+      const excludeId = window._editFieldId || '';
+      const url = `/settings/form-fields/check-key?key=${encodeURIComponent(key)}${excludeId ? '&exclude_id='+excludeId : ''}`;
+      fetch(url).then(r => r.json()).then(d => {
+        statusEl.style.display = '';
+        if (d.available) {
+          statusEl.textContent = '✓ field_key is available';
+          statusEl.style.color = 'var(--success, #4caf50)';
+        } else {
+          statusEl.textContent = `✗ field_key already used by: "${d.conflict || 'another field'}"`;
+          statusEl.style.color = 'var(--danger, #f44336)';
+        }
+      }).catch(() => {});
+    }
+
+    labelInput.addEventListener('input', function() {
+      if (!_manuallyEdited && !window._editFieldId) {
+        const generated = slugify(labelInput.value);
+        keyInput.value = generated;
+        clearTimeout(_debounceTimer);
+        _debounceTimer = setTimeout(() => checkAvailability(generated), 300);
+      }
+    });
+
+    keyInput.addEventListener('input', function() {
+      _manuallyEdited = true;
+      clearTimeout(_debounceTimer);
+      _debounceTimer = setTimeout(() => checkAvailability(keyInput.value), 300);
+    });
+
+    // Reset manuallyEdited when modal opens fresh (new field)
+    const origOpen = window.openFieldModal;
+    window.openFieldModal = function(fid, sectionId) {
+      _manuallyEdited = !!fid;  // editing = already has key, don't auto-fill
+      const statusEl = document.getElementById('field-key-status');
+      if (statusEl) statusEl.style.display = 'none';
+      if (origOpen) origOpen(fid, sectionId);
+      // If editing, check current key availability after modal loads
+      if (fid) {
+        setTimeout(() => checkAvailability(keyInput.value), 500);
+      }
+    };
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setup);
+  } else {
+    setup();
+  }
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   AI DOCUMENT EXTRACTION
+═══════════════════════════════════════════════════════════════ */
+
+function openAiExtract() {
+  const modal = document.getElementById('ai-extract-modal');
+  if (!modal) return;
+  resetAiExtract();
+  // Load attachments for dropdown
+  if (SHOW_ID) {
+    fetch(`/shows/${SHOW_ID}/attachments`).then(r => r.json()).then(attachments => {
+      const sel = document.getElementById('ai-attachment-select');
+      if (!sel) return;
+      sel.innerHTML = '<option value="">— Select attachment —</option>';
+      (Array.isArray(attachments) ? attachments : []).forEach(a => {
+        if (a.mime_type === 'application/pdf' || a.filename.toLowerCase().endsWith('.pdf') ||
+            a.mime_type === 'text/plain' || a.filename.toLowerCase().endsWith('.txt')) {
+          const opt = document.createElement('option');
+          opt.value = a.id;
+          opt.textContent = a.filename;
+          sel.appendChild(opt);
+        }
+      });
+    }).catch(() => {});
+  }
+  modal.style.display = '';
+}
+
+function closeAiExtract() {
+  const modal = document.getElementById('ai-extract-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+function resetAiExtract() {
+  document.getElementById('ai-upload-section').style.display = '';
+  document.getElementById('ai-results-section').style.display = 'none';
+  const fileInput = document.getElementById('ai-file-input');
+  if (fileInput) fileInput.value = '';
+  const sel = document.getElementById('ai-attachment-select');
+  if (sel) sel.value = '';
+  const msg = document.getElementById('ai-upload-msg');
+  if (msg) { msg.style.display = 'none'; msg.textContent = ''; }
+}
+
+async function runAiExtract() {
+  const fileInput = document.getElementById('ai-file-input');
+  const attachSel = document.getElementById('ai-attachment-select');
+  const msgEl     = document.getElementById('ai-upload-msg');
+
+  const hasFile   = fileInput && fileInput.files && fileInput.files.length > 0;
+  const attachId  = attachSel ? attachSel.value : '';
+
+  if (!hasFile && !attachId) {
+    msgEl.style.display = '';
+    msgEl.textContent = 'Please upload a document or select an existing attachment.';
+    msgEl.style.color = 'var(--danger, #f44336)';
+    return;
+  }
+
+  msgEl.style.display = '';
+  msgEl.textContent = 'Extracting... this may take 10–60 seconds depending on document size and model.';
+  msgEl.style.color = 'var(--text-dim)';
+
+  const formData = new FormData();
+  if (hasFile) {
+    formData.append('document', fileInput.files[0]);
+  } else {
+    formData.append('attachment_id', attachId);
+  }
+
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/ai-extract`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await resp.json();
+
+    if (!data.success) {
+      msgEl.style.display = '';
+      msgEl.textContent = 'Error: ' + (data.error || 'Unknown error');
+      msgEl.style.color = 'var(--danger, #f44336)';
+      return;
+    }
+
+    _showAiSuggestions(data);
+  } catch(e) {
+    msgEl.style.display = '';
+    msgEl.textContent = 'Network error: ' + e.message;
+    msgEl.style.color = 'var(--danger, #f44336)';
+  }
+}
+
+function _showAiSuggestions(data) {
+  document.getElementById('ai-upload-section').style.display = 'none';
+  document.getElementById('ai-results-section').style.display = '';
+
+  const header = document.getElementById('ai-results-header');
+  const list   = document.getElementById('ai-suggestions-list');
+  const applyBtn = document.getElementById('ai-apply-btn');
+
+  const count = Object.keys(data.suggestions || {}).length;
+  header.textContent = `Document: ${data.document}  ·  Model: ${data.model}  ·  ${count} field${count !== 1 ? 's' : ''} found`;
+
+  if (!count) {
+    list.innerHTML = '<p style="font-size:13px;color:var(--text-dim)">No fields could be extracted from this document. Make sure fields have AI hints configured in Settings → Form Fields.</p>';
+    if (applyBtn) applyBtn.disabled = true;
+    return;
+  }
+
+  if (applyBtn) applyBtn.disabled = false;
+
+  list.innerHTML = Object.entries(data.suggestions).map(([key, s]) => `
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <input type="checkbox" class="ai-suggestion-check" data-key="${_esc(key)}" data-value="${_esc(s.value)}" checked style="margin-top:3px;flex-shrink:0">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--text-dim)">${_esc(s.label)}</div>
+        <div style="font-size:13px;margin-top:2px;word-break:break-word">${_esc(s.value)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function applyAiSuggestions() {
+  const checks = document.querySelectorAll('.ai-suggestion-check:checked');
+  if (!checks.length) { alert('No fields selected.'); return; }
+
+  const applyBtn = document.getElementById('ai-apply-btn');
+  if (applyBtn) applyBtn.disabled = true;
+
+  // Build payload: {field_key: value, ...}
+  const payload = {};
+  checks.forEach(cb => { payload[cb.dataset.key] = cb.dataset.value; });
+
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/save/advance`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const d = await resp.json();
+    if (d.success) {
+      // Update fields in the UI
+      Object.entries(payload).forEach(([key, value]) => {
+        const fieldEl = document.querySelector(`[data-key="${key}"]`);
+        if (fieldEl) {
+          if (fieldEl.tagName === 'INPUT' || fieldEl.tagName === 'TEXTAREA') {
+            fieldEl.value = value;
+          } else if (fieldEl.tagName === 'SELECT') {
+            fieldEl.value = value;
+          }
+        }
+      });
+      closeAiExtract();
+      const statusEl = document.getElementById('save-status');
+      if (statusEl) {
+        const count = Object.keys(payload).length;
+        statusEl.textContent = `AI applied ${count} field${count !== 1 ? 's' : ''}`;
+        setTimeout(() => { if (statusEl.textContent.startsWith('AI')) statusEl.textContent = ''; }, 3000);
+      }
+    } else {
+      alert('Apply failed: ' + (d.error || 'Unknown error'));
+      if (applyBtn) applyBtn.disabled = false;
+    }
+  } catch(e) {
+    alert('Network error: ' + e.message);
+    if (applyBtn) applyBtn.disabled = false;
+  }
+}
+
 function markAdvanceRead() {
   if (!SHOW_ID) return;
   fetch(`/shows/${SHOW_ID}/read`, {method:'POST'}).catch(() => {});

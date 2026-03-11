@@ -25,6 +25,8 @@
   <button class="tab-btn" onclick="switchSettingsTab('syslog')">Syslog</button>
   <button class="tab-btn" onclick="switchSettingsTab('backups')">Backups</button>
   <button class="tab-btn" onclick="switchSettingsTab('files')">Files</button>
+  <button class="tab-btn" onclick="switchSettingsTab('database')">Database</button>
+  <button class="tab-btn" onclick="switchSettingsTab('ai')">AI</button>
   <button class="tab-btn" onclick="switchSettingsTab('godmode')">God Mode</button>
   {% endif %}
   <button class="tab-btn" onclick="switchSettingsTab('account')">My Account</button>
@@ -644,6 +646,114 @@
 </div>
 {% endif %}
 
+{# ── DATABASE ──────────────────────────────────────────────────────────────── #}
+{% if user.role == 'admin' %}
+<div id="stab-database" class="stab-pane" style="display:none">
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> DATABASE CONFIGURATION</div>
+    <div class="form-section-body" style="max-width:600px">
+      <p class="field-hint" style="margin-bottom:16px">Configure the database backend. SQLite is the default for single-server installs. PostgreSQL supports multiple apps sharing one database via schema namespacing.</p>
+      <div class="field-group">
+        <label class="field-label">DATABASE TYPE</label>
+        <select id="db-type" class="field-input" onchange="toggleDbFields()" style="max-width:240px">
+          <option value="sqlite" {% if (db_settings.db_type or 'sqlite') == 'sqlite' %}selected{% endif %}>SQLite (local file)</option>
+          <option value="postgres" {% if db_settings.db_type == 'postgres' %}selected{% endif %}>PostgreSQL</option>
+        </select>
+      </div>
+      <div id="pg-fields" style="display:{% if db_settings.db_type == 'postgres' %}block{% else %}none{% endif %}">
+        <div class="form-row cols-2">
+          <div class="field-group">
+            <label class="field-label">HOST</label>
+            <input type="text" id="pg-host" class="field-input" value="{{ db_settings.pg_host or 'localhost' }}" placeholder="localhost">
+          </div>
+          <div class="field-group">
+            <label class="field-label">PORT</label>
+            <input type="number" id="pg-port" class="field-input" value="{{ db_settings.pg_port or '5432' }}" placeholder="5432" style="max-width:120px">
+          </div>
+        </div>
+        <div class="form-row cols-2">
+          <div class="field-group">
+            <label class="field-label">DATABASE NAME</label>
+            <input type="text" id="pg-dbname" class="field-input" value="{{ db_settings.pg_dbname or 'showadvance' }}" placeholder="showadvance">
+          </div>
+          <div class="field-group">
+            <label class="field-label">SCHEMA <span class="text-dim" style="font-size:10px">(namespace, for multi-app isolation)</span></label>
+            <input type="text" id="pg-schema" class="field-input" value="{{ db_settings.pg_schema or 'showadvance' }}" placeholder="showadvance">
+          </div>
+        </div>
+        <div class="form-row cols-2">
+          <div class="field-group">
+            <label class="field-label">USERNAME</label>
+            <input type="text" id="pg-user" class="field-input" value="{{ db_settings.pg_user or '' }}" autocomplete="off">
+          </div>
+          <div class="field-group">
+            <label class="field-label">PASSWORD</label>
+            <input type="password" id="pg-password" class="field-input" value="" placeholder="(leave blank to keep current)" autocomplete="new-password">
+          </div>
+        </div>
+      </div>
+      <div id="db-msg" class="field-msg" style="display:none;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+        <button class="btn btn-ghost" onclick="testDbConnection()">Test Connection</button>
+        <button class="btn btn-primary" onclick="saveDatabaseSettings()">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section" id="migrate-section" style="margin-bottom:16px;display:{% if db_settings.db_type == 'postgres' %}block{% else %}none{% endif %}">
+    <div class="form-section-header"><span class="section-icon">◈</span> MIGRATE FROM SQLITE → POSTGRESQL</div>
+    <div class="form-section-body">
+      <p class="field-hint" style="margin-bottom:12px">Copy all data from the local SQLite file to PostgreSQL. Safe to run multiple times — duplicate rows are skipped automatically. Run this after configuring and saving PostgreSQL credentials above.</p>
+      <div id="migrate-msg" class="field-msg" style="display:none;margin-bottom:8px"></div>
+      <button class="btn btn-primary" onclick="runMigration()">Migrate Now</button>
+      <div id="migrate-results" style="display:none;margin-top:16px">
+        <table class="data-table" id="migrate-table">
+          <thead><tr><th>TABLE</th><th>COPIED</th><th>SKIPPED</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{# ── AI / OLLAMA ────────────────────────────────────────────────────────────── #}
+{% if user.role == 'admin' %}
+<div id="stab-ai" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> AI EXTRACTION (OLLAMA)</div>
+    <div class="form-section-body" style="max-width:600px">
+      <p class="field-hint" style="margin-bottom:16px">Enable AI-powered document extraction using a locally-hosted Ollama model. Once enabled, users can upload a PDF on any show and the AI will suggest values for fields that have an AI Hint configured.</p>
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="ollama-enabled" {% if ai_settings.ollama_enabled == '1' %}checked{% endif %}>
+          Enable AI extraction
+        </label>
+      </div>
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">OLLAMA URL</label>
+          <input type="text" id="ollama-url" class="field-input" value="{{ ai_settings.ollama_url or 'http://localhost:11434' }}" placeholder="http://localhost:11434">
+        </div>
+        <div class="field-group">
+          <label class="field-label">MODEL</label>
+          <input type="text" id="ollama-model" class="field-input" value="{{ ai_settings.ollama_model or 'llama3.2' }}" placeholder="llama3.2">
+        </div>
+      </div>
+      <div id="ai-msg" class="field-msg" style="display:none;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:12px">
+        <button class="btn btn-ghost" onclick="testAiConnection()">Test Connection</button>
+        <button class="btn btn-primary" onclick="saveAiSettings()">Save Settings</button>
+      </div>
+      <div class="field-hint" style="margin-top:16px">
+        <strong>Setup:</strong> Install <a href="https://ollama.com" target="_blank" style="color:var(--accent)">Ollama</a>, then run: <code style="font-family:var(--font-mono);font-size:11px">ollama pull llama3.2</code><br>
+        For better accuracy on structured extraction, <code style="font-family:var(--font-mono);font-size:11px">mistral</code> or <code style="font-family:var(--font-mono);font-size:11px">llama3.1:8b</code> may perform better.
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ── MY ACCOUNT ────────────────────────────────────────────────────────────── #}
 <div id="stab-account" class="stab-pane" style="display:none">
   <div class="form-section">
@@ -808,6 +918,12 @@
           Collapsible notes field (renders in toggle-open notes section)
         </label>
       </div>
+      <div class="field-group">
+        <label class="field-label">AI HINT <span class="text-dim" style="font-size:10px">(optional — helps AI extract this field from documents)</span></label>
+        <textarea name="ai_hint" class="field-input field-textarea" rows="2" placeholder="e.g. Maximum venue capacity, usually a round number like 500 or 2400"></textarea>
+        <p class="field-hint">Describe what this field contains so the AI knows what to look for in uploaded documents.</p>
+      </div>
+      <div id="field-key-status" style="display:none;font-size:11px;margin-top:-8px;margin-bottom:8px"></div>
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeFieldModal()">Cancel</button>
@@ -1227,9 +1343,130 @@ async function adminDeleteFile(showId, fileId, btn) {
   loadShowOptions();
   // Activate tab from URL hash or server-side default
   const hash = location.hash.replace('#','');
-  const validTabs = ['contacts','users','groups','fields','syslog','backups','account','files','godmode'];
+  const validTabs = ['contacts','users','groups','fields','syslog','backups','account','files','godmode','database','ai'];
   const defaultTab = {% if user.role == 'admin' or is_content_admin %}'contacts'{% else %}'users'{% endif %};
   switchSettingsTab(validTabs.includes(hash) ? hash : {% if active_tab %}'{{ active_tab }}'{% else %}defaultTab{% endif %});
 })();
+
+/* ── Database Settings ──────────────────────────────────────────── */
+function toggleDbFields() {
+  const dbType = document.getElementById('db-type').value;
+  document.getElementById('pg-fields').style.display = dbType === 'postgres' ? 'block' : 'none';
+  document.getElementById('migrate-section').style.display = dbType === 'postgres' ? 'block' : 'none';
+}
+
+async function testDbConnection() {
+  const msg = document.getElementById('db-msg');
+  msg.style.display = '';
+  msg.textContent = 'Testing...';
+  msg.className = 'field-msg';
+  const payload = {
+    db_type: document.getElementById('db-type').value,
+    pg_host: document.getElementById('pg-host')?.value || '',
+    pg_port: document.getElementById('pg-port')?.value || '5432',
+    pg_dbname: document.getElementById('pg-dbname')?.value || '',
+    pg_user: document.getElementById('pg-user')?.value || '',
+    pg_password: document.getElementById('pg-password')?.value || '',
+    pg_schema: document.getElementById('pg-schema')?.value || 'showadvance',
+  };
+  try {
+    const resp = await fetch('/settings/database/test', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    const d = await resp.json();
+    msg.textContent = d.message;
+    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
+  } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
+}
+
+async function saveDatabaseSettings() {
+  const msg = document.getElementById('db-msg');
+  msg.style.display = '';
+  msg.textContent = 'Saving...';
+  msg.className = 'field-msg';
+  const payload = {
+    db_type: document.getElementById('db-type').value,
+    pg_host: document.getElementById('pg-host')?.value || '',
+    pg_port: document.getElementById('pg-port')?.value || '5432',
+    pg_dbname: document.getElementById('pg-dbname')?.value || '',
+    pg_user: document.getElementById('pg-user')?.value || '',
+    pg_password: document.getElementById('pg-password')?.value || '',
+    pg_schema: document.getElementById('pg-schema')?.value || 'showadvance',
+  };
+  try {
+    const resp = await fetch('/settings/database', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    const d = await resp.json();
+    msg.textContent = d.success ? 'Settings saved. Restart the app to apply changes.' : (d.error || 'Save failed.');
+    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
+    if (d.success) toggleDbFields();
+  } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
+}
+
+async function runMigration() {
+  const msg = document.getElementById('migrate-msg');
+  const resultsEl = document.getElementById('migrate-results');
+  const tbody = document.querySelector('#migrate-table tbody');
+  msg.style.display = '';
+  msg.textContent = 'Migration running... this may take a moment.';
+  msg.className = 'field-msg';
+  resultsEl.style.display = 'none';
+  try {
+    const resp = await fetch('/settings/database/migrate', {method: 'POST'});
+    const d = await resp.json();
+    if (d.success) {
+      msg.textContent = `Migration complete. ${d.total_copied} rows copied, ${d.total_skipped} skipped (duplicates).`;
+      msg.className = 'field-msg field-msg-success';
+      tbody.innerHTML = Object.entries(d.stats).map(([t, s]) =>
+        `<tr><td style="font-family:var(--font-mono);font-size:11px">${t}</td><td>${s.copied ?? 0}</td><td class="text-dim">${s.skipped ?? 0}${s.error ? ' ⚠ '+s.error : ''}</td></tr>`
+      ).join('');
+      resultsEl.style.display = 'block';
+    } else {
+      msg.textContent = 'Migration failed: ' + (d.error || 'Unknown error');
+      msg.className = 'field-msg field-msg-error';
+    }
+  } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
+}
+
+/* ── AI / Ollama Settings ───────────────────────────────────────── */
+async function testAiConnection() {
+  const msg = document.getElementById('ai-msg');
+  msg.style.display = '';
+  msg.textContent = 'Testing...';
+  msg.className = 'field-msg';
+  const payload = {
+    ollama_url: document.getElementById('ollama-url').value,
+    ollama_model: document.getElementById('ollama-model').value,
+  };
+  try {
+    const resp = await fetch('/settings/ai/test', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    const d = await resp.json();
+    msg.textContent = d.message;
+    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
+  } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
+}
+
+async function saveAiSettings() {
+  const msg = document.getElementById('ai-msg');
+  msg.style.display = '';
+  msg.textContent = 'Saving...';
+  msg.className = 'field-msg';
+  const payload = {
+    ollama_enabled: document.getElementById('ollama-enabled').checked ? '1' : '0',
+    ollama_url: document.getElementById('ollama-url').value,
+    ollama_model: document.getElementById('ollama-model').value,
+  };
+  try {
+    const resp = await fetch('/settings/ai', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
+    });
+    const d = await resp.json();
+    msg.textContent = d.success ? 'AI settings saved.' : (d.error || 'Save failed.');
+    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
+  } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
+}
 </script>
 {% endblock %}

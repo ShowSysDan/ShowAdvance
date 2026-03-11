@@ -133,7 +133,8 @@ CREATE TABLE IF NOT EXISTS form_fields (
     help_text TEXT DEFAULT NULL,
     placeholder TEXT DEFAULT '',
     width_hint TEXT DEFAULT 'full',
-    is_notes_field INTEGER DEFAULT 0
+    is_notes_field INTEGER DEFAULT 0,
+    ai_hint TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS form_history (
@@ -626,7 +627,8 @@ def migrate_db():
             help_text TEXT DEFAULT NULL,
             placeholder TEXT DEFAULT '',
             width_hint TEXT DEFAULT 'full',
-            is_notes_field INTEGER DEFAULT 0
+            is_notes_field INTEGER DEFAULT 0,
+            ai_hint TEXT DEFAULT NULL
         );
 
         CREATE TABLE IF NOT EXISTS form_history (
@@ -724,6 +726,7 @@ def migrate_db():
         "ALTER TABLE export_log ADD COLUMN filename TEXT DEFAULT ''",
         'ALTER TABLE form_sections ADD COLUMN default_open INTEGER DEFAULT 1',
         'ALTER TABLE schedule_rows ADD COLUMN perf_id INTEGER DEFAULT NULL',
+        'ALTER TABLE form_fields ADD COLUMN ai_hint TEXT DEFAULT NULL',
     ]:
         try:
             conn.execute(alter_sql)
@@ -826,6 +829,401 @@ def init_db(force=False):
     print("⚠  Change the admin password after first login via Settings → Users")
 
 
+PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    display_name TEXT,
+    role TEXT DEFAULT 'user',
+    theme TEXT DEFAULT 'dark',
+    last_login TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS shows (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    show_date DATE,
+    show_time TEXT DEFAULT '',
+    venue TEXT DEFAULT '',
+    status TEXT DEFAULT 'active',
+    advance_version INTEGER DEFAULT 0,
+    schedule_version INTEGER DEFAULT 0,
+    created_by INTEGER REFERENCES users(id),
+    last_saved_by INTEGER REFERENCES users(id),
+    last_saved_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS advance_data (
+    id SERIAL PRIMARY KEY,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    field_key TEXT NOT NULL,
+    field_value TEXT DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(show_id, field_key)
+);
+
+CREATE TABLE IF NOT EXISTS schedule_rows (
+    id SERIAL PRIMARY KEY,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    perf_id INTEGER DEFAULT NULL,
+    sort_order INTEGER DEFAULT 0,
+    start_time TEXT DEFAULT '',
+    end_time TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    notes TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS schedule_meta (
+    id SERIAL PRIMARY KEY,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    field_key TEXT NOT NULL,
+    field_value TEXT DEFAULT '',
+    UNIQUE(show_id, field_key)
+);
+
+CREATE TABLE IF NOT EXISTS post_show_notes (
+    id SERIAL PRIMARY KEY,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    field_key TEXT NOT NULL,
+    field_value TEXT DEFAULT '',
+    UNIQUE(show_id, field_key)
+);
+
+CREATE TABLE IF NOT EXISTS show_performances (
+    id SERIAL PRIMARY KEY,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    perf_date DATE,
+    perf_time TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS contacts (
+    id SERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    title TEXT DEFAULT '',
+    department TEXT DEFAULT '',
+    phone TEXT DEFAULT '',
+    email TEXT DEFAULT '',
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS export_log (
+    id SERIAL PRIMARY KEY,
+    show_id INTEGER REFERENCES shows(id) ON DELETE SET NULL,
+    export_type TEXT,
+    version INTEGER,
+    exported_by INTEGER REFERENCES users(id),
+    exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    filename TEXT DEFAULT '',
+    pdf_data BYTEA
+);
+
+CREATE TABLE IF NOT EXISTS form_sections (
+    id SERIAL PRIMARY KEY,
+    section_key TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    collapsible INTEGER DEFAULT 1,
+    icon TEXT DEFAULT '◈',
+    default_open INTEGER DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS form_fields (
+    id SERIAL PRIMARY KEY,
+    section_id INTEGER NOT NULL REFERENCES form_sections(id) ON DELETE CASCADE,
+    field_key TEXT UNIQUE NOT NULL,
+    label TEXT NOT NULL,
+    field_type TEXT NOT NULL DEFAULT 'text',
+    sort_order INTEGER DEFAULT 0,
+    options_json TEXT DEFAULT NULL,
+    contact_dept TEXT DEFAULT NULL,
+    conditional_show_when TEXT DEFAULT NULL,
+    help_text TEXT DEFAULT NULL,
+    placeholder TEXT DEFAULT '',
+    width_hint TEXT DEFAULT 'full',
+    is_notes_field INTEGER DEFAULT 0,
+    ai_hint TEXT DEFAULT NULL
+);
+
+CREATE TABLE IF NOT EXISTS form_history (
+    id SERIAL PRIMARY KEY,
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    form_type TEXT NOT NULL,
+    saved_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    saved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    snapshot_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_groups (
+    id SERIAL PRIMARY KEY,
+    name TEXT UNIQUE NOT NULL,
+    group_type TEXT NOT NULL DEFAULT 'all_access',
+    description TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS user_group_members (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, group_id)
+);
+
+CREATE TABLE IF NOT EXISTS show_group_access (
+    show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    group_id INTEGER NOT NULL REFERENCES user_groups(id) ON DELETE CASCADE,
+    PRIMARY KEY (show_id, group_id)
+);
+
+CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS active_sessions (
+    user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    show_id       INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    tab           TEXT NOT NULL DEFAULT 'advance',
+    focused_field TEXT,
+    last_seen     TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, show_id)
+);
+
+CREATE TABLE IF NOT EXISTS show_comments (
+    id         SERIAL PRIMARY KEY,
+    show_id    INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    body       TEXT NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS show_attachments (
+    id          SERIAL PRIMARY KEY,
+    show_id     INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    filename    TEXT NOT NULL,
+    mime_type   TEXT DEFAULT 'application/octet-stream',
+    file_data   BYTEA NOT NULL,
+    file_size   INTEGER DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS advance_reads (
+    id           SERIAL PRIMARY KEY,
+    show_id      INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    version_read INTEGER DEFAULT 0,
+    read_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(show_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS schedule_meta_fields (
+    id               SERIAL PRIMARY KEY,
+    field_key        TEXT UNIQUE NOT NULL,
+    label            TEXT NOT NULL,
+    field_type       TEXT DEFAULT 'text',
+    advance_field_key TEXT DEFAULT NULL,
+    sort_order       INTEGER DEFAULT 0,
+    width_hint       TEXT DEFAULT 'half'
+);
+
+CREATE TABLE IF NOT EXISTS schedule_templates (
+    id         SERIAL PRIMARY KEY,
+    name       TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS schedule_template_rows (
+    id          SERIAL PRIMARY KEY,
+    template_id INTEGER NOT NULL REFERENCES schedule_templates(id) ON DELETE CASCADE,
+    sort_order  INTEGER DEFAULT 0,
+    start_time  TEXT DEFAULT '',
+    end_time    TEXT DEFAULT '',
+    description TEXT DEFAULT '',
+    notes       TEXT DEFAULT ''
+);
+"""
+
+
+def init_db_postgres(settings, seed=True):
+    """
+    Initialize a PostgreSQL database with the ShowAdvance schema.
+    Creates the schema namespace and all tables. Safe to run on an existing DB.
+    """
+    try:
+        import psycopg2
+    except ImportError:
+        print("psycopg2 is not installed. Run: pip install psycopg2-binary")
+        return False
+
+    schema = settings.get('pg_schema', 'showadvance') or 'showadvance'
+    try:
+        conn = psycopg2.connect(
+            host=settings.get('pg_host', 'localhost'),
+            port=int(settings.get('pg_port', 5432) or 5432),
+            dbname=settings.get('pg_dbname', 'showadvance'),
+            user=settings.get('pg_user', ''),
+            password=settings.get('pg_password', ''),
+            connect_timeout=10,
+        )
+        cur = conn.cursor()
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
+        cur.execute(f'SET search_path TO "{schema}"')
+
+        # Create tables one by one (PG_SCHEMA contains multiple CREATE TABLE statements)
+        for stmt in PG_SCHEMA.split(';'):
+            stmt = stmt.strip()
+            if stmt:
+                cur.execute(stmt)
+
+        if seed:
+            # Admin user
+            from werkzeug.security import generate_password_hash
+            cur.execute("""
+                INSERT INTO users (username, password_hash, display_name, role)
+                VALUES (%s, %s, %s, %s)
+                ON CONFLICT (username) DO NOTHING
+            """, ('admin', generate_password_hash('admin123'), 'Administrator', 'admin'))
+
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"✓ PostgreSQL schema '{schema}' initialized")
+        return True
+    except Exception as e:
+        print(f"✗ PostgreSQL init failed: {e}")
+        return False
+
+
+def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None):
+    """
+    Copy all data from a SQLite database to PostgreSQL.
+    Safe to run multiple times — uses ON CONFLICT DO NOTHING to skip duplicates.
+    Returns a dict with per-table stats: {table: {'copied': N, 'skipped': N}}.
+    """
+    try:
+        import psycopg2
+        import psycopg2.extras
+    except ImportError:
+        return {'error': 'psycopg2 is not installed. Run: pip install psycopg2-binary'}
+
+    if not os.path.exists(sqlite_path):
+        return {'error': f'SQLite database not found: {sqlite_path}'}
+
+    # First ensure the PostgreSQL schema exists
+    ok = init_db_postgres(pg_settings, seed=False)
+    if not ok:
+        return {'error': 'Could not initialize PostgreSQL schema'}
+
+    schema = pg_settings.get('pg_schema', 'showadvance') or 'showadvance'
+
+    # Table copy order respects foreign key dependencies
+    TABLE_ORDER = [
+        'users', 'user_groups', 'contacts', 'form_sections', 'schedule_templates',
+        'app_settings', 'shows', 'form_fields', 'schedule_meta_fields',
+        'advance_data', 'schedule_meta', 'post_show_notes', 'schedule_rows',
+        'show_performances', 'user_group_members', 'show_group_access',
+        'form_history', 'show_comments', 'show_attachments', 'advance_reads',
+        'export_log', 'schedule_template_rows', 'active_sessions',
+    ]
+
+    src = sqlite3.connect(sqlite_path)
+    src.row_factory = sqlite3.Row
+
+    pg_conn = psycopg2.connect(
+        host=pg_settings.get('pg_host', 'localhost'),
+        port=int(pg_settings.get('pg_port', 5432) or 5432),
+        dbname=pg_settings.get('pg_dbname', 'showadvance'),
+        user=pg_settings.get('pg_user', ''),
+        password=pg_settings.get('pg_password', ''),
+        connect_timeout=10,
+    )
+    pg_cur = pg_conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+    pg_cur.execute(f'SET search_path TO "{schema}"')
+
+    stats = {}
+
+    for table in TABLE_ORDER:
+        if progress_callback:
+            progress_callback(table)
+
+        try:
+            rows = src.execute(f'SELECT * FROM {table}').fetchall()
+        except Exception:
+            # Table might not exist in older SQLite DBs
+            stats[table] = {'copied': 0, 'skipped': 0, 'error': 'table not found in source'}
+            continue
+
+        if not rows:
+            stats[table] = {'copied': 0, 'skipped': 0}
+            continue
+
+        col_names = list(rows[0].keys())
+        cols_str = ', '.join(f'"{c}"' for c in col_names)
+        placeholders = ', '.join(['%s'] * len(col_names))
+
+        copied = 0
+        skipped = 0
+
+        for row in rows:
+            values = []
+            for v in row:
+                # Convert SQLite bytes to psycopg2 Binary for BYTEA columns
+                if isinstance(v, bytes):
+                    import psycopg2
+                    values.append(psycopg2.Binary(v))
+                else:
+                    values.append(v)
+
+            try:
+                pg_cur.execute(
+                    f'INSERT INTO "{table}" ({cols_str}) VALUES ({placeholders}) ON CONFLICT DO NOTHING',
+                    values
+                )
+                if pg_cur.rowcount > 0:
+                    copied += 1
+                else:
+                    skipped += 1
+            except Exception as e:
+                skipped += 1
+                pg_conn.rollback()
+                # Re-set search path after rollback
+                pg_cur.execute(f'SET search_path TO "{schema}"')
+
+        pg_conn.commit()
+        stats[table] = {'copied': copied, 'skipped': skipped}
+
+    # Sync sequences so new inserts get correct IDs
+    serial_tables = [
+        'users', 'shows', 'advance_data', 'schedule_rows', 'schedule_meta',
+        'post_show_notes', 'show_performances', 'contacts', 'export_log',
+        'form_sections', 'form_fields', 'form_history', 'user_groups',
+        'show_comments', 'show_attachments', 'advance_reads',
+        'schedule_meta_fields', 'schedule_templates', 'schedule_template_rows',
+    ]
+    for table in serial_tables:
+        try:
+            pg_cur.execute(f"""
+                SELECT setval(
+                    pg_get_serial_sequence('"{table}"', 'id'),
+                    COALESCE((SELECT MAX(id) FROM "{table}"), 1)
+                )
+            """)
+        except Exception:
+            pass
+    pg_conn.commit()
+
+    src.close()
+    pg_cur.close()
+    pg_conn.close()
+
+    return stats
+
+
 if __name__ == '__main__':
     import sys
     if '--migrate' in sys.argv:
@@ -834,6 +1232,13 @@ if __name__ == '__main__':
             sys.exit(1)
         print(f"Running migrations on: {DATABASE}")
         migrate_db()
+    elif '--init-postgres' in sys.argv:
+        from db_adapter import read_db_settings
+        settings = read_db_settings(DATABASE)
+        if settings.get('db_type') != 'postgres':
+            print("No PostgreSQL settings found. Configure database settings in the app first.")
+            sys.exit(1)
+        init_db_postgres(settings)
     else:
         force = '--force' in sys.argv
         init_db(force=force)

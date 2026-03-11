@@ -15,6 +15,9 @@ from datetime import datetime, date
 from functools import wraps
 from io import BytesIO
 
+import db_adapter
+from db_adapter import DBIntegrityError
+
 from flask import (Flask, render_template, request, redirect, url_for,
                    flash, session, jsonify, make_response, abort)
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -112,13 +115,18 @@ def reload_syslog_handler():
 # ─── App Settings Helper ──────────────────────────────────────────────────────
 
 def get_app_setting(key, default=''):
-    """Fetch a single app_setting value from the database."""
+    """
+    Fetch a single app_setting value.
+    Always reads from the SQLite bootstrap file so this is safe to call
+    at startup before the active DB connection type is resolved.
+    """
     if not os.path.exists(DATABASE):
         return default
     try:
-        db = get_db()
-        row = db.execute('SELECT value FROM app_settings WHERE key=?', (key,)).fetchone()
-        db.close()
+        _conn = sqlite3.connect(DATABASE)
+        _conn.row_factory = sqlite3.Row
+        row = _conn.execute('SELECT value FROM app_settings WHERE key=?', (key,)).fetchone()
+        _conn.close()
         return row['value'] if row and row['value'] is not None else default
     except Exception:
         return default
@@ -127,11 +135,9 @@ def get_app_setting(key, default=''):
 # ─── Database ─────────────────────────────────────────────────────────────────
 
 def get_db():
-    conn = sqlite3.connect(DATABASE)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    conn.execute("PRAGMA journal_mode = WAL")   # allows concurrent reads during writes
-    return conn
+    """Return a normalized DB connection (SQLite or PostgreSQL based on settings)."""
+    settings = db_adapter.read_db_settings(DATABASE)
+    return db_adapter.connect(DATABASE, settings)
 
 
 # ─── Auth Decorators ──────────────────────────────────────────────────────────
@@ -739,6 +745,7 @@ def show_page(show_id):
                            global_wifi_network=global_wifi_network,
                            global_wifi_password=global_wifi_password,
                            sched_templates=sched_templates,
+                           ollama_enabled=get_app_setting('ollama_enabled', '0') == '1',
                            user=get_current_user())
 
 
@@ -2118,6 +2125,8 @@ def form_fields_settings():
                            wifi_password=all_settings.get('wifi_password', ''),
                            upload_max_mb=all_settings.get('upload_max_mb', '20'),
                            logo_data=all_settings.get('logo_data', ''),
+                           db_settings=all_settings,
+                           ai_settings=all_settings,
                            user=get_current_user())
 
 
@@ -2144,8 +2153,8 @@ def add_form_field():
             INSERT INTO form_fields
             (section_id, field_key, label, field_type, sort_order,
              options_json, contact_dept, conditional_show_when,
-             help_text, placeholder, width_hint, is_notes_field)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+             help_text, placeholder, width_hint, is_notes_field, ai_hint)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (section_id, field_key, label,
               data.get('field_type','text'), max_order + 10,
               options_json,
@@ -2154,12 +2163,13 @@ def add_form_field():
               data.get('help_text'),
               data.get('placeholder',''),
               data.get('width_hint','full'),
-              1 if data.get('is_notes_field') else 0))
+              1 if data.get('is_notes_field') else 0,
+              data.get('ai_hint') or None))
         fid = cur.lastrowid
         db.commit()
         syslog_logger.info(f"FIELD_ADD key={field_key} by={session.get('username')}")
         return jsonify({'success': True, 'id': fid})
-    except sqlite3.IntegrityError:
+    except (sqlite3.IntegrityError, DBIntegrityError):
         return jsonify({'success': False, 'error': f'field_key "{field_key}" already exists.'}), 400
     finally:
         db.close()
@@ -2176,7 +2186,7 @@ def edit_form_field(fid):
         UPDATE form_fields SET
             section_id=?, label=?, field_type=?,
             options_json=?, contact_dept=?, conditional_show_when=?,
-            help_text=?, placeholder=?, width_hint=?, is_notes_field=?
+            help_text=?, placeholder=?, width_hint=?, is_notes_field=?, ai_hint=?
         WHERE id=?
     """, (data.get('section_id'), data.get('label',''),
           data.get('field_type','text'), options_json,
@@ -2184,6 +2194,7 @@ def edit_form_field(fid):
           data.get('help_text'), data.get('placeholder',''),
           data.get('width_hint','full'),
           1 if data.get('is_notes_field') else 0,
+          data.get('ai_hint') or None,
           fid))
     db.commit(); db.close()
     return jsonify({'success': True})
@@ -2775,6 +2786,296 @@ def public_schedule_pdf(show_id):
         resp.headers['Content-Disposition'] = f'inline; filename="Schedule_{show_id}.pdf"'
         return resp
     abort(404)
+
+
+# ─── Field Key Availability Check ─────────────────────────────────────────────
+
+@app.route('/settings/form-fields/check-key')
+@content_admin_required
+def check_field_key():
+    key = request.args.get('key', '').strip().lower().replace(' ', '_')
+    exclude_id = request.args.get('exclude_id', type=int)
+    if not key:
+        return jsonify({'available': False, 'conflict': None})
+    db = get_db()
+    if exclude_id:
+        row = db.execute(
+            'SELECT id, label FROM form_fields WHERE field_key=? AND id!=?', (key, exclude_id)
+        ).fetchone()
+    else:
+        row = db.execute(
+            'SELECT id, label FROM form_fields WHERE field_key=?', (key,)
+        ).fetchone()
+    db.close()
+    if row:
+        return jsonify({'available': False, 'conflict': row['label']})
+    return jsonify({'available': True})
+
+
+# ─── Database Settings ─────────────────────────────────────────────────────────
+
+@app.route('/settings/database', methods=['POST'])
+@admin_required
+def save_database_settings():
+    data = request.get_json(force=True) or {}
+    db_type = data.get('db_type', 'sqlite')
+    db = get_db()
+    settings_to_save = {
+        'db_type': db_type,
+        'pg_host': data.get('pg_host', 'localhost'),
+        'pg_port': str(data.get('pg_port', '5432')),
+        'pg_dbname': data.get('pg_dbname', 'showadvance'),
+        'pg_user': data.get('pg_user', ''),
+        'pg_schema': data.get('pg_schema', 'showadvance'),
+    }
+    # Only update password if provided (non-empty)
+    if data.get('pg_password'):
+        settings_to_save['pg_password'] = data['pg_password']
+
+    for key, value in settings_to_save.items():
+        db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)', (key, value))
+    db.commit(); db.close()
+
+    # Also write to SQLite bootstrap (in case active DB is PostgreSQL)
+    _sqlite_conn = sqlite3.connect(DATABASE)
+    for key, value in settings_to_save.items():
+        _sqlite_conn.execute(
+            'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)', (key, value)
+        )
+    _sqlite_conn.commit(); _sqlite_conn.close()
+
+    syslog_logger.info(f"SETTINGS_CHANGE key=database db_type={db_type} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/settings/database/test', methods=['POST'])
+@admin_required
+def test_database_connection():
+    data = request.get_json(force=True) or {}
+    db_type = data.get('db_type', 'sqlite')
+
+    if db_type == 'sqlite':
+        if os.path.exists(DATABASE):
+            return jsonify({'success': True, 'message': f'SQLite database found at {DATABASE}'})
+        return jsonify({'success': False, 'message': 'SQLite database not found. Run init_db.py first.'})
+
+    if db_type == 'postgres':
+        ok, err = db_adapter.test_postgres_connection(
+            host=data.get('pg_host', 'localhost'),
+            port=data.get('pg_port', 5432),
+            dbname=data.get('pg_dbname', 'showadvance'),
+            user=data.get('pg_user', ''),
+            password=data.get('pg_password', ''),
+            schema=data.get('pg_schema', 'showadvance'),
+        )
+        if ok:
+            return jsonify({'success': True, 'message': 'Connected to PostgreSQL successfully.'})
+        return jsonify({'success': False, 'message': err})
+
+    return jsonify({'success': False, 'message': 'Unknown database type.'})
+
+
+@app.route('/settings/database/migrate', methods=['POST'])
+@admin_required
+def migrate_database():
+    """Migrate data from SQLite to PostgreSQL. Safe to run multiple times."""
+    from init_db import migrate_sqlite_to_postgres
+
+    settings = db_adapter.read_db_settings(DATABASE)
+    if settings.get('db_type') != 'postgres':
+        return jsonify({'success': False, 'error': 'Database type must be PostgreSQL to migrate.'}), 400
+
+    try:
+        stats = migrate_sqlite_to_postgres(DATABASE, settings)
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+    if 'error' in stats:
+        return jsonify({'success': False, 'error': stats['error']}), 500
+
+    total_copied = sum(v.get('copied', 0) for v in stats.values() if isinstance(v, dict))
+    total_skipped = sum(v.get('skipped', 0) for v in stats.values() if isinstance(v, dict))
+
+    syslog_logger.info(f"DB_MIGRATE copied={total_copied} skipped={total_skipped} by={session.get('username')}")
+    return jsonify({
+        'success': True,
+        'stats': stats,
+        'total_copied': total_copied,
+        'total_skipped': total_skipped,
+    })
+
+
+# ─── AI / Ollama Settings ──────────────────────────────────────────────────────
+
+@app.route('/settings/ai', methods=['POST'])
+@admin_required
+def save_ai_settings():
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    for key in ('ollama_enabled', 'ollama_url', 'ollama_model'):
+        if key in data:
+            db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+                       (key, str(data[key])))
+    db.commit(); db.close()
+    syslog_logger.info(f"SETTINGS_CHANGE key=ai by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/settings/ai/test', methods=['POST'])
+@admin_required
+def test_ai_connection():
+    data = request.get_json(force=True) or {}
+    url = data.get('ollama_url', 'http://localhost:11434').rstrip('/')
+    model = data.get('ollama_model', 'llama3.2')
+    import urllib.request
+    import urllib.error
+    try:
+        req = urllib.request.Request(f'{url}/api/tags', method='GET')
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            body = json.loads(resp.read())
+            models = [m['name'] for m in body.get('models', [])]
+            if model in models or any(m.startswith(model.split(':')[0]) for m in models):
+                return jsonify({'success': True, 'message': f'Connected. Model "{model}" available.', 'models': models})
+            return jsonify({'success': True, 'message': f'Connected, but model "{model}" not found. Available: {", ".join(models[:5])}', 'models': models})
+    except urllib.error.URLError as e:
+        return jsonify({'success': False, 'message': f'Cannot reach Ollama at {url}: {e.reason}'})
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)})
+
+
+# ─── AI Document Extraction ────────────────────────────────────────────────────
+
+@app.route('/shows/<int:show_id>/ai-extract', methods=['POST'])
+@login_required
+def ai_extract(show_id):
+    """Extract form field values from an uploaded document using Ollama."""
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+
+    # Check Ollama is enabled
+    ollama_enabled = get_app_setting('ollama_enabled', '0')
+    if ollama_enabled != '1':
+        return jsonify({'success': False, 'error': 'AI extraction is not enabled. Enable it in Settings → AI.'}), 400
+
+    ollama_url = get_app_setting('ollama_url', 'http://localhost:11434').rstrip('/')
+    ollama_model = get_app_setting('ollama_model', 'llama3.2')
+
+    # Get document text
+    doc_text = ''
+    attachment_id = request.form.get('attachment_id', type=int)
+    uploaded_file = request.files.get('document')
+
+    if attachment_id:
+        db = get_db()
+        row = db.execute(
+            'SELECT file_data, mime_type, filename FROM show_attachments WHERE id=? AND show_id=?',
+            (attachment_id, show_id)
+        ).fetchone()
+        db.close()
+        if not row:
+            return jsonify({'success': False, 'error': 'Attachment not found.'}), 404
+        file_bytes = bytes(row['file_data'])
+        mime = row['mime_type']
+        fname = row['filename']
+    elif uploaded_file and uploaded_file.filename:
+        file_bytes = uploaded_file.read()
+        mime = uploaded_file.content_type or 'application/octet-stream'
+        fname = uploaded_file.filename
+    else:
+        return jsonify({'success': False, 'error': 'No document provided.'}), 400
+
+    # Extract text from document
+    try:
+        if mime == 'application/pdf' or fname.lower().endswith('.pdf'):
+            try:
+                import pdfplumber
+                from io import BytesIO as _BytesIO
+                with pdfplumber.open(_BytesIO(file_bytes)) as pdf:
+                    doc_text = '\n'.join(
+                        page.extract_text() or '' for page in pdf.pages
+                    )
+            except ImportError:
+                return jsonify({'success': False, 'error': 'pdfplumber not installed. Run: pip install pdfplumber'}), 500
+        else:
+            # Try plain text decode
+            doc_text = file_bytes.decode('utf-8', errors='replace')
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Could not extract text: {e}'}), 500
+
+    if not doc_text.strip():
+        return jsonify({'success': False, 'error': 'No readable text found in document.'}), 400
+
+    # Load form fields with ai_hint
+    db = get_db()
+    field_rows = db.execute(
+        'SELECT field_key, label, ai_hint FROM form_fields WHERE ai_hint IS NOT NULL AND ai_hint != \'\''
+    ).fetchall()
+    db.close()
+
+    if not field_rows:
+        return jsonify({'success': False, 'error': 'No fields have AI hints configured. Add hints in Settings → Form Fields.'}), 400
+
+    field_map = {r['field_key']: {'label': r['label'], 'hint': r['ai_hint']} for r in field_rows}
+    field_schema = {k: v['hint'] for k, v in field_map.items()}
+
+    # Build prompt
+    prompt = (
+        'You are extracting information from a document to populate a form. '
+        'Return ONLY valid JSON — no explanation, no markdown, just the JSON object. '
+        'Use null for fields where the information is not found in the document. '
+        f'Fields to extract (key: description): {json.dumps(field_schema)}\n\n'
+        f'Document text:\n{doc_text[:8000]}'
+    )
+
+    # Call Ollama
+    try:
+        import urllib.request as _urlreq
+        payload = json.dumps({
+            'model': ollama_model,
+            'messages': [{'role': 'user', 'content': prompt}],
+            'format': 'json',
+            'stream': False,
+        }).encode()
+        req = _urlreq.Request(
+            f'{ollama_url}/api/chat',
+            data=payload,
+            headers={'Content-Type': 'application/json'},
+            method='POST',
+        )
+        with _urlreq.urlopen(req, timeout=120) as resp:
+            result = json.loads(resp.read())
+        raw_content = result.get('message', {}).get('content', '')
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Ollama request failed: {e}'}), 500
+
+    # Parse JSON response
+    try:
+        # Strip markdown code fences if model added them
+        clean = raw_content.strip()
+        if clean.startswith('```'):
+            clean = '\n'.join(clean.split('\n')[1:])
+            if clean.endswith('```'):
+                clean = clean[:-3]
+        extracted = json.loads(clean)
+    except (json.JSONDecodeError, ValueError):
+        return jsonify({'success': False, 'error': f'AI returned invalid JSON: {raw_content[:200]}'}), 500
+
+    # Build suggestions (only non-null values)
+    suggestions = {}
+    for field_key, value in extracted.items():
+        if value is not None and str(value).strip() and field_key in field_map:
+            suggestions[field_key] = {
+                'value': str(value).strip(),
+                'label': field_map[field_key]['label'],
+            }
+
+    return jsonify({
+        'success': True,
+        'suggestions': suggestions,
+        'document': fname,
+        'model': ollama_model,
+        'field_count': len(field_rows),
+    })
 
 
 # ─── Error Handlers ───────────────────────────────────────────────────────────

@@ -118,11 +118,53 @@
     <span id="presence-indicator" class="presence-indicator" hidden></span>
     <span class="save-status" id="save-status"></span>
     <button type="button" class="btn btn-ghost btn-sm" onclick="openHistory()" title="Version history">History</button>
+    {% if not restricted and ollama_enabled %}
+    <button type="button" class="btn btn-ghost btn-sm" onclick="openAiExtract()" title="Extract field values from a document using AI">AI Extract</button>
+    {% endif %}
     {% if not restricted %}
     <button class="btn btn-primary" id="save-btn" onclick="saveActive()">Save</button>
     {% endif %}
   </div>
 </div>
+
+{# ── AI Extract Modal ─────────────────────────────────────────────────────── #}
+{% if not restricted and ollama_enabled %}
+<div id="ai-extract-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeAiExtract()">
+  <div class="modal-card" style="max-width:600px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      AI Extract from Document
+      <button onclick="closeAiExtract()" class="modal-close">×</button>
+    </div>
+    <div class="modal-body">
+      <p style="font-size:13px;color:var(--text-dim);margin-bottom:16px">Upload a PDF or text document and the AI will suggest values for form fields that have AI hints configured.</p>
+      <div id="ai-upload-section">
+        <div class="field-group">
+          <label class="field-label">UPLOAD DOCUMENT</label>
+          <input type="file" id="ai-file-input" class="field-input" accept=".pdf,.txt,.doc,.docx">
+        </div>
+        {% if show.id %}
+        <div class="field-group">
+          <label class="field-label">OR CHOOSE EXISTING ATTACHMENT</label>
+          <select id="ai-attachment-select" class="field-input">
+            <option value="">— Select attachment —</option>
+          </select>
+        </div>
+        {% endif %}
+        <div id="ai-upload-msg" style="display:none;font-size:12px;margin-top:8px"></div>
+        <button class="btn btn-primary" onclick="runAiExtract()" style="margin-top:8px">Extract Fields</button>
+      </div>
+      <div id="ai-results-section" style="display:none">
+        <div id="ai-results-header" style="font-size:12px;color:var(--text-dim);margin-bottom:12px"></div>
+        <div id="ai-suggestions-list"></div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;border-top:1px solid var(--border);padding-top:12px">
+          <button class="btn btn-ghost" onclick="resetAiExtract()">← Back</button>
+          <button class="btn btn-primary" onclick="applyAiSuggestions()" id="ai-apply-btn">Apply Selected</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {# ─── Tab Nav ──────────────────────────────────────────────────────────────── #}
 <div class="tab-nav">
