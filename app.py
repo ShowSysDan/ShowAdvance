@@ -2966,6 +2966,13 @@ def test_ai_connection():
 @login_required
 def ai_extract(show_id):
     """Extract form field values from an uploaded document using Ollama."""
+    try:
+        return _ai_extract_impl(show_id)
+    except Exception as e:
+        app.logger.exception("ai_extract unhandled error")
+        return jsonify({'success': False, 'error': f'Server error: {e}'}), 500
+
+def _ai_extract_impl(show_id):
     if not can_access_show(session['user_id'], show_id):
         abort(403)
 
