@@ -3031,8 +3031,40 @@ def _ai_extract_impl(show_id):
                 return jsonify({'success': False, 'error': 'python-docx not installed. Run: pip install python-docx'}), 500
         elif fname.lower().endswith('.doc'):
             return jsonify({'success': False, 'error': 'Legacy .doc format is not supported. Please save as .docx and re-upload.'}), 400
+        elif fname.lower().endswith('.rtf'):
+            try:
+                from striprtf.striprtf import rtf_to_text as _rtf_to_text
+                doc_text = _rtf_to_text(file_bytes.decode('utf-8', errors='replace'))
+            except ImportError:
+                return jsonify({'success': False, 'error': 'striprtf not installed. Run: pip install striprtf'}), 500
+        elif fname.lower().endswith(('.xlsx', '.xls')) or mime in (
+                'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                'application/vnd.ms-excel'):
+            try:
+                from io import BytesIO as _BytesIO
+                if fname.lower().endswith('.xls'):
+                    import xlrd as _xlrd
+                    wb = _xlrd.open_workbook(file_contents=file_bytes)
+                    rows = []
+                    for sheet in wb.sheets():
+                        for i in range(sheet.nrows):
+                            rows.append('\t'.join(str(sheet.cell_value(i, j)) for j in range(sheet.ncols)))
+                    doc_text = '\n'.join(rows)
+                else:
+                    import openpyxl as _openpyxl
+                    wb = _openpyxl.load_workbook(_BytesIO(file_bytes), data_only=True)
+                    rows = []
+                    for sheet in wb.worksheets:
+                        for row in sheet.iter_rows(values_only=True):
+                            line = '\t'.join(str(c) if c is not None else '' for c in row)
+                            if line.strip():
+                                rows.append(line)
+                    doc_text = '\n'.join(rows)
+            except ImportError as ie:
+                pkg = 'xlrd' if '.xls' in fname.lower() and not fname.lower().endswith('.xlsx') else 'openpyxl'
+                return jsonify({'success': False, 'error': f'{pkg} not installed. Run: pip install {pkg}'}), 500
         else:
-            # Plain text (.txt and others)
+            # Plain text (.txt, .csv and others)
             doc_text = file_bytes.decode('utf-8', errors='replace')
     except Exception as e:
         return jsonify({'success': False, 'error': f'Could not extract text: {e}'}), 500
@@ -3069,7 +3101,7 @@ def _ai_extract_impl(show_id):
             'model': ollama_model,
             'messages': [{'role': 'user', 'content': prompt}],
             'format': 'json',
-            'stream': False,
+            'stream': True,  # Stream tokens; timeout applies per-chunk, not total
         }).encode()
         req = _urlreq.Request(
             f'{ollama_url}/api/chat',
@@ -3077,9 +3109,16 @@ def _ai_extract_impl(show_id):
             headers={'Content-Type': 'application/json'},
             method='POST',
         )
-        with _urlreq.urlopen(req, timeout=240) as resp:
-            result = json.loads(resp.read())
-        raw_content = result.get('message', {}).get('content', '')
+        raw_content = ''
+        with _urlreq.urlopen(req, timeout=60) as resp:
+            for line in resp:
+                line = line.strip()
+                if not line:
+                    continue
+                chunk = json.loads(line)
+                raw_content += chunk.get('message', {}).get('content', '')
+                if chunk.get('done'):
+                    break
     except Exception as e:
         return jsonify({'success': False, 'error': f'Ollama request failed: {e}'}), 500
 
