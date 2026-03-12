@@ -3070,6 +3070,11 @@ def ai_extract(show_id):
                 'label': field_map[field_key]['label'],
             }
 
+    syslog_logger.info(
+        f"AI_EXTRACT show_id={show_id} document={fname} "
+        f"fields_found={len(suggestions)} model={ollama_model} "
+        f"by={session.get('username')}"
+    )
     return jsonify({
         'success': True,
         'suggestions': suggestions,
