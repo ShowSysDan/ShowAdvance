@@ -1773,7 +1773,7 @@ function _bindScheduleTimeParsing() {
     function checkAvailability(key) {
       const statusEl = document.getElementById('field-key-status');
       if (!statusEl || !key) { if (statusEl) statusEl.style.display = 'none'; return; }
-      const excludeId = window._editFieldId || '';
+      const excludeId = _editFieldId || '';
       const url = `/settings/form-fields/check-key?key=${encodeURIComponent(key)}${excludeId ? '&exclude_id='+excludeId : ''}`;
       fetch(url).then(r => r.json()).then(d => {
         statusEl.style.display = '';
@@ -1788,7 +1788,7 @@ function _bindScheduleTimeParsing() {
     }
 
     labelInput.addEventListener('input', function() {
-      if (!_manuallyEdited && !window._editFieldId) {
+      if (!_manuallyEdited && !_editFieldId) {
         const generated = slugify(labelInput.value);
         keyInput.value = generated;
         clearTimeout(_debounceTimer);
