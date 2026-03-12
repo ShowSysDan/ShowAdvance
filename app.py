@@ -3020,8 +3020,19 @@ def _ai_extract_impl(show_id):
                     )
             except ImportError:
                 return jsonify({'success': False, 'error': 'pdfplumber not installed. Run: pip install pdfplumber'}), 500
+        elif fname.lower().endswith('.docx') or mime in (
+                'application/vnd.openxmlformats-officedocument.wordprocessingml.document',):
+            try:
+                import docx as _docx
+                from io import BytesIO as _BytesIO
+                document = _docx.Document(_BytesIO(file_bytes))
+                doc_text = '\n'.join(p.text for p in document.paragraphs if p.text.strip())
+            except ImportError:
+                return jsonify({'success': False, 'error': 'python-docx not installed. Run: pip install python-docx'}), 500
+        elif fname.lower().endswith('.doc'):
+            return jsonify({'success': False, 'error': 'Legacy .doc format is not supported. Please save as .docx and re-upload.'}), 400
         else:
-            # Try plain text decode
+            # Plain text (.txt and others)
             doc_text = file_bytes.decode('utf-8', errors='replace')
     except Exception as e:
         return jsonify({'success': False, 'error': f'Could not extract text: {e}'}), 500
