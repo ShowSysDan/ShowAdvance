@@ -3066,7 +3066,7 @@ def _ai_extract_impl(show_id):
             headers={'Content-Type': 'application/json'},
             method='POST',
         )
-        with _urlreq.urlopen(req, timeout=90) as resp:
+        with _urlreq.urlopen(req, timeout=240) as resp:
             result = json.loads(resp.read())
         raw_content = result.get('message', {}).get('content', '')
     except Exception as e:
