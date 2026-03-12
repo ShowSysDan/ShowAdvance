@@ -1901,6 +1901,9 @@ async function runAiExtract() {
     logEl.scrollTop = logEl.scrollHeight;
   }
 
+  const btn = document.querySelector('#ai-upload-section .btn-primary');
+  if (btn) { btn.disabled = true; btn.textContent = 'Extracting…'; }
+
   msgEl.style.display = 'none';
   if (logEl) { logEl.style.display = ''; logEl.innerHTML = ''; }
 
@@ -1912,6 +1915,10 @@ async function runAiExtract() {
     formData.append('document', fileInput.files[0]);
   } else {
     formData.append('attachment_id', attachId);
+  }
+
+  function _resetBtn() {
+    if (btn) { btn.disabled = false; btn.textContent = 'Extract Fields'; }
   }
 
   // Animated "waiting" line while fetch is in-flight
@@ -1935,6 +1942,7 @@ async function runAiExtract() {
     });
     clearInterval(_waitTimer);
     if (_waitLine) _waitLine.remove();
+    _resetBtn();
 
     const data = await resp.json();
 
@@ -1949,6 +1957,7 @@ async function runAiExtract() {
   } catch(e) {
     clearInterval(_waitTimer);
     if (_waitLine) _waitLine.remove();
+    _resetBtn();
     _log('Network error: ' + e.message, 'var(--red, #f44336)');
   }
 }
