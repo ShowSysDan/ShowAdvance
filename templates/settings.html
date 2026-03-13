@@ -1758,17 +1758,31 @@ async function addCrewMember() {
   }
 }
 
-async function editCrewMember(mid, currentName) {
-  const name = prompt('Edit technician name:', currentName);
-  if (!name || name === currentName) return;
-  const r = await fetch(`/settings/crew-members/${mid}/edit`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
-  });
-  const d = await r.json();
-  if (d.success) {
-    const nameEl = document.getElementById('crew-name-' + mid);
-    if (nameEl) nameEl.textContent = name;
-  } else alert(d.error || 'Error updating technician.');
+function editCrewMember(mid, currentName) {
+  const nameEl = document.getElementById('crew-name-' + mid);
+  if (!nameEl || nameEl.querySelector('input')) return; // already editing
+  const orig = nameEl.textContent.trim();
+  nameEl.innerHTML = '';
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.value = orig;
+  inp.className = 'field-input field-input-sm';
+  inp.style.cssText = 'width:100%;max-width:260px';
+  const save = async () => {
+    const name = inp.value.trim();
+    if (!name || name === orig) { nameEl.textContent = orig; return; }
+    const r = await fetch(`/settings/crew-members/${mid}/edit`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+    });
+    const d = await r.json();
+    if (d.success) { nameEl.textContent = name; }
+    else { nameEl.textContent = orig; alert(d.error || 'Error updating technician.'); }
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { nameEl.textContent = orig; } });
+  inp.addEventListener('blur', save);
+  nameEl.appendChild(inp);
+  inp.focus();
+  inp.select();
 }
 
 async function deleteCrewMember(mid) {

@@ -7,6 +7,8 @@
 .crew-tracker-wrap {
   overflow-x: auto;
   margin-top: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
 }
 
 .crew-grid {
@@ -16,32 +18,37 @@
 }
 
 /* Sticky header rows */
-.crew-grid thead tr {
+.crew-grid thead tr:first-child th {
   position: sticky;
-  background: var(--bg);
+  top: 0;
   z-index: 10;
 }
-.crew-grid thead tr:first-child {
-  top: 0;
-}
-.crew-grid thead tr:nth-child(2) {
-  top: 36px; /* height of first header row */
+.crew-grid thead tr:nth-child(2) th {
+  position: sticky;
+  top: 32px;
+  z-index: 10;
 }
 
 /* Name column — sticky left */
 .crew-grid .name-col {
   position: sticky;
   left: 0;
-  background: var(--bg-card);
-  z-index: 5;
+  z-index: 6;
   white-space: nowrap;
-  min-width: 160px;
-  max-width: 220px;
+  width: 190px;
+  min-width: 190px;
   font-weight: 500;
+  background: var(--bg-card);
 }
 .crew-grid thead .name-col {
-  background: var(--bg);
+  background: var(--bg-surface);
   z-index: 20;
+}
+.crew-grid tbody tr:nth-child(even) td.name-col {
+  background: var(--bg-surface);
+}
+.crew-grid tbody tr:hover td.name-col {
+  background: var(--bg-hover);
 }
 
 /* Category header */
@@ -53,95 +60,87 @@
   letter-spacing: 0.1em;
   text-transform: uppercase;
   text-align: center;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
+  padding: 0 4px;
+  height: 32px;
+  border-left: 1px solid var(--border);
   border-bottom: 2px solid var(--accent);
 }
 
-/* Position header */
+/* Position header — vertical text */
 .crew-grid .pos-header {
   background: var(--bg-surface);
-  color: var(--text-dim);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-align: center;
-  padding: 5px 4px;
-  border: 1px solid var(--border);
-  min-width: 80px;
-  max-width: 110px;
+  width: 42px;
+  min-width: 42px;
+  max-width: 42px;
+  height: 110px;
+  border-left: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 0 4px;
   vertical-align: bottom;
+  text-align: center;
 }
 .crew-grid .pos-header span {
   display: block;
-  transform: rotate(-45deg);
-  transform-origin: center center;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 80px;
-  padding-bottom: 4px;
+  max-height: 100px;
+  padding: 0 4px;
 }
 
 /* Grid cells */
 .crew-grid td {
-  border: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  border-left: 1px solid var(--border);
   padding: 0;
   text-align: center;
   vertical-align: middle;
+  height: 38px;
 }
 .crew-grid tbody tr:nth-child(even) td {
-  background: var(--bg-surface);
-}
-.crew-grid tbody tr:nth-child(even) td.name-col {
   background: var(--bg-surface);
 }
 .crew-grid tbody tr:hover td {
   background: var(--bg-hover);
 }
-.crew-grid tbody tr:hover td.name-col {
-  background: var(--bg-hover);
-}
 
-/* Skill indicator */
+/* Skill indicator dot — read-only by default */
 .skill-cell {
   width: 100%;
-  height: 36px;
+  height: 38px;
   display: flex;
   align-items: center;
   justify-content: center;
-  cursor: pointer;
-  transition: background 0.1s;
+  cursor: default;
 }
-.skill-cell:hover {
-  background: var(--accent-glow);
-}
-.skill-check {
-  width: 18px;
-  height: 18px;
-  border-radius: 4px;
+.skill-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
   border: 2px solid var(--border-light);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  color: transparent;
   background: transparent;
   transition: all 0.15s;
   pointer-events: none;
+  flex-shrink: 0;
 }
-.skill-check.qualified {
+.skill-dot.qualified {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
 }
 
 /* Name cell */
 .crew-name-cell {
-  padding: 6px 10px;
+  padding: 6px 10px 6px 12px;
   text-align: left;
   font-size: 13px;
+  border-bottom: 1px solid var(--border);
 }
 .crew-actions {
   display: flex;
@@ -155,7 +154,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 8px;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 .crew-edit-item {
   display: flex;
@@ -172,8 +171,10 @@
 .crew-edit-item:hover { background: var(--bg-hover); }
 .crew-edit-item.qualified { border-color: var(--accent); background: var(--accent-glow); }
 .crew-edit-item input[type="checkbox"] { accent-color: var(--accent); }
-.crew-edit-category { font-size: 10px; font-weight: 700; text-transform: uppercase;
-  letter-spacing: 0.08em; color: var(--accent); margin-top: 12px; margin-bottom: 4px; }
+.crew-edit-category {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--accent); margin-top: 12px; margin-bottom: 4px;
+}
 
 /* Sort toolbar */
 .tracker-toolbar {
@@ -214,7 +215,7 @@
 {% else %}
 
 <div class="tracker-toolbar">
-  <span class="text-dim" style="font-size:12px">{{ members|length }} crew members &nbsp;·&nbsp; {{ all_positions|length }} positions</span>
+  <span class="text-dim" style="font-size:12px">{{ members|length }} technicians &nbsp;·&nbsp; {{ all_positions|length }} positions</span>
   <button class="btn btn-ghost btn-sm" onclick="sortCrewAlpha()">Sort A–Z</button>
 </div>
 
@@ -223,8 +224,9 @@
   <thead>
     {# Row 1: category spans #}
     <tr>
-      <th class="name-col pos-header" rowspan="2" style="text-align:left;vertical-align:middle;padding:8px 10px;font-size:11px;letter-spacing:0.06em">
-        CREW MEMBER
+      <th class="name-col cat-header" rowspan="2"
+          style="text-align:left;vertical-align:middle;padding:0 12px;font-size:10px;color:var(--text-muted);border-left:none;">
+        TECHNICIAN
       </th>
       {% for cat in categories %}
         {% if cat.positions %}
@@ -253,7 +255,8 @@
       <td class="name-col crew-name-cell">
         <div class="crew-actions">
           <span>{{ m.name }}</span>
-          <button class="btn btn-xs btn-ghost" onclick="openEditModal({{ m.id }}, {{ m.name|tojson }}, {{ m.qualifications|tojson }})"
+          <button class="btn btn-xs btn-ghost"
+                  onclick="openEditModal({{ m.id }}, {{ m.name|tojson }}, {{ m.qualifications|tojson }})"
                   title="Edit qualifications" style="flex-shrink:0">✎</button>
         </div>
       </td>
@@ -261,8 +264,8 @@
         {% for pos in cat.positions %}
         {% set qualified = pos.id in m.qualifications %}
         <td>
-          <div class="skill-cell" onclick="toggleQual(this, {{ m.id }}, {{ pos.id }})" title="{{ pos.name }}" data-mid="{{ m.id }}" data-pid="{{ pos.id }}">
-            <div class="skill-check {{ 'qualified' if qualified else '' }}">{% if qualified %}✓{% endif %}</div>
+          <div class="skill-cell" data-mid="{{ m.id }}" data-pid="{{ pos.id }}" title="{{ pos.name }}">
+            <div class="skill-dot {{ 'qualified' if qualified else '' }}"></div>
           </div>
         </td>
         {% endfor %}
@@ -270,8 +273,8 @@
       {% for pos in uncategorized_positions %}
       {% set qualified = pos.id in m.qualifications %}
       <td>
-        <div class="skill-cell" onclick="toggleQual(this, {{ m.id }}, {{ pos.id }})" title="{{ pos.name }}" data-mid="{{ m.id }}" data-pid="{{ pos.id }}">
-          <div class="skill-check {{ 'qualified' if qualified else '' }}">{% if qualified %}✓{% endif %}</div>
+        <div class="skill-cell" data-mid="{{ m.id }}" data-pid="{{ pos.id }}" title="{{ pos.name }}">
+          <div class="skill-dot {{ 'qualified' if qualified else '' }}"></div>
         </div>
       </td>
       {% endfor %}
@@ -302,33 +305,6 @@
 const _categories = {{ categories|tojson }};
 const _uncategorized = {{ uncategorized_positions|tojson }};
 
-async function toggleQual(cellDiv, memberId, positionId) {
-  const check = cellDiv.querySelector('.skill-check');
-  const wasQualified = check.classList.contains('qualified');
-  // Optimistic update
-  check.classList.toggle('qualified', !wasQualified);
-  check.textContent = wasQualified ? '' : '✓';
-
-  try {
-    const r = await fetch('/api/crew-qualifications/toggle', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({crew_member_id: memberId, position_id: positionId})
-    });
-    const d = await r.json();
-    if (!d.success) {
-      // Revert
-      check.classList.toggle('qualified', wasQualified);
-      check.textContent = wasQualified ? '✓' : '';
-      alert('Error: ' + (d.error || 'Unknown'));
-    }
-  } catch(e) {
-    check.classList.toggle('qualified', wasQualified);
-    check.textContent = wasQualified ? '✓' : '';
-    alert('Network error');
-  }
-}
-
 let _modalMemberId = null;
 
 function openEditModal(memberId, memberName, qualifications) {
@@ -340,7 +316,6 @@ function openEditModal(memberId, memberName, qualifications) {
 
   const qualSet = new Set(qualifications);
 
-  // Build grouped checkboxes
   const allGroups = [
     ..._categories.map(c => ({label: c.name, positions: c.positions})),
     ...(_uncategorized.length ? [{label: 'Other', positions: _uncategorized}] : [])
@@ -367,12 +342,9 @@ function openEditModal(memberId, memberName, qualifications) {
       cb.addEventListener('change', async () => {
         const wasChecked = !cb.checked;
         item.classList.toggle('qualified', cb.checked);
-        // Update grid cell
-        const gridCell = document.querySelector(`.skill-cell[data-mid="${memberId}"][data-pid="${pos.id}"] .skill-check`);
-        if (gridCell) {
-          gridCell.classList.toggle('qualified', cb.checked);
-          gridCell.textContent = cb.checked ? '✓' : '';
-        }
+        // Update grid dot
+        const dot = document.querySelector(`.skill-cell[data-mid="${memberId}"][data-pid="${pos.id}"] .skill-dot`);
+        if (dot) dot.classList.toggle('qualified', cb.checked);
         try {
           const r = await fetch('/api/crew-qualifications/toggle', {
             method: 'POST',
@@ -383,13 +355,13 @@ function openEditModal(memberId, memberName, qualifications) {
           if (!d.success) {
             cb.checked = wasChecked;
             item.classList.toggle('qualified', wasChecked);
-            if (gridCell) { gridCell.classList.toggle('qualified', wasChecked); gridCell.textContent = wasChecked ? '✓' : ''; }
+            if (dot) dot.classList.toggle('qualified', wasChecked);
             alert('Error: ' + (d.error || 'Unknown'));
           }
         } catch(e) {
           cb.checked = wasChecked;
           item.classList.toggle('qualified', wasChecked);
-          if (gridCell) { gridCell.classList.toggle('qualified', wasChecked); gridCell.textContent = wasChecked ? '✓' : ''; }
+          if (dot) dot.classList.toggle('qualified', wasChecked);
         }
       });
 
@@ -400,7 +372,7 @@ function openEditModal(memberId, memberName, qualifications) {
     body.appendChild(grid);
   }
 
-  document.getElementById('crew-edit-modal').style.display = '';
+  document.getElementById('crew-edit-modal').style.display = 'flex';
 }
 
 function closeEditModal() {
