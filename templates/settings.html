@@ -784,7 +784,7 @@
               <td id="cat-name-{{ cat.id }}">{{ cat.name }}</td>
               <td style="width:80px">
                 <div class="action-btns">
-                  <button class="btn btn-xs btn-ghost" onclick="editCategory({{ cat.id }}, {{ cat.name|tojson }})">✎</button>
+                  <button class="btn btn-xs btn-ghost" onclick="editCategory(this)">✎</button>
                   <button class="btn btn-xs btn-danger-ghost" onclick="deleteCategory({{ cat.id }})">×</button>
                 </div>
               </td>
@@ -833,7 +833,7 @@
               <td class="text-dim" id="pos-cat-{{ pos.id }}">{{ pos.category_name or '—' }}</td>
               <td>
                 <div class="action-btns">
-                  <button class="btn btn-xs btn-ghost" onclick="editPosition({{ pos.id }}, {{ pos.name|tojson }}, {{ (pos.category_id or '')|tojson }})">✎</button>
+                  <button class="btn btn-xs btn-ghost" onclick="editPosition(this)">✎</button>
                   <button class="btn btn-xs btn-danger-ghost" onclick="deletePosition({{ pos.id }})">×</button>
                 </div>
               </td>
@@ -876,7 +876,7 @@
             <td id="crew-name-{{ m.id }}">{{ m.name }}</td>
             <td>
               <div class="action-btns">
-                <button class="btn btn-xs btn-ghost" onclick="editCrewMember({{ m.id }}, {{ m.name|tojson }})">✎</button>
+                <button class="btn btn-xs btn-ghost" onclick="editCrewMember(this)">✎</button>
                 <button class="btn btn-xs btn-danger-ghost" onclick="deleteCrewMember({{ m.id }})">×</button>
               </div>
             </td>
@@ -1626,7 +1626,7 @@ async function addPositionCategory() {
     li.dataset.cid = d.id;
     li.innerHTML = `<td id="cat-name-${d.id}">${_esc(d.name)}</td>
       <td style="width:80px"><div class="action-btns">
-        <button class="btn btn-xs btn-ghost" onclick="editCategory(${d.id}, ${JSON.stringify(d.name)})">✎</button>
+        <button class="btn btn-xs btn-ghost" onclick="editCategory(this)">✎</button>
         <button class="btn btn-xs btn-danger-ghost" onclick="deleteCategory(${d.id})">×</button>
       </div></td>`;
     document.getElementById('cat-empty')?.remove();
@@ -1640,18 +1640,31 @@ async function addPositionCategory() {
   }
 }
 
-async function editCategory(cid, currentName) {
-  const name = prompt('Edit category name:', currentName);
-  if (!name || name === currentName) return;
-  const r = await fetch(`/settings/position-categories/${cid}/edit`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
-  });
-  const d = await r.json();
-  if (d.success) {
-    document.getElementById('cat-name-' + cid).textContent = name;
-    // Update option in pos select
-    document.querySelectorAll(`#new-pos-cat option[value="${cid}"]`).forEach(o => o.textContent = name);
-  } else alert(d.error || 'Error updating category.');
+function editCategory(btn) {
+  const tr = btn.closest('tr');
+  const cid = tr.dataset.cid;
+  const nameEl = document.getElementById('cat-name-' + cid);
+  if (!nameEl || nameEl.querySelector('input')) return;
+  const orig = nameEl.textContent.trim();
+  nameEl.innerHTML = '';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.value = orig; inp.className = 'field-input field-input-sm';
+  inp.style.cssText = 'width:100%;max-width:220px';
+  const save = async () => {
+    const name = inp.value.trim();
+    if (!name || name === orig) { nameEl.textContent = orig; return; }
+    const r = await fetch(`/settings/position-categories/${cid}/edit`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+    });
+    const d = await r.json();
+    if (d.success) {
+      nameEl.textContent = name;
+      document.querySelectorAll(`#new-pos-cat option[value="${cid}"]`).forEach(o => o.textContent = name);
+    } else { nameEl.textContent = orig; alert(d.error || 'Error updating category.'); }
+  };
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') nameEl.textContent = orig; });
+  inp.addEventListener('blur', save);
+  nameEl.appendChild(inp); inp.focus(); inp.select();
 }
 
 async function deleteCategory(cid) {
@@ -1692,7 +1705,7 @@ async function addPosition() {
     tr.innerHTML = `<td id="pos-name-${d.id}">${_esc(d.name)}</td>
       <td class="text-dim" id="pos-cat-${d.id}" data-cat-id="${category_id || ''}">${_esc(catName)}</td>
       <td><div class="action-btns">
-        <button class="btn btn-xs btn-ghost" onclick="editPosition(${d.id}, ${JSON.stringify(d.name)}, ${JSON.stringify(category_id || '')})">✎</button>
+        <button class="btn btn-xs btn-ghost" onclick="editPosition(this)">✎</button>
         <button class="btn btn-xs btn-danger-ghost" onclick="deletePosition(${d.id})">×</button>
       </div></td>`;
     tbody.appendChild(tr);
@@ -1701,19 +1714,50 @@ async function addPosition() {
   }
 }
 
-async function editPosition(pid, currentName, currentCatId) {
-  const name = prompt('Edit position name:', currentName);
-  if (!name) return;
-  // For simplicity, keep same category. A full implementation would show a select.
-  const r = await fetch(`/settings/job-positions/${pid}/edit`, {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name, category_id: currentCatId || null})
+function editPosition(btn) {
+  const tr = btn.closest('tr');
+  const pid = tr.dataset.pid;
+  const nameEl = document.getElementById('pos-name-' + pid);
+  const catEl = document.getElementById('pos-cat-' + pid);
+  if (!nameEl || nameEl.querySelector('input')) return;
+  const origName = nameEl.textContent.trim();
+  const origCatId = catEl?.dataset.catId || '';
+  const origCatText = catEl?.textContent.trim() || '—';
+  nameEl.innerHTML = '';
+  const inp = document.createElement('input');
+  inp.type = 'text'; inp.value = origName; inp.className = 'field-input field-input-sm';
+  inp.style.cssText = 'width:100%;max-width:180px';
+  // Build category select from existing options
+  catEl.innerHTML = '';
+  const sel = document.createElement('select');
+  sel.className = 'field-input field-input-sm';
+  sel.innerHTML = '<option value="">— Uncategorized —</option>';
+  document.querySelectorAll('#new-pos-cat option').forEach(o => {
+    if (!o.value) return;
+    const opt = document.createElement('option');
+    opt.value = o.value; opt.textContent = o.textContent;
+    if (o.value == origCatId) opt.selected = true;
+    sel.appendChild(opt);
   });
-  const d = await r.json();
-  if (d.success) {
-    const nameEl = document.getElementById('pos-name-' + pid);
-    if (nameEl) nameEl.textContent = name;
-  } else alert(d.error || 'Error updating position.');
+  const save = async () => {
+    const name = inp.value.trim();
+    const category_id = sel.value || null;
+    if (!name) { nameEl.textContent = origName; catEl.textContent = origCatText; return; }
+    const r = await fetch(`/settings/job-positions/${pid}/edit`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, category_id})
+    });
+    const d = await r.json();
+    if (d.success) {
+      nameEl.textContent = name;
+      const catName = sel.options[sel.selectedIndex]?.text || '—';
+      catEl.textContent = catName; catEl.dataset.catId = category_id || '';
+    } else { nameEl.textContent = origName; catEl.textContent = origCatText; alert(d.error || 'Error updating position.'); }
+  };
+  const onKey = e => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') { nameEl.textContent = origName; catEl.textContent = origCatText; } };
+  inp.addEventListener('keydown', onKey); sel.addEventListener('keydown', onKey);
+  inp.addEventListener('blur', () => setTimeout(save, 120));
+  nameEl.appendChild(inp); catEl.appendChild(sel); inp.focus(); inp.select();
 }
 
 async function deletePosition(pid) {
@@ -1749,7 +1793,7 @@ async function addCrewMember() {
     const tr = document.createElement('tr'); tr.dataset.mid = d.id;
     tr.innerHTML = `<td id="crew-name-${d.id}">${_esc(d.name)}</td>
       <td><div class="action-btns">
-        <button class="btn btn-xs btn-ghost" onclick="editCrewMember(${d.id}, ${JSON.stringify(d.name)})">✎</button>
+        <button class="btn btn-xs btn-ghost" onclick="editCrewMember(this)">✎</button>
         <button class="btn btn-xs btn-danger-ghost" onclick="deleteCrewMember(${d.id})">×</button>
       </div></td>`;
     document.getElementById('crew-tbody').appendChild(tr);
@@ -1758,7 +1802,9 @@ async function addCrewMember() {
   }
 }
 
-function editCrewMember(mid, currentName) {
+function editCrewMember(btn) {
+  const tr = btn.closest('tr');
+  const mid = tr.dataset.mid;
   const nameEl = document.getElementById('crew-name-' + mid);
   if (!nameEl || nameEl.querySelector('input')) return; // already editing
   const orig = nameEl.textContent.trim();

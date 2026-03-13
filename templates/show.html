@@ -892,6 +892,26 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 <div id="save-toast" class="save-toast"></div>
 
 {% block scripts %}
+<style>
+/* ── Labor autocomplete ──────────────────────────── */
+.labor-name-wrap { position: relative; display: flex; align-items: center; gap: 6px; }
+.labor-name-wrap input { flex: 1; min-width: 0; }
+.qual-badge { font-size: 11px; font-weight: 700; flex-shrink: 0; white-space: nowrap; }
+.qual-badge.ok  { color: var(--accent); }
+.qual-badge.warn { color: #f59e0b; }
+.labor-ac-list {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 200;
+  background: var(--bg-card); border: 1px solid var(--border-light);
+  border-radius: var(--radius); box-shadow: 0 4px 16px rgba(0,0,0,.4);
+  max-height: 180px; overflow-y: auto; margin-top: 2px;
+}
+.labor-ac-item {
+  padding: 7px 10px; font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.labor-ac-item:hover { background: var(--bg-hover); }
+.labor-ac-warn { font-size: 10px; color: #f59e0b; font-weight: 600; white-space: nowrap; }
+</style>
 <script>
   const RESTRICTED = {{ 'true' if restricted else 'false' }};
   const INITIAL_TAB = '{{ tab }}';
@@ -1108,6 +1128,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
   /* ── Labor Requests ─────────────────────────────────────────── */
   let _laborPositions = [];
+  let _crewMembers = null;
 
   async function _loadLaborPositions() {
     if (_laborPositions.length) return _laborPositions;
@@ -1116,6 +1137,86 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       _laborPositions = await r.json();
     } catch(e) { _laborPositions = []; }
     return _laborPositions;
+  }
+
+  async function _loadCrewMembers() {
+    if (_crewMembers !== null) return;
+    try {
+      const r = await fetch('/api/crew-members');
+      _crewMembers = await r.json();
+    } catch(e) { _crewMembers = []; }
+  }
+
+  function _getPositionId(tr) {
+    return parseInt(tr.querySelector('[data-field="position_id"]')?.value) || null;
+  }
+
+  function _updateQualBadge(tr) {
+    const nameInp = tr.querySelector('[data-field="requested_name"]');
+    if (!nameInp) return;
+    let badge = nameInp.parentNode.querySelector('.qual-badge');
+    if (!badge) return;
+    const name = nameInp.value.trim().toLowerCase();
+    const posId = _getPositionId(tr);
+    if (!name || !posId || !_crewMembers) { badge.textContent = ''; badge.className = 'qual-badge'; return; }
+    const member = _crewMembers.find(m => m.name.toLowerCase() === name);
+    if (!member) { badge.textContent = ''; badge.className = 'qual-badge'; return; }
+    if (member.qualifications.includes(posId)) {
+      badge.textContent = '✓ qualified'; badge.className = 'qual-badge ok';
+      badge.title = member.name + ' is qualified for this position';
+    } else {
+      badge.textContent = '⚠ not qualified'; badge.className = 'qual-badge warn';
+      badge.title = member.name + ' does NOT have this position qualified';
+    }
+  }
+
+  function _attachNameAutocomplete(nameInp) {
+    // Wrap the input in a relative container for dropdown positioning
+    const td = nameInp.parentNode;
+    if (td.classList.contains('labor-name-wrap')) return; // already wrapped
+    td.classList.add('labor-name-wrap');
+    const badge = document.createElement('span');
+    badge.className = 'qual-badge';
+    td.appendChild(badge);
+
+    nameInp.addEventListener('input', () => {
+      document.querySelectorAll('.labor-ac-list').forEach(d => d.remove());
+      const val = nameInp.value.trim().toLowerCase();
+      if (!val || !_crewMembers) return;
+      const matches = _crewMembers.filter(m => m.name.toLowerCase().includes(val));
+      if (!matches.length) return;
+      const tr = nameInp.closest('tr');
+      const posId = _getPositionId(tr);
+      const list = document.createElement('div');
+      list.className = 'labor-ac-list';
+      matches.forEach(m => {
+        const item = document.createElement('div');
+        item.className = 'labor-ac-item';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = m.name;
+        item.appendChild(nameSpan);
+        if (posId && !m.qualifications.includes(posId)) {
+          const warn = document.createElement('span');
+          warn.className = 'labor-ac-warn'; warn.textContent = '⚠ not qualified';
+          item.appendChild(warn);
+        }
+        item.addEventListener('mousedown', e => {
+          e.preventDefault();
+          nameInp.value = m.name;
+          document.querySelectorAll('.labor-ac-list').forEach(d => d.remove());
+          saveLaborRow(nameInp);
+          _updateQualBadge(nameInp.closest('tr'));
+        });
+        list.appendChild(item);
+      });
+      td.appendChild(list);
+    });
+
+    nameInp.addEventListener('blur', () => {
+      setTimeout(() => document.querySelectorAll('.labor-ac-list').forEach(d => d.remove()), 150);
+      _updateQualBadge(nameInp.closest('tr'));
+    });
+    nameInp.addEventListener('change', () => _updateQualBadge(nameInp.closest('tr')));
   }
 
   function _buildPositionSelect(selectEl, selectedId) {
@@ -1142,14 +1243,20 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   }
 
   async function initLaborTab() {
-    await _loadLaborPositions();
-    // Populate existing row dropdowns
+    await Promise.all([_loadLaborPositions(), _loadCrewMembers()]);
+    // Populate existing row dropdowns and attach autocomplete
     document.querySelectorAll('#labor-tbody tr').forEach(tr => {
       const rid = tr.dataset.rid;
       const sel = tr.querySelector('select[data-field="position_id"]');
       if (sel) {
         const existing = window._laborRequestsData.find(r => r.id == rid);
         _buildPositionSelect(sel, existing ? existing.position_id : null);
+        sel.addEventListener('change', () => _updateQualBadge(tr));
+      }
+      const nameInp = tr.querySelector('[data-field="requested_name"]');
+      if (nameInp) {
+        _attachNameAutocomplete(nameInp);
+        _updateQualBadge(tr);
       }
     });
   }
@@ -1192,8 +1299,12 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       <td><button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button></td>
     `;
     document.getElementById('labor-tbody').appendChild(tr);
-    _buildPositionSelect(tr.querySelector('select[data-field="position_id"]'), null);
-    tr.querySelector('select').focus();
+    const newSel = tr.querySelector('select[data-field="position_id"]');
+    _buildPositionSelect(newSel, null);
+    newSel.addEventListener('change', () => _updateQualBadge(tr));
+    const newNameInp = tr.querySelector('[data-field="requested_name"]');
+    if (newNameInp) _attachNameAutocomplete(newNameInp);
+    newSel.focus();
   }
 
   async function saveLaborRow(el) {

@@ -72,7 +72,7 @@
   width: 42px;
   min-width: 42px;
   max-width: 42px;
-  height: 110px;
+  height: 140px;
   border-left: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
   padding: 8px 0 4px;
@@ -88,10 +88,10 @@
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-dim);
-  white-space: nowrap;
+  white-space: normal;
+  word-break: break-word;
   overflow: hidden;
-  text-overflow: ellipsis;
-  max-height: 100px;
+  max-height: 130px;
   padding: 0 4px;
 }
 
@@ -217,6 +217,7 @@
 <div class="tracker-toolbar">
   <span class="text-dim" style="font-size:12px">{{ members|length }} technicians &nbsp;·&nbsp; {{ all_positions|length }} positions</span>
   <button class="btn btn-ghost btn-sm" onclick="sortCrewAlpha()">Sort A–Z</button>
+  <button class="btn btn-ghost btn-sm" onclick="sortCrewByCategory()">Sort by Category</button>
 </div>
 
 <div class="crew-tracker-wrap">
@@ -256,7 +257,8 @@
         <div class="crew-actions">
           <span>{{ m.name }}</span>
           <button class="btn btn-xs btn-ghost"
-                  onclick="openEditModal({{ m.id }}, {{ m.name|tojson }}, {{ m.qualifications|tojson }})"
+                  data-name="{{ m.name }}" data-quals="{{ m.qualifications|tojson }}"
+                  onclick="openEditModal(this)"
                   title="Edit qualifications" style="flex-shrink:0">✎</button>
         </div>
       </td>
@@ -307,7 +309,12 @@ const _uncategorized = {{ uncategorized_positions|tojson }};
 
 let _modalMemberId = null;
 
-function openEditModal(memberId, memberName, qualifications) {
+function openEditModal(btn) {
+  const tr = btn.closest('tr');
+  const memberId = parseInt(tr.dataset.mid);
+  const memberName = btn.dataset.name;
+  const qualifications = JSON.parse(btn.dataset.quals || '[]');
+
   _modalMemberId = memberId;
   document.getElementById('modal-crew-name').textContent = memberName;
 
@@ -357,6 +364,15 @@ function openEditModal(memberId, memberName, qualifications) {
             item.classList.toggle('qualified', wasChecked);
             if (dot) dot.classList.toggle('qualified', wasChecked);
             alert('Error: ' + (d.error || 'Unknown'));
+          } else {
+            // Keep button's data-quals in sync
+            const editBtn = tr.querySelector('button[data-quals]');
+            if (editBtn) {
+              let qs = JSON.parse(editBtn.dataset.quals || '[]');
+              if (d.has) { if (!qs.includes(pos.id)) qs.push(pos.id); }
+              else { qs = qs.filter(q => q !== pos.id); }
+              editBtn.dataset.quals = JSON.stringify(qs);
+            }
           }
         } catch(e) {
           cb.checked = wasChecked;
@@ -384,6 +400,36 @@ function sortCrewAlpha() {
   const tbody = document.getElementById('crew-tbody');
   const rows = Array.from(tbody.querySelectorAll('tr'));
   rows.sort((a, b) => a.dataset.name.localeCompare(b.dataset.name));
+  rows.forEach(r => tbody.appendChild(r));
+}
+
+function sortCrewByCategory() {
+  // Build a map: position_id → category name
+  const posCat = {};
+  for (const cat of _categories) {
+    for (const pos of cat.positions) posCat[pos.id] = cat.name;
+  }
+  for (const pos of _uncategorized) posCat[pos.id] = 'zzz_other';
+
+  const tbody = document.getElementById('crew-tbody');
+  const rows = Array.from(tbody.querySelectorAll('tr'));
+  rows.sort((a, b) => {
+    const aQuals = JSON.parse(a.querySelector('button[data-quals]')?.dataset.quals || '[]');
+    const bQuals = JSON.parse(b.querySelector('button[data-quals]')?.dataset.quals || '[]');
+    // Find primary category: category with most qualifications
+    const primaryCat = quals => {
+      const counts = {};
+      for (const pid of quals) {
+        const cat = posCat[pid] || 'zzz_other';
+        counts[cat] = (counts[cat] || 0) + 1;
+      }
+      const sorted = Object.entries(counts).sort((x, y) => y[1] - x[1]);
+      return sorted[0]?.[0] || 'zzz_none';
+    };
+    const catA = primaryCat(aQuals), catB = primaryCat(bQuals);
+    if (catA !== catB) return catA.localeCompare(catB);
+    return a.dataset.name.localeCompare(b.dataset.name);
+  });
   rows.forEach(r => tbody.appendChild(r));
 }
 </script>
