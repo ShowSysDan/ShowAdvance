@@ -610,11 +610,11 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
                      onchange="saveLaborRow(this)">
             </td>
             <td>
-              <input type="text" class="field-input field-input-sm labor-field" data-field="requested_name"
-                     value="{{ lr.requested_name or '' }}"
-                     placeholder="Optional — specific technician name"
-                     {% if restricted %}disabled{% endif %}
-                     onchange="saveLaborRow(this)">
+              <select class="field-input field-input-sm labor-field" data-field="requested_name"
+                      {% if restricted %}disabled{% endif %}
+                      onchange="saveLaborRow(this)">
+                <option value="">— Any technician —</option>
+              </select>
             </td>
             {% if not restricted %}
             <td>
@@ -1151,72 +1151,54 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     return parseInt(tr.querySelector('[data-field="position_id"]')?.value) || null;
   }
 
-  function _updateQualBadge(tr) {
-    const nameInp = tr.querySelector('[data-field="requested_name"]');
-    if (!nameInp) return;
-    let badge = nameInp.parentNode.querySelector('.qual-badge');
-    if (!badge) return;
-    const name = nameInp.value.trim().toLowerCase();
-    const posId = _getPositionId(tr);
-    if (!name || !posId || !_crewMembers) { badge.textContent = ''; badge.className = 'qual-badge'; return; }
-    const member = _crewMembers.find(m => m.name.toLowerCase() === name);
-    if (!member) { badge.textContent = ''; badge.className = 'qual-badge'; return; }
-    if (member.qualifications.includes(posId)) {
-      badge.textContent = '✓ qualified'; badge.className = 'qual-badge ok';
-      badge.title = member.name + ' is qualified for this position';
-    } else {
-      badge.textContent = '⚠ not qualified'; badge.className = 'qual-badge warn';
-      badge.title = member.name + ' does NOT have this position qualified';
-    }
-  }
+  function _buildTechnicianSelect(selectEl, positionId, selectedName) {
+    selectEl.innerHTML = '';
+    const anyOpt = document.createElement('option');
+    anyOpt.value = '';
+    anyOpt.textContent = '— Any technician —';
+    selectEl.appendChild(anyOpt);
+    if (!_crewMembers || !_crewMembers.length) return;
 
-  function _attachNameAutocomplete(nameInp) {
-    // Wrap the input in a relative container for dropdown positioning
-    const td = nameInp.parentNode;
-    if (td.classList.contains('labor-name-wrap')) return; // already wrapped
-    td.classList.add('labor-name-wrap');
-    const badge = document.createElement('span');
-    badge.className = 'qual-badge';
-    td.appendChild(badge);
-
-    nameInp.addEventListener('input', () => {
-      document.querySelectorAll('.labor-ac-list').forEach(d => d.remove());
-      const val = nameInp.value.trim().toLowerCase();
-      if (!val || !_crewMembers) return;
-      const matches = _crewMembers.filter(m => m.name.toLowerCase().includes(val));
-      if (!matches.length) return;
-      const tr = nameInp.closest('tr');
-      const posId = _getPositionId(tr);
-      const list = document.createElement('div');
-      list.className = 'labor-ac-list';
-      matches.forEach(m => {
-        const item = document.createElement('div');
-        item.className = 'labor-ac-item';
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = m.name;
-        item.appendChild(nameSpan);
-        if (posId && !m.qualifications.includes(posId)) {
-          const warn = document.createElement('span');
-          warn.className = 'labor-ac-warn'; warn.textContent = '⚠ not qualified';
-          item.appendChild(warn);
-        }
-        item.addEventListener('mousedown', e => {
-          e.preventDefault();
-          nameInp.value = m.name;
-          document.querySelectorAll('.labor-ac-list').forEach(d => d.remove());
-          saveLaborRow(nameInp);
-          _updateQualBadge(nameInp.closest('tr'));
+    if (positionId) {
+      const qualified = _crewMembers.filter(m => m.qualifications.includes(positionId));
+      const others    = _crewMembers.filter(m => !m.qualifications.includes(positionId));
+      if (qualified.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Qualified';
+        qualified.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.name; opt.textContent = m.name;
+          if (m.name === selectedName) opt.selected = true;
+          og.appendChild(opt);
         });
-        list.appendChild(item);
+        selectEl.appendChild(og);
+      }
+      if (others.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Others';
+        others.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.name; opt.textContent = m.name;
+          if (m.name === selectedName) opt.selected = true;
+          og.appendChild(opt);
+        });
+        selectEl.appendChild(og);
+      }
+    } else {
+      _crewMembers.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name; opt.textContent = m.name;
+        if (m.name === selectedName) opt.selected = true;
+        selectEl.appendChild(opt);
       });
-      td.appendChild(list);
-    });
-
-    nameInp.addEventListener('blur', () => {
-      setTimeout(() => document.querySelectorAll('.labor-ac-list').forEach(d => d.remove()), 150);
-      _updateQualBadge(nameInp.closest('tr'));
-    });
-    nameInp.addEventListener('change', () => _updateQualBadge(nameInp.closest('tr')));
+    }
+    // Preserve a saved name not currently in the roster
+    if (selectedName && !selectEl.value) {
+      const opt = document.createElement('option');
+      opt.value = selectedName; opt.textContent = selectedName;
+      opt.selected = true;
+      selectEl.insertBefore(opt, selectEl.children[1]);
+    }
   }
 
   function _buildPositionSelect(selectEl, selectedId) {
@@ -1244,19 +1226,19 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
   async function initLaborTab() {
     await Promise.all([_loadLaborPositions(), _loadCrewMembers()]);
-    // Populate existing row dropdowns and attach autocomplete
     document.querySelectorAll('#labor-tbody tr').forEach(tr => {
       const rid = tr.dataset.rid;
-      const sel = tr.querySelector('select[data-field="position_id"]');
-      if (sel) {
-        const existing = window._laborRequestsData.find(r => r.id == rid);
-        _buildPositionSelect(sel, existing ? existing.position_id : null);
-        sel.addEventListener('change', () => _updateQualBadge(tr));
-      }
-      const nameInp = tr.querySelector('[data-field="requested_name"]');
-      if (nameInp) {
-        _attachNameAutocomplete(nameInp);
-        _updateQualBadge(tr);
+      const posSel  = tr.querySelector('select[data-field="position_id"]');
+      const techSel = tr.querySelector('select[data-field="requested_name"]');
+      const existing = window._laborRequestsData.find(r => r.id == rid);
+      if (posSel) _buildPositionSelect(posSel, existing ? existing.position_id : null);
+      if (techSel) _buildTechnicianSelect(techSel, existing ? existing.position_id : null, existing ? existing.requested_name || '' : '');
+      if (posSel && techSel) {
+        posSel.addEventListener('change', () => {
+          const posId = parseInt(posSel.value) || null;
+          _buildTechnicianSelect(techSel, posId, techSel.value);
+          saveLaborRow(posSel);
+        });
       }
     });
   }
@@ -1295,16 +1277,20 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       <td><select class="field-input field-input-sm labor-field" data-field="position_id" onchange="saveLaborRow(this)"></select></td>
       <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" onchange="saveLaborRow(this)"></td>
       <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" onchange="saveLaborRow(this)"></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="requested_name" placeholder="Optional — specific technician name" onchange="saveLaborRow(this)"></td>
+      <td><select class="field-input field-input-sm labor-field" data-field="requested_name" onchange="saveLaborRow(this)"></select></td>
       <td><button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button></td>
     `;
     document.getElementById('labor-tbody').appendChild(tr);
-    const newSel = tr.querySelector('select[data-field="position_id"]');
-    _buildPositionSelect(newSel, null);
-    newSel.addEventListener('change', () => _updateQualBadge(tr));
-    const newNameInp = tr.querySelector('[data-field="requested_name"]');
-    if (newNameInp) _attachNameAutocomplete(newNameInp);
-    newSel.focus();
+    const newPosSel  = tr.querySelector('select[data-field="position_id"]');
+    const newTechSel = tr.querySelector('select[data-field="requested_name"]');
+    _buildPositionSelect(newPosSel, null);
+    _buildTechnicianSelect(newTechSel, null, '');
+    newPosSel.addEventListener('change', () => {
+      const posId = parseInt(newPosSel.value) || null;
+      _buildTechnicianSelect(newTechSel, posId, newTechSel.value);
+      saveLaborRow(newPosSel);
+    });
+    newPosSel.focus();
   }
 
   async function saveLaborRow(el) {
