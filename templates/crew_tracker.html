@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Crew Tracker — AdvanceIt{% endblock %}
+{% block title %}Skill Tracker — AdvanceIt{% endblock %}
 
 {% block head %}
 <style>
@@ -188,11 +188,11 @@
 {% block content %}
 <div class="page-header">
   <div>
-    <h1 class="page-title">Crew Skill Tracker</h1>
-    <p class="page-sub">Track which positions each crew member is qualified for</p>
+    <h1 class="page-title">Skill Tracker</h1>
+    <p class="page-sub">Track which positions each technician is qualified for</p>
   </div>
   <div class="header-actions">
-    <a href="{{ url_for('settings') }}#crew" class="btn btn-ghost btn-sm">Manage Crew Members</a>
+    <a href="{{ url_for('settings') }}#technicians" class="btn btn-ghost btn-sm">Manage Technicians</a>
     <a href="{{ url_for('settings') }}#positions" class="btn btn-ghost btn-sm">Manage Positions</a>
   </div>
 </div>
@@ -207,8 +207,8 @@
 {% elif not members %}
 <div class="form-section">
   <div class="form-section-body" style="text-align:center;padding:32px">
-    <p class="text-dim">No crew members have been added yet.</p>
-    <a href="{{ url_for('settings') }}#crew" class="btn btn-primary" style="margin-top:12px">Go to Settings → Crew Members</a>
+    <p class="text-dim">No technicians have been added yet.</p>
+    <a href="{{ url_for('settings') }}#technicians" class="btn btn-primary" style="margin-top:12px">Go to Settings → Technicians</a>
   </div>
 </div>
 {% else %}

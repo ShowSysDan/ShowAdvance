@@ -21,7 +21,7 @@
   {% if user.role == 'admin' or is_content_admin %}
   <button class="tab-btn" onclick="switchSettingsTab('fields')">Form Fields</button>
   <button class="tab-btn" onclick="switchSettingsTab('positions')">Job Positions</button>
-  <button class="tab-btn" onclick="switchSettingsTab('crew')">Crew Members</button>
+  <button class="tab-btn" onclick="switchSettingsTab('technicians')">Technicians</button>
   {% endif %}
   {% if user.role == 'admin' %}
   <button class="tab-btn" onclick="switchSettingsTab('syslog')">Syslog</button>
@@ -853,14 +853,14 @@
 
 {# ── CREW MEMBERS ──────────────────────────────────────────────────────────── #}
 {% if user.role == 'admin' or is_content_admin %}
-<div id="stab-crew" class="stab-pane" style="display:none">
+<div id="stab-technicians" class="stab-pane" style="display:none">
   <div class="form-section">
     <div class="form-section-header">
-      <span class="section-icon">◈</span> CREW MEMBERS
-      <span class="section-count ml-auto text-dim">{{ crew_members_list|length }} members</span>
+      <span class="section-icon">◈</span> TECHNICIANS
+      <span class="section-count ml-auto text-dim">{{ crew_members_list|length }} technicians</span>
     </div>
     <div class="form-section-body" style="border-bottom:1px solid var(--border)">
-      <h3 class="sub-section-label">ADD CREW MEMBER</h3>
+      <h3 class="sub-section-label">ADD TECHNICIAN</h3>
       <div style="display:flex;gap:8px">
         <input type="text" id="new-crew-name" class="field-input" placeholder="Full name" style="max-width:320px">
         <button class="btn btn-primary" onclick="addCrewMember()">Add</button>
@@ -882,7 +882,7 @@
             </td>
           </tr>
           {% else %}
-          <tr id="crew-empty"><td colspan="2" class="text-dim" style="text-align:center;padding:16px">No crew members yet.</td></tr>
+          <tr id="crew-empty"><td colspan="2" class="text-dim" style="text-align:center;padding:16px">No technicians yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -1181,7 +1181,7 @@ function switchFieldsTab(name) {
 }
 
 /* ── Settings Tab Switcher ─────────────────────────────────────── */
-const ALL_STABS = ['contacts','users','groups','fields','syslog','backups','account','files','godmode','database','ai'];
+const ALL_STABS = ['contacts','users','groups','fields','positions','technicians','syslog','backups','account','files','godmode','database','ai'];
 
 function switchSettingsTab(name) {
   ALL_STABS.forEach(t => {
@@ -1481,7 +1481,7 @@ async function adminDeleteFile(showId, fileId, btn) {
   loadShowOptions();
   // Activate tab from URL hash or server-side default
   const hash = location.hash.replace('#','');
-  const validTabs = ['contacts','users','groups','fields','positions','crew','syslog','backups','account','files','godmode','database','ai'];
+  const validTabs = ['contacts','users','groups','fields','positions','technicians','syslog','backups','account','files','godmode','database','ai'];
   const defaultTab = {% if user.role == 'admin' or is_content_admin %}'contacts'{% else %}'users'{% endif %};
   switchSettingsTab(validTabs.includes(hash) ? hash : {% if active_tab %}'{{ active_tab }}'{% else %}defaultTab{% endif %});
 })();
@@ -1743,7 +1743,7 @@ async function addCrewMember() {
   const d = await r.json();
   msg.style.display = '';
   if (d.success) {
-    msg.className = 'field-msg field-msg-success'; msg.textContent = 'Crew member added.';
+    msg.className = 'field-msg field-msg-success'; msg.textContent = 'Technician added.';
     document.getElementById('new-crew-name').value = '';
     document.getElementById('crew-empty')?.remove();
     const tr = document.createElement('tr'); tr.dataset.mid = d.id;
@@ -1759,7 +1759,7 @@ async function addCrewMember() {
 }
 
 async function editCrewMember(mid, currentName) {
-  const name = prompt('Edit crew member name:', currentName);
+  const name = prompt('Edit technician name:', currentName);
   if (!name || name === currentName) return;
   const r = await fetch(`/settings/crew-members/${mid}/edit`, {
     method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
@@ -1768,16 +1768,16 @@ async function editCrewMember(mid, currentName) {
   if (d.success) {
     const nameEl = document.getElementById('crew-name-' + mid);
     if (nameEl) nameEl.textContent = name;
-  } else alert(d.error || 'Error updating crew member.');
+  } else alert(d.error || 'Error updating technician.');
 }
 
 async function deleteCrewMember(mid) {
-  if (!confirm('Remove this crew member? Their skill qualifications will also be removed.')) return;
+  if (!confirm('Remove this technician? Their skill qualifications will also be removed.')) return;
   const r = await fetch(`/settings/crew-members/${mid}/delete`, {method: 'POST'});
   const d = await r.json();
   if (d.success) {
     document.querySelector(`#crew-tbody tr[data-mid="${mid}"]`)?.remove();
-  } else alert(d.error || 'Error deleting crew member.');
+  } else alert(d.error || 'Error deleting technician.');
 }
 
 function _esc(s) {

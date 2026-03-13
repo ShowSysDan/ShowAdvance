@@ -596,14 +596,16 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
               </select>
             </td>
             <td>
-              <input type="time" class="field-input field-input-sm labor-field" data-field="in_time"
+              <input type="text" class="field-input field-input-sm labor-field" data-field="in_time"
                      value="{{ lr.in_time or '' }}"
+                     placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]"
                      {% if restricted %}disabled{% endif %}
                      onchange="saveLaborRow(this)">
             </td>
             <td>
-              <input type="time" class="field-input field-input-sm labor-field" data-field="out_time"
+              <input type="text" class="field-input field-input-sm labor-field" data-field="out_time"
                      value="{{ lr.out_time or '' }}"
+                     placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]"
                      {% if restricted %}disabled{% endif %}
                      onchange="saveLaborRow(this)">
             </td>
@@ -1184,8 +1186,8 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     tr.dataset.rid = rid;
     tr.innerHTML = `
       <td><select class="field-input field-input-sm labor-field" data-field="position_id" onchange="saveLaborRow(this)"></select></td>
-      <td><input type="time" class="field-input field-input-sm labor-field" data-field="in_time" onchange="saveLaborRow(this)"></td>
-      <td><input type="time" class="field-input field-input-sm labor-field" data-field="out_time" onchange="saveLaborRow(this)"></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" onchange="saveLaborRow(this)"></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" onchange="saveLaborRow(this)"></td>
       <td><input type="text" class="field-input field-input-sm labor-field" data-field="requested_name" placeholder="Optional — specific technician name" onchange="saveLaborRow(this)"></td>
       <td><button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button></td>
     `;

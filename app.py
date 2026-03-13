@@ -3234,6 +3234,7 @@ def add_position_category():
     cid = cur.lastrowid
     db.commit()
     db.close()
+    syslog_logger.info(f"POSITION_CATEGORY_ADD id={cid} name={name!r} by={session.get('username')}")
     return jsonify({'success': True, 'id': cid, 'name': name})
 
 
@@ -3248,6 +3249,7 @@ def edit_position_category(cid):
     db.execute('UPDATE position_categories SET name=? WHERE id=?', (name, cid))
     db.commit()
     db.close()
+    syslog_logger.info(f"POSITION_CATEGORY_EDIT id={cid} name={name!r} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3260,6 +3262,7 @@ def delete_position_category(cid):
     db.execute('DELETE FROM position_categories WHERE id=?', (cid,))
     db.commit()
     db.close()
+    syslog_logger.info(f"POSITION_CATEGORY_DELETE id={cid} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3280,6 +3283,7 @@ def add_job_position():
     pid = cur.lastrowid
     db.commit()
     db.close()
+    syslog_logger.info(f"JOB_POSITION_ADD id={pid} name={name!r} category_id={category_id} by={session.get('username')}")
     return jsonify({'success': True, 'id': pid, 'name': name})
 
 
@@ -3298,6 +3302,7 @@ def edit_job_position(pid):
     )
     db.commit()
     db.close()
+    syslog_logger.info(f"JOB_POSITION_EDIT id={pid} name={name!r} category_id={category_id} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3308,6 +3313,7 @@ def delete_job_position(pid):
     db.execute('DELETE FROM job_positions WHERE id=?', (pid,))
     db.commit()
     db.close()
+    syslog_logger.info(f"JOB_POSITION_DELETE id={pid} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3367,6 +3373,7 @@ def add_labor_request(show_id):
     rid = cur.lastrowid
     db.commit()
     db.close()
+    syslog_logger.info(f"LABOR_REQUEST_ADD show_id={show_id} id={rid} by={session.get('username')}")
     return jsonify({'success': True, 'id': rid})
 
 
@@ -3390,6 +3397,7 @@ def update_labor_request(show_id, rid):
           rid, show_id))
     db.commit()
     db.close()
+    syslog_logger.info(f"LABOR_REQUEST_EDIT show_id={show_id} id={rid} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3404,6 +3412,7 @@ def delete_labor_request(show_id, rid):
     db.execute('DELETE FROM labor_requests WHERE id=? AND show_id=?', (rid, show_id))
     db.commit()
     db.close()
+    syslog_logger.info(f"LABOR_REQUEST_DELETE show_id={show_id} id={rid} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3515,6 +3524,7 @@ def add_crew_member():
     mid = cur.lastrowid
     db.commit()
     db.close()
+    syslog_logger.info(f"TECHNICIAN_ADD id={mid} name={name!r} by={session.get('username')}")
     return jsonify({'success': True, 'id': mid, 'name': name})
 
 
@@ -3529,6 +3539,7 @@ def edit_crew_member(mid):
     db.execute('UPDATE crew_members SET name=? WHERE id=?', (name, mid))
     db.commit()
     db.close()
+    syslog_logger.info(f"TECHNICIAN_EDIT id={mid} name={name!r} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3539,6 +3550,7 @@ def delete_crew_member(mid):
     db.execute('DELETE FROM crew_members WHERE id=?', (mid,))
     db.commit()
     db.close()
+    syslog_logger.info(f"TECHNICIAN_DELETE id={mid} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3582,6 +3594,8 @@ def toggle_crew_qualification():
         has = True
     db.commit()
     db.close()
+    action = 'QUAL_ADD' if has else 'QUAL_REMOVE'
+    syslog_logger.info(f"TECHNICIAN_{action} crew_member_id={crew_member_id} position_id={position_id} by={session.get('username')}")
     return jsonify({'success': True, 'has': has})
 
 
