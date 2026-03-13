@@ -232,6 +232,43 @@ CREATE TABLE IF NOT EXISTS schedule_template_rows (
     description TEXT DEFAULT '',
     notes       TEXT DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS position_categories (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS job_positions (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
+    name        TEXT NOT NULL,
+    sort_order  INTEGER DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS labor_requests (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id        INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    position_id    INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+    in_time        TEXT DEFAULT '',
+    out_time       TEXT DEFAULT '',
+    requested_name TEXT DEFAULT '',
+    sort_order     INTEGER DEFAULT 0,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS crew_members (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS crew_qualifications (
+    crew_member_id INTEGER NOT NULL REFERENCES crew_members(id) ON DELETE CASCADE,
+    position_id    INTEGER NOT NULL REFERENCES job_positions(id) ON DELETE CASCADE,
+    PRIMARY KEY (crew_member_id, position_id)
+);
 """
 
 SEED_CONTACTS = [
@@ -451,6 +488,35 @@ FORM_FIELDS_SEED = [
     ('general_info', 'general_notes',   'GENERAL NOTES',        'textarea', 30, None, None, None, None, 'General notes...', 'full', 1),
 ]
 
+# (category_name, sort_order)
+POSITION_CATEGORIES_SEED = [
+    ('Audio',     10),
+    ('Lighting',  20),
+    ('Video',     30),
+    ('Stage',     40),
+    ('Other',     50),
+]
+
+# (category_name, position_name, sort_order)
+JOB_POSITIONS_SEED = [
+    ('Audio',    'A1',                    10),
+    ('Audio',    'A2',                    20),
+    ('Audio',    'Monitor Engineer',      30),
+    ('Audio',    'RF Technician',         40),
+    ('Audio',    'Audio Technician',      50),
+    ('Lighting', 'Lighting Designer',     10),
+    ('Lighting', 'Lighting Technician',   20),
+    ('Lighting', 'Followspot Operator',   30),
+    ('Video',    'Video Director',        10),
+    ('Video',    'Video Technician',      20),
+    ('Video',    'Camera Operator',       30),
+    ('Stage',    'Stage Manager',         10),
+    ('Stage',    'Stage Hand',            20),
+    ('Stage',    'Fly Technician',        30),
+    ('Other',    'Production Manager',    10),
+    ('Other',    'Runner',                20),
+]
+
 APP_SETTINGS_SEED = [
     # Server
     ('app_port',              '5400'),
@@ -535,6 +601,28 @@ def _seed_schedule_meta_fields(conn):
             (fk, lbl, ft, afk, so, wh)
         )
     print(f"  Seeded {len(SCHEDULE_META_FIELDS_SEED)} schedule meta fields")
+
+
+def _seed_job_positions(conn):
+    """Seed position_categories and job_positions if tables are empty."""
+    count = conn.execute('SELECT COUNT(*) FROM position_categories').fetchone()[0]
+    if count > 0:
+        return
+    cat_id_map = {}
+    for (cat_name, sort_order) in POSITION_CATEGORIES_SEED:
+        cur = conn.execute(
+            'INSERT OR IGNORE INTO position_categories (name, sort_order) VALUES (?, ?)',
+            (cat_name, sort_order)
+        )
+        cat_id_map[cat_name] = cur.lastrowid
+
+    for (cat_name, pos_name, sort_order) in JOB_POSITIONS_SEED:
+        cat_id = cat_id_map.get(cat_name)
+        conn.execute(
+            'INSERT OR IGNORE INTO job_positions (category_id, name, sort_order) VALUES (?, ?, ?)',
+            (cat_id, pos_name, sort_order)
+        )
+    print(f"  Seeded {len(POSITION_CATEGORIES_SEED)} position categories and {len(JOB_POSITIONS_SEED)} job positions")
 
 
 def _seed_app_settings(conn):
@@ -733,6 +821,49 @@ def migrate_db():
         except Exception:
             pass  # Column already exists
 
+    # Staffing / crew scheduling tables (safe to rerun)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS position_categories (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS job_positions (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
+            name        TEXT NOT NULL,
+            sort_order  INTEGER DEFAULT 0
+        );
+
+        CREATE TABLE IF NOT EXISTS labor_requests (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id        INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            position_id    INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+            in_time        TEXT DEFAULT '',
+            out_time       TEXT DEFAULT '',
+            requested_name TEXT DEFAULT '',
+            sort_order     INTEGER DEFAULT 0,
+            created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS crew_members (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS crew_qualifications (
+            crew_member_id INTEGER NOT NULL REFERENCES crew_members(id) ON DELETE CASCADE,
+            position_id    INTEGER NOT NULL REFERENCES job_positions(id) ON DELETE CASCADE,
+            PRIMARY KEY (crew_member_id, position_id)
+        );
+    """)
+
+    # Seed job positions if empty
+    _seed_job_positions(conn)
+
     # Create schedule_meta_fields and schedule_templates tables (safe to rerun)
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS schedule_meta_fields (
@@ -817,6 +948,7 @@ def init_db(force=False):
     _seed_form_data(conn)
     _seed_app_settings(conn)
     _seed_schedule_meta_fields(conn)
+    _seed_job_positions(conn)
 
     conn.commit()
     conn.close()

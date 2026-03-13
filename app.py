@@ -723,6 +723,16 @@ def show_page(show_id):
     sched_templates = [dict(r) for r in db2.execute(
         'SELECT id, name FROM schedule_templates ORDER BY sort_order, name'
     ).fetchall()]
+
+    # Labor requests for this show
+    labor_rows = db2.execute("""
+        SELECT lr.*, jp.name as position_name
+        FROM labor_requests lr
+        LEFT JOIN job_positions jp ON lr.position_id = jp.id
+        WHERE lr.show_id = ?
+        ORDER BY lr.sort_order, lr.id
+    """, (show_id,)).fetchall()
+    labor_requests_data = [dict(r) for r in labor_rows]
     db2.close()
 
     return render_template('show.html',
@@ -745,6 +755,7 @@ def show_page(show_id):
                            global_wifi_network=global_wifi_network,
                            global_wifi_password=global_wifi_password,
                            sched_templates=sched_templates,
+                           labor_requests_data=labor_requests_data,
                            ollama_enabled=get_app_setting('ollama_enabled', '0') == '1',
                            user=get_current_user())
 
@@ -1538,6 +1549,13 @@ def _build_schedule_pdf(show_id):
         schedule_days = [{'perf': {'perf_date': show['show_date'], 'perf_time': show['show_time']},
                           'rows': rows_by_perf.get(None, []), 'day_num': 1}]
 
+    # Crew call times — unique in_times from labor_requests, sorted
+    labor_in_times = db.execute(
+        "SELECT in_time FROM labor_requests WHERE show_id=? AND in_time != '' ORDER BY in_time",
+        (show_id,)
+    ).fetchall()
+    crew_call_times = sorted(set(r['in_time'] for r in labor_in_times if r['in_time']))
+
     new_v = (show['schedule_version'] or 0) + 1
     db.execute('UPDATE shows SET schedule_version=? WHERE id=?', (new_v, show_id))
     log_cur = db.execute("""INSERT INTO export_log (show_id, export_type, version, exported_by)
@@ -1557,6 +1575,7 @@ def _build_schedule_pdf(show_id):
                            wifi_ssid=wifi_ssid,
                            wifi_pass=wifi_pass,
                            wifi_qr_b64=wifi_qr_b64,
+                           crew_call_times=crew_call_times,
                            version=new_v,
                            export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
 
@@ -1828,6 +1847,20 @@ def settings():
     sched_templates = [dict(t) for t in db3.execute(
         'SELECT id, name FROM schedule_templates ORDER BY sort_order, name'
     ).fetchall()] if _is_ca else []
+
+    # Job positions data for settings tab
+    position_categories = [dict(c) for c in db3.execute(
+        'SELECT * FROM position_categories ORDER BY sort_order, id'
+    ).fetchall()] if _is_ca else []
+    positions_raw = db3.execute(
+        'SELECT jp.*, pc.name as category_name FROM job_positions jp LEFT JOIN position_categories pc ON jp.category_id = pc.id ORDER BY pc.sort_order, jp.sort_order, jp.id'
+    ).fetchall() if _is_ca else []
+    job_positions = [dict(p) for p in positions_raw]
+
+    # Crew members
+    crew_members_list = [dict(m) for m in db3.execute(
+        'SELECT * FROM crew_members ORDER BY sort_order, name'
+    ).fetchall()] if _is_ca else []
     db3.close()
 
     db_settings = {
@@ -1856,6 +1889,9 @@ def settings():
                            departments=DEPARTMENTS,
                            is_content_admin=_is_ca,
                            sched_templates=sched_templates,
+                           position_categories=position_categories,
+                           job_positions=job_positions,
+                           crew_members_list=crew_members_list,
                            wifi_network=all_settings.get('wifi_network', ''),
                            wifi_password=all_settings.get('wifi_password', ''),
                            upload_max_mb=all_settings.get('upload_max_mb', '20'),
@@ -3155,6 +3191,398 @@ def _ai_extract_impl(show_id):
         'model': ollama_model,
         'field_count': len(field_rows),
     })
+
+
+# ─── Job Positions & Position Categories ─────────────────────────────────────
+
+@app.route('/api/job-positions')
+@login_required
+def api_job_positions():
+    db = get_db()
+    rows = db.execute("""
+        SELECT jp.id, jp.category_id, pc.name as category_name, jp.name, jp.sort_order
+        FROM job_positions jp
+        LEFT JOIN position_categories pc ON jp.category_id = pc.id
+        ORDER BY pc.sort_order, jp.sort_order, jp.id
+    """).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/api/position-categories')
+@login_required
+def api_position_categories():
+    db = get_db()
+    cats = db.execute('SELECT * FROM position_categories ORDER BY sort_order, id').fetchall()
+    db.close()
+    return jsonify([dict(c) for c in cats])
+
+
+@app.route('/settings/position-categories/add', methods=['POST'])
+@content_admin_required
+def add_position_category():
+    data = request.get_json(force=True) or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    db = get_db()
+    max_order = db.execute('SELECT MAX(sort_order) FROM position_categories').fetchone()[0] or 0
+    cur = db.execute(
+        'INSERT INTO position_categories (name, sort_order) VALUES (?, ?)',
+        (name, max_order + 10)
+    )
+    cid = cur.lastrowid
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'id': cid, 'name': name})
+
+
+@app.route('/settings/position-categories/<int:cid>/edit', methods=['POST'])
+@content_admin_required
+def edit_position_category(cid):
+    data = request.get_json(force=True) or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    db = get_db()
+    db.execute('UPDATE position_categories SET name=? WHERE id=?', (name, cid))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/position-categories/<int:cid>/delete', methods=['POST'])
+@content_admin_required
+def delete_position_category(cid):
+    db = get_db()
+    # Null out category_id on positions in this category
+    db.execute('UPDATE job_positions SET category_id=NULL WHERE category_id=?', (cid,))
+    db.execute('DELETE FROM position_categories WHERE id=?', (cid,))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/job-positions/add', methods=['POST'])
+@content_admin_required
+def add_job_position():
+    data = request.get_json(force=True) or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    category_id = data.get('category_id') or None
+    db = get_db()
+    max_order = db.execute('SELECT MAX(sort_order) FROM job_positions WHERE category_id IS ?', (category_id,)).fetchone()[0] or 0
+    cur = db.execute(
+        'INSERT INTO job_positions (category_id, name, sort_order) VALUES (?, ?, ?)',
+        (category_id, name, max_order + 10)
+    )
+    pid = cur.lastrowid
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'id': pid, 'name': name})
+
+
+@app.route('/settings/job-positions/<int:pid>/edit', methods=['POST'])
+@content_admin_required
+def edit_job_position(pid):
+    data = request.get_json(force=True) or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    category_id = data.get('category_id') or None
+    db = get_db()
+    db.execute(
+        'UPDATE job_positions SET name=?, category_id=? WHERE id=?',
+        (name, category_id, pid)
+    )
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/job-positions/<int:pid>/delete', methods=['POST'])
+@content_admin_required
+def delete_job_position(pid):
+    db = get_db()
+    db.execute('DELETE FROM job_positions WHERE id=?', (pid,))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/job-positions/reorder', methods=['POST'])
+@content_admin_required
+def reorder_job_positions():
+    data = request.get_json(force=True) or {}
+    position_ids = data.get('position_ids', [])
+    db = get_db()
+    for i, pid in enumerate(position_ids):
+        db.execute('UPDATE job_positions SET sort_order=? WHERE id=?', (i * 10, pid))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+# ─── Labor Requests (per show) ────────────────────────────────────────────────
+
+@app.route('/shows/<int:show_id>/labor-requests', methods=['GET'])
+@login_required
+def get_labor_requests(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    rows = db.execute("""
+        SELECT lr.*, jp.name as position_name
+        FROM labor_requests lr
+        LEFT JOIN job_positions jp ON lr.position_id = jp.id
+        WHERE lr.show_id = ?
+        ORDER BY lr.sort_order, lr.id
+    """, (show_id,)).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/shows/<int:show_id>/labor-requests', methods=['POST'])
+@login_required
+def add_labor_request(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    max_order = db.execute(
+        'SELECT MAX(sort_order) FROM labor_requests WHERE show_id=?', (show_id,)
+    ).fetchone()[0] or 0
+    cur = db.execute("""
+        INSERT INTO labor_requests (show_id, position_id, in_time, out_time, requested_name, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?)
+    """, (show_id,
+          data.get('position_id') or None,
+          data.get('in_time', ''),
+          data.get('out_time', ''),
+          data.get('requested_name', ''),
+          max_order + 10))
+    rid = cur.lastrowid
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'id': rid})
+
+
+@app.route('/shows/<int:show_id>/labor-requests/<int:rid>', methods=['PUT'])
+@login_required
+def update_labor_request(show_id, rid):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    db.execute("""
+        UPDATE labor_requests
+        SET position_id=?, in_time=?, out_time=?, requested_name=?
+        WHERE id=? AND show_id=?
+    """, (data.get('position_id') or None,
+          data.get('in_time', ''),
+          data.get('out_time', ''),
+          data.get('requested_name', ''),
+          rid, show_id))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/shows/<int:show_id>/labor-requests/<int:rid>', methods=['DELETE'])
+@login_required
+def delete_labor_request(show_id, rid):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    db = get_db()
+    db.execute('DELETE FROM labor_requests WHERE id=? AND show_id=?', (rid, show_id))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/shows/<int:show_id>/labor-requests/reorder', methods=['POST'])
+@login_required
+def reorder_labor_requests(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    data = request.get_json(force=True) or {}
+    request_ids = data.get('request_ids', [])
+    db = get_db()
+    for i, rid in enumerate(request_ids):
+        db.execute(
+            'UPDATE labor_requests SET sort_order=? WHERE id=? AND show_id=?',
+            (i * 10, rid, show_id)
+        )
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+# ─── Crew Members ────────────────────────────────────────────────────────────
+
+@app.route('/crew')
+@login_required
+def crew_tracker():
+    db = get_db()
+    categories = db.execute(
+        'SELECT * FROM position_categories ORDER BY sort_order, id'
+    ).fetchall()
+
+    # Build categories with their positions
+    positions = db.execute(
+        'SELECT * FROM job_positions ORDER BY sort_order, id'
+    ).fetchall()
+    pos_by_cat = {}
+    all_positions = []
+    for p in positions:
+        pos_by_cat.setdefault(p['category_id'], []).append(dict(p))
+        all_positions.append(dict(p))
+
+    cats_with_positions = []
+    for c in categories:
+        c_dict = dict(c)
+        c_dict['positions'] = pos_by_cat.get(c['id'], [])
+        cats_with_positions.append(c_dict)
+    # Uncategorized positions
+    uncategorized = pos_by_cat.get(None, [])
+
+    # Crew members
+    members = db.execute(
+        'SELECT * FROM crew_members ORDER BY sort_order, name'
+    ).fetchall()
+
+    # Qualifications — build set of (crew_member_id, position_id)
+    quals = db.execute('SELECT crew_member_id, position_id FROM crew_qualifications').fetchall()
+    qual_set = {(q['crew_member_id'], q['position_id']) for q in quals}
+
+    # Build member rows with qual flags
+    member_rows = []
+    for m in members:
+        m_dict = dict(m)
+        m_dict['qualifications'] = [q[1] for q in qual_set if q[0] == m['id']]
+        member_rows.append(m_dict)
+
+    db.close()
+    return render_template('crew_tracker.html',
+                           categories=cats_with_positions,
+                           uncategorized_positions=uncategorized,
+                           all_positions=all_positions,
+                           members=member_rows,
+                           user=get_current_user())
+
+
+@app.route('/api/crew-members')
+@login_required
+def api_crew_members():
+    db = get_db()
+    members = db.execute(
+        'SELECT * FROM crew_members ORDER BY sort_order, name'
+    ).fetchall()
+    quals = db.execute('SELECT crew_member_id, position_id FROM crew_qualifications').fetchall()
+    qual_map = {}
+    for q in quals:
+        qual_map.setdefault(q['crew_member_id'], []).append(q['position_id'])
+
+    result = []
+    for m in members:
+        m_dict = dict(m)
+        m_dict['qualifications'] = qual_map.get(m['id'], [])
+        result.append(m_dict)
+    db.close()
+    return jsonify(result)
+
+
+@app.route('/settings/crew-members/add', methods=['POST'])
+@content_admin_required
+def add_crew_member():
+    data = request.get_json(force=True) or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    db = get_db()
+    max_order = db.execute('SELECT MAX(sort_order) FROM crew_members').fetchone()[0] or 0
+    cur = db.execute(
+        'INSERT INTO crew_members (name, sort_order) VALUES (?, ?)',
+        (name, max_order + 10)
+    )
+    mid = cur.lastrowid
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'id': mid, 'name': name})
+
+
+@app.route('/settings/crew-members/<int:mid>/edit', methods=['POST'])
+@content_admin_required
+def edit_crew_member(mid):
+    data = request.get_json(force=True) or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    db = get_db()
+    db.execute('UPDATE crew_members SET name=? WHERE id=?', (name, mid))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/crew-members/<int:mid>/delete', methods=['POST'])
+@content_admin_required
+def delete_crew_member(mid):
+    db = get_db()
+    db.execute('DELETE FROM crew_members WHERE id=?', (mid,))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/crew-members/reorder', methods=['POST'])
+@content_admin_required
+def reorder_crew_members():
+    data = request.get_json(force=True) or {}
+    member_ids = data.get('member_ids', [])
+    db = get_db()
+    for i, mid in enumerate(member_ids):
+        db.execute('UPDATE crew_members SET sort_order=? WHERE id=?', (i * 10, mid))
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/api/crew-qualifications/toggle', methods=['POST'])
+@content_admin_required
+def toggle_crew_qualification():
+    data = request.get_json(force=True) or {}
+    crew_member_id = data.get('crew_member_id')
+    position_id = data.get('position_id')
+    if not crew_member_id or not position_id:
+        return jsonify({'success': False, 'error': 'crew_member_id and position_id required.'}), 400
+    db = get_db()
+    existing = db.execute(
+        'SELECT 1 FROM crew_qualifications WHERE crew_member_id=? AND position_id=?',
+        (crew_member_id, position_id)
+    ).fetchone()
+    if existing:
+        db.execute(
+            'DELETE FROM crew_qualifications WHERE crew_member_id=? AND position_id=?',
+            (crew_member_id, position_id)
+        )
+        has = False
+    else:
+        db.execute(
+            'INSERT INTO crew_qualifications (crew_member_id, position_id) VALUES (?, ?)',
+            (crew_member_id, position_id)
+        )
+        has = True
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'has': has})
 
 
 # ─── Error Handlers ───────────────────────────────────────────────────────────

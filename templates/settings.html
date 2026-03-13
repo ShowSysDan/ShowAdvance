@@ -20,6 +20,8 @@
   {% endif %}
   {% if user.role == 'admin' or is_content_admin %}
   <button class="tab-btn" onclick="switchSettingsTab('fields')">Form Fields</button>
+  <button class="tab-btn" onclick="switchSettingsTab('positions')">Job Positions</button>
+  <button class="tab-btn" onclick="switchSettingsTab('crew')">Crew Members</button>
   {% endif %}
   {% if user.role == 'admin' %}
   <button class="tab-btn" onclick="switchSettingsTab('syslog')">Syslog</button>
@@ -754,6 +756,142 @@
 </div>
 {% endif %}
 
+{# ── JOB POSITIONS ─────────────────────────────────────────────────────────── #}
+{% if user.role == 'admin' or is_content_admin %}
+<div id="stab-positions" class="stab-pane" style="display:none">
+
+  <div style="display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start">
+
+    {# Left: categories #}
+    <div class="form-section">
+      <div class="form-section-header">
+        <span class="section-icon">◈</span> CATEGORIES
+        <span class="section-count ml-auto text-dim">{{ position_categories|length }}</span>
+      </div>
+      <div class="form-section-body" style="border-bottom:1px solid var(--border)">
+        <h3 class="sub-section-label">ADD CATEGORY</h3>
+        <div style="display:flex;gap:8px">
+          <input type="text" id="new-cat-name" class="field-input" placeholder="Category name" style="flex:1">
+          <button class="btn btn-primary" onclick="addPositionCategory()">Add</button>
+        </div>
+        <div id="cat-msg" class="field-msg" style="display:none;margin-top:6px"></div>
+      </div>
+      <div class="form-section-body no-pad">
+        <table class="data-table">
+          <tbody id="cat-list">
+            {% for cat in position_categories %}
+            <tr data-cid="{{ cat.id }}">
+              <td id="cat-name-{{ cat.id }}">{{ cat.name }}</td>
+              <td style="width:80px">
+                <div class="action-btns">
+                  <button class="btn btn-xs btn-ghost" onclick="editCategory({{ cat.id }}, {{ cat.name|tojson }})">✎</button>
+                  <button class="btn btn-xs btn-danger-ghost" onclick="deleteCategory({{ cat.id }})">×</button>
+                </div>
+              </td>
+            </tr>
+            {% else %}
+            <tr id="cat-empty"><td colspan="2" class="text-dim" style="text-align:center;padding:16px">No categories yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    {# Right: positions #}
+    <div class="form-section">
+      <div class="form-section-header">
+        <span class="section-icon">◈</span> JOB POSITIONS
+        <span class="section-count ml-auto text-dim">{{ job_positions|length }}</span>
+      </div>
+      <div class="form-section-body" style="border-bottom:1px solid var(--border)">
+        <h3 class="sub-section-label">ADD POSITION</h3>
+        <div style="display:flex;gap:8px;align-items:flex-end">
+          <div class="field-group" style="flex:1;margin:0">
+            <label class="field-label">CATEGORY</label>
+            <select id="new-pos-cat" class="field-input">
+              <option value="">— Uncategorized —</option>
+              {% for cat in position_categories %}
+              <option value="{{ cat.id }}">{{ cat.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field-group" style="flex:2;margin:0">
+            <label class="field-label">POSITION NAME</label>
+            <input type="text" id="new-pos-name" class="field-input" placeholder="e.g. A1, Lighting Designer...">
+          </div>
+          <button class="btn btn-primary" onclick="addPosition()">Add</button>
+        </div>
+        <div id="pos-msg" class="field-msg" style="display:none;margin-top:6px"></div>
+      </div>
+      <div class="form-section-body no-pad">
+        <table class="data-table" id="positions-table">
+          <thead><tr><th>POSITION NAME</th><th>CATEGORY</th><th style="width:80px">ACTIONS</th></tr></thead>
+          <tbody id="positions-tbody">
+            {% for pos in job_positions %}
+            <tr data-pid="{{ pos.id }}">
+              <td id="pos-name-{{ pos.id }}">{{ pos.name }}</td>
+              <td class="text-dim" id="pos-cat-{{ pos.id }}">{{ pos.category_name or '—' }}</td>
+              <td>
+                <div class="action-btns">
+                  <button class="btn btn-xs btn-ghost" onclick="editPosition({{ pos.id }}, {{ pos.name|tojson }}, {{ (pos.category_id or '')|tojson }})">✎</button>
+                  <button class="btn btn-xs btn-danger-ghost" onclick="deletePosition({{ pos.id }})">×</button>
+                </div>
+              </td>
+            </tr>
+            {% else %}
+            <tr id="pos-empty"><td colspan="3" class="text-dim" style="text-align:center;padding:16px">No positions yet. Add a category first, then add positions.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endif %}
+
+
+{# ── CREW MEMBERS ──────────────────────────────────────────────────────────── #}
+{% if user.role == 'admin' or is_content_admin %}
+<div id="stab-crew" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> CREW MEMBERS
+      <span class="section-count ml-auto text-dim">{{ crew_members_list|length }} members</span>
+    </div>
+    <div class="form-section-body" style="border-bottom:1px solid var(--border)">
+      <h3 class="sub-section-label">ADD CREW MEMBER</h3>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="new-crew-name" class="field-input" placeholder="Full name" style="max-width:320px">
+        <button class="btn btn-primary" onclick="addCrewMember()">Add</button>
+      </div>
+      <div id="crew-msg" class="field-msg" style="display:none;margin-top:6px"></div>
+    </div>
+    <div class="form-section-body no-pad">
+      <table class="data-table">
+        <thead><tr><th>NAME</th><th style="width:80px">ACTIONS</th></tr></thead>
+        <tbody id="crew-tbody">
+          {% for m in crew_members_list %}
+          <tr data-mid="{{ m.id }}">
+            <td id="crew-name-{{ m.id }}">{{ m.name }}</td>
+            <td>
+              <div class="action-btns">
+                <button class="btn btn-xs btn-ghost" onclick="editCrewMember({{ m.id }}, {{ m.name|tojson }})">✎</button>
+                <button class="btn btn-xs btn-danger-ghost" onclick="deleteCrewMember({{ m.id }})">×</button>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr id="crew-empty"><td colspan="2" class="text-dim" style="text-align:center;padding:16px">No crew members yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+
 {# ── MY ACCOUNT ────────────────────────────────────────────────────────────── #}
 <div id="stab-account" class="stab-pane" style="display:none">
   <div class="form-section">
@@ -1343,7 +1481,7 @@ async function adminDeleteFile(showId, fileId, btn) {
   loadShowOptions();
   // Activate tab from URL hash or server-side default
   const hash = location.hash.replace('#','');
-  const validTabs = ['contacts','users','groups','fields','syslog','backups','account','files','godmode','database','ai'];
+  const validTabs = ['contacts','users','groups','fields','positions','crew','syslog','backups','account','files','godmode','database','ai'];
   const defaultTab = {% if user.role == 'admin' or is_content_admin %}'contacts'{% else %}'users'{% endif %};
   switchSettingsTab(validTabs.includes(hash) ? hash : {% if active_tab %}'{{ active_tab }}'{% else %}defaultTab{% endif %});
 })();
@@ -1467,6 +1605,183 @@ async function saveAiSettings() {
     msg.textContent = d.success ? 'AI settings saved.' : (d.error || 'Save failed.');
     msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
   } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
+}
+
+/* ── Position Categories ─────────────────────────────────────── */
+async function addPositionCategory() {
+  const name = document.getElementById('new-cat-name').value.trim();
+  if (!name) return;
+  const msg = document.getElementById('cat-msg');
+  const r = await fetch('/settings/position-categories/add', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name})
+  });
+  const d = await r.json();
+  msg.style.display = '';
+  if (d.success) {
+    msg.className = 'field-msg field-msg-success'; msg.textContent = 'Category added.';
+    document.getElementById('new-cat-name').value = '';
+    // Append to list
+    const li = document.createElement('tr');
+    li.dataset.cid = d.id;
+    li.innerHTML = `<td id="cat-name-${d.id}">${_esc(d.name)}</td>
+      <td style="width:80px"><div class="action-btns">
+        <button class="btn btn-xs btn-ghost" onclick="editCategory(${d.id}, ${JSON.stringify(d.name)})">✎</button>
+        <button class="btn btn-xs btn-danger-ghost" onclick="deleteCategory(${d.id})">×</button>
+      </div></td>`;
+    document.getElementById('cat-empty')?.remove();
+    document.getElementById('cat-list').appendChild(li);
+    // Also add to position category select
+    const sel = document.getElementById('new-pos-cat');
+    const opt = document.createElement('option'); opt.value = d.id; opt.textContent = d.name;
+    sel.appendChild(opt);
+  } else {
+    msg.className = 'field-msg field-msg-error'; msg.textContent = d.error || 'Error.';
+  }
+}
+
+async function editCategory(cid, currentName) {
+  const name = prompt('Edit category name:', currentName);
+  if (!name || name === currentName) return;
+  const r = await fetch(`/settings/position-categories/${cid}/edit`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+  });
+  const d = await r.json();
+  if (d.success) {
+    document.getElementById('cat-name-' + cid).textContent = name;
+    // Update option in pos select
+    document.querySelectorAll(`#new-pos-cat option[value="${cid}"]`).forEach(o => o.textContent = name);
+  } else alert(d.error || 'Error updating category.');
+}
+
+async function deleteCategory(cid) {
+  if (!confirm('Delete this category? Positions in it will become uncategorized.')) return;
+  const r = await fetch(`/settings/position-categories/${cid}/delete`, {method: 'POST'});
+  const d = await r.json();
+  if (d.success) {
+    document.querySelector(`#cat-list tr[data-cid="${cid}"]`)?.remove();
+    document.querySelectorAll(`#new-pos-cat option[value="${cid}"]`).forEach(o => o.remove());
+    // Update positions table cells
+    document.querySelectorAll('#positions-tbody tr').forEach(tr => {
+      const catCell = tr.querySelector('td:nth-child(2)');
+      if (catCell && catCell.dataset.catId == cid) catCell.textContent = '—';
+    });
+  } else alert(d.error || 'Error deleting category.');
+}
+
+/* ── Job Positions ───────────────────────────────────────────── */
+async function addPosition() {
+  const name = document.getElementById('new-pos-name').value.trim();
+  const category_id = document.getElementById('new-pos-cat').value || null;
+  const catSel = document.getElementById('new-pos-cat');
+  const catName = catSel.options[catSel.selectedIndex]?.text || '—';
+  if (!name) return;
+  const msg = document.getElementById('pos-msg');
+  const r = await fetch('/settings/job-positions/add', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, category_id})
+  });
+  const d = await r.json();
+  msg.style.display = '';
+  if (d.success) {
+    msg.className = 'field-msg field-msg-success'; msg.textContent = 'Position added.';
+    document.getElementById('new-pos-name').value = '';
+    document.getElementById('pos-empty')?.remove();
+    const tbody = document.getElementById('positions-tbody');
+    const tr = document.createElement('tr'); tr.dataset.pid = d.id;
+    tr.innerHTML = `<td id="pos-name-${d.id}">${_esc(d.name)}</td>
+      <td class="text-dim" id="pos-cat-${d.id}" data-cat-id="${category_id || ''}">${_esc(catName)}</td>
+      <td><div class="action-btns">
+        <button class="btn btn-xs btn-ghost" onclick="editPosition(${d.id}, ${JSON.stringify(d.name)}, ${JSON.stringify(category_id || '')})">✎</button>
+        <button class="btn btn-xs btn-danger-ghost" onclick="deletePosition(${d.id})">×</button>
+      </div></td>`;
+    tbody.appendChild(tr);
+  } else {
+    msg.className = 'field-msg field-msg-error'; msg.textContent = d.error || 'Error.';
+  }
+}
+
+async function editPosition(pid, currentName, currentCatId) {
+  const name = prompt('Edit position name:', currentName);
+  if (!name) return;
+  // For simplicity, keep same category. A full implementation would show a select.
+  const r = await fetch(`/settings/job-positions/${pid}/edit`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, category_id: currentCatId || null})
+  });
+  const d = await r.json();
+  if (d.success) {
+    const nameEl = document.getElementById('pos-name-' + pid);
+    if (nameEl) nameEl.textContent = name;
+  } else alert(d.error || 'Error updating position.');
+}
+
+async function deletePosition(pid) {
+  if (!confirm('Delete this position? It will be removed from all labor requests.')) return;
+  const r = await fetch(`/settings/job-positions/${pid}/delete`, {method: 'POST'});
+  const d = await r.json();
+  if (d.success) {
+    document.querySelector(`#positions-tbody tr[data-pid="${pid}"]`)?.remove();
+    if (!document.querySelector('#positions-tbody tr')) {
+      const td = document.createElement('td'); td.colSpan = 3; td.className = 'text-dim';
+      td.style.textAlign = 'center'; td.style.padding = '16px';
+      td.textContent = 'No positions yet.';
+      const tr = document.createElement('tr'); tr.id = 'pos-empty'; tr.appendChild(td);
+      document.getElementById('positions-tbody').appendChild(tr);
+    }
+  } else alert(d.error || 'Error deleting position.');
+}
+
+/* ── Crew Members ────────────────────────────────────────────── */
+async function addCrewMember() {
+  const name = document.getElementById('new-crew-name').value.trim();
+  if (!name) return;
+  const msg = document.getElementById('crew-msg');
+  const r = await fetch('/settings/crew-members/add', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+  });
+  const d = await r.json();
+  msg.style.display = '';
+  if (d.success) {
+    msg.className = 'field-msg field-msg-success'; msg.textContent = 'Crew member added.';
+    document.getElementById('new-crew-name').value = '';
+    document.getElementById('crew-empty')?.remove();
+    const tr = document.createElement('tr'); tr.dataset.mid = d.id;
+    tr.innerHTML = `<td id="crew-name-${d.id}">${_esc(d.name)}</td>
+      <td><div class="action-btns">
+        <button class="btn btn-xs btn-ghost" onclick="editCrewMember(${d.id}, ${JSON.stringify(d.name)})">✎</button>
+        <button class="btn btn-xs btn-danger-ghost" onclick="deleteCrewMember(${d.id})">×</button>
+      </div></td>`;
+    document.getElementById('crew-tbody').appendChild(tr);
+  } else {
+    msg.className = 'field-msg field-msg-error'; msg.textContent = d.error || 'Error.';
+  }
+}
+
+async function editCrewMember(mid, currentName) {
+  const name = prompt('Edit crew member name:', currentName);
+  if (!name || name === currentName) return;
+  const r = await fetch(`/settings/crew-members/${mid}/edit`, {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+  });
+  const d = await r.json();
+  if (d.success) {
+    const nameEl = document.getElementById('crew-name-' + mid);
+    if (nameEl) nameEl.textContent = name;
+  } else alert(d.error || 'Error updating crew member.');
+}
+
+async function deleteCrewMember(mid) {
+  if (!confirm('Remove this crew member? Their skill qualifications will also be removed.')) return;
+  const r = await fetch(`/settings/crew-members/${mid}/delete`, {method: 'POST'});
+  const d = await r.json();
+  if (d.success) {
+    document.querySelector(`#crew-tbody tr[data-mid="${mid}"]`)?.remove();
+  } else alert(d.error || 'Error deleting crew member.');
+}
+
+function _esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 </script>
 {% endblock %}

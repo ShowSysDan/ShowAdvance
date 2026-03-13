@@ -132,6 +132,14 @@
   {% endif %}
   {% endfor %}
 
+  <!-- Crew Call Times -->
+  {% if crew_call_times %}
+  <div style="background:#fff8e8; border:1px solid #e8c870; padding:5px 10px; margin-bottom:8px; font-size:8.5pt; border-radius:3px;">
+    <strong>CREW CALL:</strong>
+    {% for t in crew_call_times %}Crew {{ loop.index }} Start: <strong>{{ t }}</strong>{% if not loop.last %} &nbsp;/&nbsp; {% endif %}{% endfor %}
+  </div>
+  {% endif %}
+
   <!-- WiFi Box (only on first day, or all days) -->
   {% if wifi_ssid %}
   <div class="wifi-box">
