@@ -574,20 +574,43 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
       </div>
       {% endif %}
     </div>
+    {% if not restricted %}
+    <div class="labor-quickfill" id="labor-quickfill">
+      <span class="labor-qf-label">Quick Fill</span>
+      <label class="labor-qf-field"><span>In</span>
+        <input type="text" id="qf-in" class="field-input field-input-sm" placeholder="14:00" maxlength="5">
+      </label>
+      <label class="labor-qf-field"><span>Out</span>
+        <input type="text" id="qf-out" class="field-input field-input-sm" placeholder="22:00" maxlength="5">
+      </label>
+      <label class="labor-qf-field"><span>Break Start</span>
+        <input type="text" id="qf-break-start" class="field-input field-input-sm" placeholder="18:00" maxlength="5">
+      </label>
+      <label class="labor-qf-field"><span>Break End</span>
+        <input type="text" id="qf-break-end" class="field-input field-input-sm" placeholder="18:30" maxlength="5">
+      </label>
+      <button type="button" class="btn btn-sm btn-ghost" onclick="applyQuickFill(false)">Apply to Selected</button>
+      <button type="button" class="btn btn-sm btn-primary" onclick="applyQuickFill(true)">Apply to All</button>
+    </div>
+    {% endif %}
     <div class="form-section-body no-pad">
       <table class="data-table" id="labor-table">
         <thead>
           <tr>
-            <th style="width:220px">POSITION</th>
-            <th style="width:120px">IN TIME</th>
-            <th style="width:120px">OUT TIME</th>
-            <th>REQUESTED NAME</th>
-            {% if not restricted %}<th style="width:60px"></th>{% endif %}
+            {% if not restricted %}<th style="width:32px;text-align:center"><input type="checkbox" id="labor-select-all" title="Select / deselect all" onchange="toggleAllLaborRows(this)"></th>{% endif %}
+            <th style="width:190px">POSITION</th>
+            <th style="width:90px">IN</th>
+            <th style="width:90px">OUT</th>
+            <th style="width:100px">BREAK START</th>
+            <th style="width:100px">BREAK END</th>
+            <th>TECHNICIAN</th>
+            {% if not restricted %}<th style="width:44px"></th>{% endif %}
           </tr>
         </thead>
         <tbody id="labor-tbody">
           {% for lr in labor_requests_data %}
           <tr data-rid="{{ lr.id }}">
+            {% if not restricted %}<td style="text-align:center"><input type="checkbox" class="labor-row-check"></td>{% endif %}
             <td>
               <select class="field-input field-input-sm labor-field" data-field="position_id"
                       {% if restricted %}disabled{% endif %}
@@ -598,26 +621,40 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
             <td>
               <input type="text" class="field-input field-input-sm labor-field" data-field="in_time"
                      value="{{ lr.in_time or '' }}"
-                     placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]"
+                     placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
                      {% if restricted %}disabled{% endif %}
                      onchange="saveLaborRow(this)">
             </td>
             <td>
               <input type="text" class="field-input field-input-sm labor-field" data-field="out_time"
                      value="{{ lr.out_time or '' }}"
-                     placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]"
+                     placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
                      {% if restricted %}disabled{% endif %}
                      onchange="saveLaborRow(this)">
             </td>
             <td>
-              <input type="text" class="field-input field-input-sm labor-field" data-field="requested_name"
-                     value="{{ lr.requested_name or '' }}"
-                     placeholder="Optional — specific technician name"
+              <input type="text" class="field-input field-input-sm labor-field" data-field="break_start"
+                     value="{{ lr.break_start or '' }}"
+                     placeholder="18:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
                      {% if restricted %}disabled{% endif %}
                      onchange="saveLaborRow(this)">
+            </td>
+            <td>
+              <input type="text" class="field-input field-input-sm labor-field" data-field="break_end"
+                     value="{{ lr.break_end or '' }}"
+                     placeholder="18:30" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
+                     {% if restricted %}disabled{% endif %}
+                     onchange="saveLaborRow(this)">
+            </td>
+            <td>
+              <select class="field-input field-input-sm labor-field" data-field="requested_name"
+                      {% if restricted %}disabled{% endif %}
+                      onchange="saveLaborRow(this)">
+                <option value="">— Any technician —</option>
+              </select>
             </td>
             {% if not restricted %}
-            <td>
+            <td style="text-align:center">
               <button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button>
             </td>
             {% endif %}
@@ -893,24 +930,20 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
 {% block scripts %}
 <style>
-/* ── Labor autocomplete ──────────────────────────── */
-.labor-name-wrap { position: relative; display: flex; align-items: center; gap: 6px; }
-.labor-name-wrap input { flex: 1; min-width: 0; }
-.qual-badge { font-size: 11px; font-weight: 700; flex-shrink: 0; white-space: nowrap; }
-.qual-badge.ok  { color: var(--accent); }
-.qual-badge.warn { color: #f59e0b; }
-.labor-ac-list {
-  position: absolute; top: 100%; left: 0; right: 0; z-index: 200;
-  background: var(--bg-card); border: 1px solid var(--border-light);
-  border-radius: var(--radius); box-shadow: 0 4px 16px rgba(0,0,0,.4);
-  max-height: 180px; overflow-y: auto; margin-top: 2px;
+/* ── Labor quick-fill toolbar ────────────────────── */
+.labor-quickfill {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  padding: 8px 12px; border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
 }
-.labor-ac-item {
-  padding: 7px 10px; font-size: 13px; cursor: pointer;
-  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+.labor-qf-label {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-muted); white-space: nowrap;
+  margin-right: 4px;
 }
-.labor-ac-item:hover { background: var(--bg-hover); }
-.labor-ac-warn { font-size: 10px; color: #f59e0b; font-weight: 600; white-space: nowrap; }
+.labor-qf-field { display: flex; align-items: center; gap: 4px; }
+.labor-qf-field span { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
+.labor-qf-field .field-input-sm { width: 72px; }
 </style>
 <script>
   const RESTRICTED = {{ 'true' if restricted else 'false' }};
@@ -1151,72 +1184,54 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     return parseInt(tr.querySelector('[data-field="position_id"]')?.value) || null;
   }
 
-  function _updateQualBadge(tr) {
-    const nameInp = tr.querySelector('[data-field="requested_name"]');
-    if (!nameInp) return;
-    let badge = nameInp.parentNode.querySelector('.qual-badge');
-    if (!badge) return;
-    const name = nameInp.value.trim().toLowerCase();
-    const posId = _getPositionId(tr);
-    if (!name || !posId || !_crewMembers) { badge.textContent = ''; badge.className = 'qual-badge'; return; }
-    const member = _crewMembers.find(m => m.name.toLowerCase() === name);
-    if (!member) { badge.textContent = ''; badge.className = 'qual-badge'; return; }
-    if (member.qualifications.includes(posId)) {
-      badge.textContent = '✓ qualified'; badge.className = 'qual-badge ok';
-      badge.title = member.name + ' is qualified for this position';
-    } else {
-      badge.textContent = '⚠ not qualified'; badge.className = 'qual-badge warn';
-      badge.title = member.name + ' does NOT have this position qualified';
-    }
-  }
+  function _buildTechnicianSelect(selectEl, positionId, selectedName) {
+    selectEl.innerHTML = '';
+    const anyOpt = document.createElement('option');
+    anyOpt.value = '';
+    anyOpt.textContent = '— Any technician —';
+    selectEl.appendChild(anyOpt);
+    if (!_crewMembers || !_crewMembers.length) return;
 
-  function _attachNameAutocomplete(nameInp) {
-    // Wrap the input in a relative container for dropdown positioning
-    const td = nameInp.parentNode;
-    if (td.classList.contains('labor-name-wrap')) return; // already wrapped
-    td.classList.add('labor-name-wrap');
-    const badge = document.createElement('span');
-    badge.className = 'qual-badge';
-    td.appendChild(badge);
-
-    nameInp.addEventListener('input', () => {
-      document.querySelectorAll('.labor-ac-list').forEach(d => d.remove());
-      const val = nameInp.value.trim().toLowerCase();
-      if (!val || !_crewMembers) return;
-      const matches = _crewMembers.filter(m => m.name.toLowerCase().includes(val));
-      if (!matches.length) return;
-      const tr = nameInp.closest('tr');
-      const posId = _getPositionId(tr);
-      const list = document.createElement('div');
-      list.className = 'labor-ac-list';
-      matches.forEach(m => {
-        const item = document.createElement('div');
-        item.className = 'labor-ac-item';
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = m.name;
-        item.appendChild(nameSpan);
-        if (posId && !m.qualifications.includes(posId)) {
-          const warn = document.createElement('span');
-          warn.className = 'labor-ac-warn'; warn.textContent = '⚠ not qualified';
-          item.appendChild(warn);
-        }
-        item.addEventListener('mousedown', e => {
-          e.preventDefault();
-          nameInp.value = m.name;
-          document.querySelectorAll('.labor-ac-list').forEach(d => d.remove());
-          saveLaborRow(nameInp);
-          _updateQualBadge(nameInp.closest('tr'));
+    if (positionId) {
+      const qualified = _crewMembers.filter(m => m.qualifications.includes(positionId));
+      const others    = _crewMembers.filter(m => !m.qualifications.includes(positionId));
+      if (qualified.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Qualified';
+        qualified.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.name; opt.textContent = m.name;
+          if (m.name === selectedName) opt.selected = true;
+          og.appendChild(opt);
         });
-        list.appendChild(item);
+        selectEl.appendChild(og);
+      }
+      if (others.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Others';
+        others.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.name; opt.textContent = m.name;
+          if (m.name === selectedName) opt.selected = true;
+          og.appendChild(opt);
+        });
+        selectEl.appendChild(og);
+      }
+    } else {
+      _crewMembers.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name; opt.textContent = m.name;
+        if (m.name === selectedName) opt.selected = true;
+        selectEl.appendChild(opt);
       });
-      td.appendChild(list);
-    });
-
-    nameInp.addEventListener('blur', () => {
-      setTimeout(() => document.querySelectorAll('.labor-ac-list').forEach(d => d.remove()), 150);
-      _updateQualBadge(nameInp.closest('tr'));
-    });
-    nameInp.addEventListener('change', () => _updateQualBadge(nameInp.closest('tr')));
+    }
+    // Preserve a saved name not currently in the roster
+    if (selectedName && !selectEl.value) {
+      const opt = document.createElement('option');
+      opt.value = selectedName; opt.textContent = selectedName;
+      opt.selected = true;
+      selectEl.insertBefore(opt, selectEl.children[1]);
+    }
   }
 
   function _buildPositionSelect(selectEl, selectedId) {
@@ -1244,19 +1259,19 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
   async function initLaborTab() {
     await Promise.all([_loadLaborPositions(), _loadCrewMembers()]);
-    // Populate existing row dropdowns and attach autocomplete
     document.querySelectorAll('#labor-tbody tr').forEach(tr => {
       const rid = tr.dataset.rid;
-      const sel = tr.querySelector('select[data-field="position_id"]');
-      if (sel) {
-        const existing = window._laborRequestsData.find(r => r.id == rid);
-        _buildPositionSelect(sel, existing ? existing.position_id : null);
-        sel.addEventListener('change', () => _updateQualBadge(tr));
-      }
-      const nameInp = tr.querySelector('[data-field="requested_name"]');
-      if (nameInp) {
-        _attachNameAutocomplete(nameInp);
-        _updateQualBadge(tr);
+      const posSel  = tr.querySelector('select[data-field="position_id"]');
+      const techSel = tr.querySelector('select[data-field="requested_name"]');
+      const existing = window._laborRequestsData.find(r => r.id == rid);
+      if (posSel) _buildPositionSelect(posSel, existing ? existing.position_id : null);
+      if (techSel) _buildTechnicianSelect(techSel, existing ? existing.position_id : null, existing ? existing.requested_name || '' : '');
+      if (posSel && techSel) {
+        posSel.addEventListener('change', () => {
+          const posId = parseInt(posSel.value) || null;
+          _buildTechnicianSelect(techSel, posId, techSel.value);
+          saveLaborRow(posSel);
+        });
       }
     });
   }
@@ -1292,33 +1307,64 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const tr = document.createElement('tr');
     tr.dataset.rid = rid;
     tr.innerHTML = `
+      <td style="text-align:center"><input type="checkbox" class="labor-row-check"></td>
       <td><select class="field-input field-input-sm labor-field" data-field="position_id" onchange="saveLaborRow(this)"></select></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" onchange="saveLaborRow(this)"></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" onchange="saveLaborRow(this)"></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="requested_name" placeholder="Optional — specific technician name" onchange="saveLaborRow(this)"></td>
-      <td><button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" onchange="saveLaborRow(this)"></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" onchange="saveLaborRow(this)"></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_start" placeholder="18:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" onchange="saveLaborRow(this)"></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_end" placeholder="18:30" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" onchange="saveLaborRow(this)"></td>
+      <td><select class="field-input field-input-sm labor-field" data-field="requested_name" onchange="saveLaborRow(this)"></select></td>
+      <td style="text-align:center"><button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button></td>
     `;
     document.getElementById('labor-tbody').appendChild(tr);
-    const newSel = tr.querySelector('select[data-field="position_id"]');
-    _buildPositionSelect(newSel, null);
-    newSel.addEventListener('change', () => _updateQualBadge(tr));
-    const newNameInp = tr.querySelector('[data-field="requested_name"]');
-    if (newNameInp) _attachNameAutocomplete(newNameInp);
-    newSel.focus();
+    const newPosSel  = tr.querySelector('select[data-field="position_id"]');
+    const newTechSel = tr.querySelector('select[data-field="requested_name"]');
+    _buildPositionSelect(newPosSel, null);
+    _buildTechnicianSelect(newTechSel, null, '');
+    newPosSel.addEventListener('change', () => {
+      const posId = parseInt(newPosSel.value) || null;
+      _buildTechnicianSelect(newTechSel, posId, newTechSel.value);
+      saveLaborRow(newPosSel);
+    });
+    newPosSel.focus();
   }
 
   async function saveLaborRow(el) {
     const tr = el.closest('tr');
     const rid = tr.dataset.rid;
     if (!rid) return;
-    const position_id = tr.querySelector('[data-field="position_id"]').value || null;
-    const in_time = tr.querySelector('[data-field="in_time"]').value || '';
-    const out_time = tr.querySelector('[data-field="out_time"]').value || '';
+    const position_id   = tr.querySelector('[data-field="position_id"]').value || null;
+    const in_time       = tr.querySelector('[data-field="in_time"]').value || '';
+    const out_time      = tr.querySelector('[data-field="out_time"]').value || '';
+    const break_start   = tr.querySelector('[data-field="break_start"]').value || '';
+    const break_end     = tr.querySelector('[data-field="break_end"]').value || '';
     const requested_name = tr.querySelector('[data-field="requested_name"]').value || '';
     await fetch(`/shows/{{ show.id }}/labor-requests/${rid}`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({position_id, in_time, out_time, requested_name})
+      body: JSON.stringify({position_id, in_time, out_time, break_start, break_end, requested_name})
+    });
+  }
+
+  function toggleAllLaborRows(masterCb) {
+    document.querySelectorAll('#labor-tbody .labor-row-check').forEach(cb => { cb.checked = masterCb.checked; });
+  }
+
+  function applyQuickFill(toAll) {
+    const inVal  = document.getElementById('qf-in').value.trim();
+    const outVal = document.getElementById('qf-out').value.trim();
+    const bsVal  = document.getElementById('qf-break-start').value.trim();
+    const beVal  = document.getElementById('qf-break-end').value.trim();
+    const rows = Array.from(document.querySelectorAll('#labor-tbody tr'));
+    const targets = toAll ? rows : rows.filter(tr => tr.querySelector('.labor-row-check')?.checked);
+    if (!targets.length) { alert(toAll ? 'No rows to fill.' : 'Select at least one row first.'); return; }
+    targets.forEach(tr => {
+      const set = (field, val) => { if (val === '') return; const el = tr.querySelector(`[data-field="${field}"]`); if (el) el.value = val; };
+      set('in_time', inVal);
+      set('out_time', outVal);
+      set('break_start', bsVal);
+      set('break_end', beVal);
+      saveLaborRow(tr.querySelector('.labor-field'));
     });
   }
 

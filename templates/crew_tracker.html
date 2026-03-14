@@ -89,7 +89,8 @@
   white-space: normal;
   word-break: break-word;
   overflow: hidden;
-  max-height: 130px;
+  height: 128px;
+  text-align: start;
   padding: 0 4px;
 }
 
@@ -212,9 +213,23 @@
 {% else %}
 
 <div class="tracker-toolbar">
-  <span class="text-dim" style="font-size:12px">{{ members|length }} technicians &nbsp;·&nbsp; {{ all_positions|length }} positions</span>
-  <button class="btn btn-ghost btn-sm" onclick="sortCrewAlpha()">Sort A–Z</button>
+  <span class="text-dim tracker-count" id="tracker-count">{{ members|length }} technicians &nbsp;·&nbsp; {{ all_positions|length }} positions</span>
+  <button class="btn btn-ghost btn-sm" onclick="sortCrewAlpha(false)">Sort A–Z</button>
+  <button class="btn btn-ghost btn-sm" onclick="sortCrewAlpha(true)">Sort Z–A</button>
   <button class="btn btn-ghost btn-sm" onclick="sortCrewByCategory()">Sort by Category</button>
+  <select id="skill-filter" class="field-input field-input-sm" style="width:auto;min-width:160px" onchange="filterBySkill(this.value)">
+    <option value="">— Show all —</option>
+    {% for cat in categories %}{% if cat.positions %}
+    <optgroup label="{{ cat.name }}">
+      {% for pos in cat.positions %}<option value="{{ pos.id }}">{{ pos.name }}</option>{% endfor %}
+    </optgroup>
+    {% endif %}{% endfor %}
+    {% if uncategorized_positions %}
+    <optgroup label="Other">
+      {% for pos in uncategorized_positions %}<option value="{{ pos.id }}">{{ pos.name }}</option>{% endfor %}
+    </optgroup>
+    {% endif %}
+  </select>
 </div>
 
 <div class="crew-tracker-wrap">
@@ -393,11 +408,38 @@ function closeEditModal() {
   _modalMemberId = null;
 }
 
-function sortCrewAlpha() {
+function sortCrewAlpha(reverse) {
   const tbody = document.getElementById('crew-tbody');
   const rows = Array.from(tbody.querySelectorAll('tr'));
-  rows.sort((a, b) => a.dataset.name.localeCompare(b.dataset.name));
+  rows.sort((a, b) => {
+    const cmp = a.dataset.name.localeCompare(b.dataset.name);
+    return reverse ? -cmp : cmp;
+  });
   rows.forEach(r => tbody.appendChild(r));
+}
+
+function filterBySkill(posId) {
+  const tbody = document.getElementById('crew-tbody');
+  let visible = 0;
+  tbody.querySelectorAll('tr').forEach(tr => {
+    if (!posId) {
+      tr.style.display = '';
+      visible++;
+      return;
+    }
+    const quals = JSON.parse(tr.querySelector('button[data-quals]')?.dataset.quals || '[]');
+    const show = quals.includes(parseInt(posId));
+    tr.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  const total = {{ members|length }};
+  const posName = posId ? document.getElementById('skill-filter').selectedOptions[0]?.text : null;
+  const countEl = document.getElementById('tracker-count');
+  if (posId) {
+    countEl.innerHTML = `${visible} of ${total} technicians qualified for <strong>${posName}</strong> &nbsp;·&nbsp; {{ all_positions|length }} positions`;
+  } else {
+    countEl.innerHTML = `${total} technicians &nbsp;·&nbsp; {{ all_positions|length }} positions`;
+  }
 }
 
 function sortCrewByCategory() {

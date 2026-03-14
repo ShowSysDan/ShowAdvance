@@ -815,6 +815,8 @@ def migrate_db():
         'ALTER TABLE form_sections ADD COLUMN default_open INTEGER DEFAULT 1',
         'ALTER TABLE schedule_rows ADD COLUMN perf_id INTEGER DEFAULT NULL',
         'ALTER TABLE form_fields ADD COLUMN ai_hint TEXT DEFAULT NULL',
+        "ALTER TABLE labor_requests ADD COLUMN break_start TEXT DEFAULT ''",
+        "ALTER TABLE labor_requests ADD COLUMN break_end TEXT DEFAULT ''",
     ]:
         try:
             conn.execute(alter_sql)

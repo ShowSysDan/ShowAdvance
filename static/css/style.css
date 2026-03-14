@@ -423,6 +423,7 @@ button.section-label:hover { color: var(--text); }
 .type-schedule { background: rgba(74,158,255,.1); color: var(--blue); }
 .role-badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-family: var(--font-cond); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; }
 .role-admin { background: rgba(224,149,32,.15); color: var(--accent); }
+.role-staff { background: rgba(74,158,255,.12); color: var(--blue); }
 .role-user  { background: var(--bg-surface); color: var(--text-dim); }
 .dept-badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 11px; background: var(--bg-surface); color: var(--text-dim); border: 1px solid var(--border); }
 

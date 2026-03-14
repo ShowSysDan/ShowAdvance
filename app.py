@@ -205,13 +205,13 @@ def _get_user_group_types(user_id):
 
 
 def is_content_admin(user_id):
-    """True if the user is a system admin OR is in an 'admin_group' type group."""
+    """True if the user is a system admin, a staff user, or is in an 'admin_group' type group."""
     db = get_db()
     user = db.execute('SELECT role FROM users WHERE id=?', (user_id,)).fetchone()
     db.close()
     if not user:
         return False
-    if user['role'] == 'admin':
+    if user['role'] in ('admin', 'staff'):
         return True
     return 'admin_group' in _get_user_group_types(user_id)
 
@@ -3362,12 +3362,14 @@ def add_labor_request(show_id):
         'SELECT MAX(sort_order) FROM labor_requests WHERE show_id=?', (show_id,)
     ).fetchone()[0] or 0
     cur = db.execute("""
-        INSERT INTO labor_requests (show_id, position_id, in_time, out_time, requested_name, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO labor_requests (show_id, position_id, in_time, out_time, break_start, break_end, requested_name, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (show_id,
           data.get('position_id') or None,
           data.get('in_time', ''),
           data.get('out_time', ''),
+          data.get('break_start', ''),
+          data.get('break_end', ''),
           data.get('requested_name', ''),
           max_order + 10))
     rid = cur.lastrowid
@@ -3388,11 +3390,13 @@ def update_labor_request(show_id, rid):
     db = get_db()
     db.execute("""
         UPDATE labor_requests
-        SET position_id=?, in_time=?, out_time=?, requested_name=?
+        SET position_id=?, in_time=?, out_time=?, break_start=?, break_end=?, requested_name=?
         WHERE id=? AND show_id=?
     """, (data.get('position_id') or None,
           data.get('in_time', ''),
           data.get('out_time', ''),
+          data.get('break_start', ''),
+          data.get('break_end', ''),
           data.get('requested_name', ''),
           rid, show_id))
     db.commit()
