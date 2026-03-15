@@ -135,6 +135,7 @@ a:hover { text-decoration: underline; }
 .flash button { background: none; border: none; font-size: 18px; cursor: pointer; color: inherit; opacity: .6; }
 .flash-success { background: rgba(34,197,94,.12); border: 1px solid rgba(34,197,94,.3); color: #22C55E; }
 .flash-error   { background: rgba(239,68,68,.12); border: 1px solid rgba(239,68,68,.3); color: #EF4444; }
+.flash-warning { background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.3); color: #FBBF24; }
 .flash-info    { background: rgba(74,158,255,.12); border: 1px solid rgba(74,158,255,.3); color: #4A9EFF; }
 
 /* ── Buttons ───────────────────────────────────────────────────── */
@@ -152,6 +153,8 @@ a:hover { text-decoration: underline; }
 .btn-ghost:hover  { background: var(--bg-hover); color: var(--text); }
 .btn-accent       { background: var(--accent-glow); color: var(--accent); border-color: var(--accent-dim); }
 .btn-accent:hover { background: rgba(224,149,32,.2); }
+.btn-danger       { background: var(--red, #ef4444); color: #fff; border-color: var(--red, #ef4444); }
+.btn-danger:hover { background: #dc2626; border-color: #dc2626; }
 .btn-danger-ghost { background: transparent; color: var(--red); border-color: transparent; }
 .btn-danger-ghost:hover { background: rgba(239,68,68,.1); border-color: rgba(239,68,68,.3); }
 .btn-sm  { padding: 4px 10px; font-size: 12px; }

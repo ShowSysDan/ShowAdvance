@@ -30,6 +30,7 @@
   <button class="tab-btn" onclick="switchSettingsTab('database')">Database</button>
   <button class="tab-btn" onclick="switchSettingsTab('ai')">AI</button>
   <button class="tab-btn" onclick="switchSettingsTab('godmode')">God Mode</button>
+  <a href="{{ url_for('audit_log_view') }}" class="tab-btn">Audit Log</a>
   {% endif %}
   <button class="tab-btn" onclick="switchSettingsTab('account')">My Account</button>
 </div>

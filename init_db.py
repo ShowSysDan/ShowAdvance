@@ -269,6 +269,29 @@ CREATE TABLE IF NOT EXISTS crew_qualifications (
     position_id    INTEGER NOT NULL REFERENCES job_positions(id) ON DELETE CASCADE,
     PRIMARY KEY (crew_member_id, position_id)
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    username    TEXT NOT NULL DEFAULT '',
+    action      TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id   TEXT,
+    show_id     INTEGER REFERENCES shows(id) ON DELETE SET NULL,
+    before_json TEXT,
+    after_json  TEXT,
+    ip_address  TEXT,
+    detail      TEXT
+);
+
+CREATE TABLE IF NOT EXISTS comment_versions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    comment_id INTEGER NOT NULL REFERENCES show_comments(id) ON DELETE CASCADE,
+    body       TEXT NOT NULL,
+    edited_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    edited_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 SEED_CONTACTS = [
@@ -817,6 +840,9 @@ def migrate_db():
         'ALTER TABLE form_fields ADD COLUMN ai_hint TEXT DEFAULT NULL',
         "ALTER TABLE labor_requests ADD COLUMN break_start TEXT DEFAULT ''",
         "ALTER TABLE labor_requests ADD COLUMN break_end TEXT DEFAULT ''",
+        'ALTER TABLE show_comments ADD COLUMN deleted_at TIMESTAMP',
+        'ALTER TABLE show_comments ADD COLUMN deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE show_comments ADD COLUMN edited_at TIMESTAMP',
     ]:
         try:
             conn.execute(alter_sql)
@@ -860,6 +886,32 @@ def migrate_db():
             crew_member_id INTEGER NOT NULL REFERENCES crew_members(id) ON DELETE CASCADE,
             position_id    INTEGER NOT NULL REFERENCES job_positions(id) ON DELETE CASCADE,
             PRIMARY KEY (crew_member_id, position_id)
+        );
+    """)
+
+    # Audit trail and comment versioning tables (safe to rerun)
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            user_id     INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            username    TEXT NOT NULL DEFAULT '',
+            action      TEXT NOT NULL,
+            entity_type TEXT NOT NULL,
+            entity_id   TEXT,
+            show_id     INTEGER REFERENCES shows(id) ON DELETE SET NULL,
+            before_json TEXT,
+            after_json  TEXT,
+            ip_address  TEXT,
+            detail      TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS comment_versions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            comment_id INTEGER NOT NULL REFERENCES show_comments(id) ON DELETE CASCADE,
+            body       TEXT NOT NULL,
+            edited_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            edited_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
 

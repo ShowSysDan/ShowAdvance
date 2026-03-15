@@ -1375,31 +1375,126 @@ async function loadComments() {
 function renderComments(comments) {
   const list = document.getElementById('comments-list');
   if (!list) return;
-  if (!comments.length) {
+  const visible = comments.filter(c => !c.deleted_at);
+  const deleted = comments.filter(c => c.deleted_at);
+  if (!visible.length && !deleted.length) {
     list.innerHTML = '<p class="text-dim" style="padding:28px;text-align:center;margin:0">No comments yet. Start the conversation!</p>';
     return;
   }
-  list.innerHTML = comments.map(c => {
+  const isAdmin = typeof IS_ADMIN !== 'undefined' && IS_ADMIN;
+  const items = [...visible, ...deleted].sort((a, b) => (a.created_at || '').localeCompare(b.created_at || ''));
+  list.innerHTML = items.map(c => {
     const color = _userColor(c.author);
     const dt = c.created_at
       ? new Date((c.created_at.includes('T') ? c.created_at : c.created_at + 'Z'))
           .toLocaleString([], {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'})
       : '';
-    const bodyHtml = _renderCommentBody(c.body);
+    const isDeleted = !!c.deleted_at;
+    const bodyHtml = isDeleted
+      ? `<span style="text-decoration:line-through;opacity:.5">${_renderCommentBody(c.body)}</span> <em class="text-dim" style="font-size:.8em">deleted by ${_esc(c.deleted_by || 'user')}</em>`
+      : _renderCommentBody(c.body);
+    const editedIndicator = c.edited_at && !isDeleted ? ` <span class="text-dim" style="font-size:.75em">(edited)</span>` : '';
+    const actions = [];
+    if (!isDeleted && (c.is_own || isAdmin)) {
+      actions.push(`<button class="comment-delete-btn" onclick="deleteComment(${c.id})" title="Delete">×</button>`);
+    }
+    if (!isDeleted && (c.is_own || isAdmin)) {
+      actions.push(`<button class="comment-edit-btn" onclick="startEditComment(${c.id})" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--text-dim);font-size:.85em;padding:0 4px">✏</button>`);
+    }
+    if (isDeleted && isAdmin) {
+      actions.push(`<button class="btn btn-ghost" style="font-size:.75em;padding:2px 6px" onclick="restoreComment(${c.id})">Restore</button>`);
+    }
+    if (isAdmin) {
+      actions.push(`<button class="btn btn-ghost" style="font-size:.75em;padding:2px 6px" onclick="showCommentVersions(${c.id})" title="Version history">History</button>`);
+    }
     return `
-      <div class="comment-item" data-id="${c.id}">
-        <div class="comment-avatar" style="background:${color}">${c.initials}</div>
-        <div class="comment-bubble">
+      <div class="comment-item ${isDeleted ? 'comment-deleted' : ''}" data-id="${c.id}">
+        <div class="comment-avatar" style="background:${color};${isDeleted ? 'opacity:.4' : ''}">${c.initials}</div>
+        <div class="comment-bubble" style="${isDeleted ? 'opacity:.6' : ''}">
           <div class="comment-header">
             <strong>${_esc(c.author)}</strong>
-            <span class="comment-time">${dt}</span>
-            ${c.is_own ? `<button class="comment-delete-btn" onclick="deleteComment(${c.id})" title="Delete">×</button>` : ''}
+            <span class="comment-time">${dt}${editedIndicator}</span>
+            <span style="margin-left:auto;display:flex;gap:4px;align-items:center">${actions.join('')}</span>
           </div>
-          <div class="comment-body">${bodyHtml}</div>
+          <div class="comment-body" id="comment-body-${c.id}">${bodyHtml}</div>
+          <div class="comment-edit-form" id="comment-edit-${c.id}" style="display:none;margin-top:.5rem">
+            <textarea class="field-input field-textarea" rows="2" id="comment-edit-input-${c.id}" style="font-size:.875rem">${_esc(c.body)}</textarea>
+            <div style="display:flex;gap:.5rem;margin-top:.4rem">
+              <button class="btn btn-primary btn-sm" onclick="saveEditComment(${c.id})">Save</button>
+              <button class="btn btn-ghost btn-sm" onclick="cancelEditComment(${c.id})">Cancel</button>
+            </div>
+          </div>
         </div>
       </div>`;
   }).join('');
   list.scrollTop = list.scrollHeight;
+}
+
+function startEditComment(cid) {
+  document.getElementById('comment-body-' + cid).style.display = 'none';
+  const editForm = document.getElementById('comment-edit-' + cid);
+  editForm.style.display = '';
+  editForm.querySelector('textarea').focus();
+}
+
+function cancelEditComment(cid) {
+  document.getElementById('comment-body-' + cid).style.display = '';
+  document.getElementById('comment-edit-' + cid).style.display = 'none';
+}
+
+async function saveEditComment(cid) {
+  const input = document.getElementById('comment-edit-input-' + cid);
+  const body = input.value.trim();
+  if (!body) return;
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/comments/${cid}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({body}),
+    });
+    const d = await resp.json();
+    if (d.success) {
+      await loadComments();
+    } else {
+      alert(d.error || 'Edit failed.');
+    }
+  } catch(_) {
+    alert('Network error.');
+  }
+}
+
+async function restoreComment(cid) {
+  if (!confirm('Restore this deleted comment?')) return;
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/comments/${cid}/restore`, {method: 'POST'});
+    const d = await resp.json();
+    if (d.success) await loadComments();
+    else alert(d.error || 'Restore failed.');
+  } catch(_) {
+    alert('Network error.');
+  }
+}
+
+async function showCommentVersions(cid) {
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/comments/${cid}/versions`);
+    const versions = await resp.json();
+    if (!versions.length) { alert('No edit history for this comment.'); return; }
+    const lines = versions.map((v, i) =>
+      `[${i+1}] ${v.edited_at ? v.edited_at.substring(0,16) : ''} by ${v.edited_by}:\n${v.body}`
+    ).join('\n\n---\n\n');
+    const choice = prompt(`Comment edit history (${versions.length} versions):\n\n${lines}\n\nEnter version number to restore (or cancel):`);
+    if (!choice) return;
+    const idx = parseInt(choice) - 1;
+    if (isNaN(idx) || idx < 0 || idx >= versions.length) { alert('Invalid version number.'); return; }
+    if (!confirm(`Restore to version ${idx+1}?`)) return;
+    const resp2 = await fetch(`/shows/${SHOW_ID}/comments/${cid}/versions/${versions[idx].id}/restore`, {method:'POST'});
+    const d = await resp2.json();
+    if (d.success) await loadComments();
+    else alert(d.error || 'Version restore failed.');
+  } catch(_) {
+    alert('Network error.');
+  }
 }
 
 function _esc(str) {

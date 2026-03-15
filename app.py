@@ -26,6 +26,16 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'dpc-advance-secret-change-in-production')
 
+
+@app.template_filter('pretty_json')
+def pretty_json_filter(value):
+    """Pretty-print a JSON string in templates."""
+    try:
+        return json.dumps(json.loads(value), indent=2, ensure_ascii=False)
+    except Exception:
+        return value or ''
+
+
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advance.db')
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 
@@ -173,6 +183,18 @@ def content_admin_required(f):
         if session.get('is_content_admin'):
             return f(*args, **kwargs)
         abort(403)
+    return decorated
+
+
+def staff_or_admin_required(f):
+    """Allow staff and admin roles (but not plain users) to access a route."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('user_role') not in ('admin', 'staff'):
+            abort(403)
+        return f(*args, **kwargs)
     return decorated
 
 
@@ -442,6 +464,31 @@ def _snapshot_form_history(db, show_id, form_type, snapshot_data):
     """, (show_id, form_type, show_id, form_type))
 
 
+def log_audit(db, action, entity_type, entity_id=None, show_id=None,
+              before=None, after=None, detail=None):
+    """Write one row to audit_log. Never raises — audit failure must not block normal flow."""
+    try:
+        db.execute("""
+            INSERT INTO audit_log
+              (user_id, username, action, entity_type, entity_id,
+               show_id, before_json, after_json, ip_address, detail)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        """, (
+            session.get('user_id'),
+            session.get('username', ''),
+            action,
+            entity_type,
+            str(entity_id) if entity_id is not None else None,
+            show_id,
+            json.dumps(before) if before is not None else None,
+            json.dumps(after)  if after  is not None else None,
+            request.remote_addr,
+            detail,
+        ))
+    except Exception:
+        pass
+
+
 # ─── Auth Routes ──────────────────────────────────────────────────────────────
 
 def _login_route():
@@ -460,7 +507,6 @@ def _login_route():
                 db.commit()
             except Exception:
                 pass
-            db.close()
             session['user_id']        = user['id']
             session['username']       = user['username']
             session['display_name']   = user['display_name'] or user['username']
@@ -468,6 +514,9 @@ def _login_route():
             session['theme']          = user['theme'] or 'dark'
             session['is_restricted']  = is_restricted_user(user['id'])
             session['is_content_admin'] = is_content_admin(user['id'])
+            log_audit(db, 'LOGIN', 'user', user['id'], detail=username)
+            db.commit()
+            db.close()
             syslog_logger.info(f"LOGIN user={username} ip={request.remote_addr}")
             next_url = request.form.get('next') or url_for('dashboard')
             return redirect(next_url)
@@ -491,6 +540,11 @@ else:
 @app.route('/logout')
 def logout():
     syslog_logger.info(f"LOGOUT user={session.get('username')}")
+    if session.get('user_id'):
+        db = get_db()
+        log_audit(db, 'LOGOUT', 'user', session['user_id'])
+        db.commit()
+        db.close()
     session.clear()
     return redirect(url_for('login'))
 
@@ -800,6 +854,7 @@ def save_advance(show_id):
 
     # Version snapshot
     _snapshot_form_history(db, show_id, 'advance', {'advance_data': data})
+    log_audit(db, 'FORM_SAVE', 'form', show_id, show_id=show_id, detail='type=advance')
 
     db.commit()
     db.close()
@@ -914,6 +969,7 @@ def save_schedule(show_id):
     """, (session['user_id'], show_id))
 
     _snapshot_form_history(db, show_id, 'schedule', data)
+    log_audit(db, 'FORM_SAVE', 'form', show_id, show_id=show_id, detail='type=schedule')
 
     db.commit()
     db.close()
@@ -943,6 +999,7 @@ def save_postnotes(show_id):
     """, (session['user_id'], show_id))
 
     _snapshot_form_history(db, show_id, 'postnotes', {'notes_data': data})
+    log_audit(db, 'FORM_SAVE', 'form', show_id, show_id=show_id, detail='type=postnotes')
 
     db.commit()
     db.close()
@@ -1012,6 +1069,26 @@ def restore_history(show_id, hist_id):
     snapshot = json.loads(entry['snapshot_json'])
     form_type = entry['form_type']
 
+    # Check for newer snapshots — warn the user before overwriting
+    force = request.args.get('force') == '1'
+    if not force:
+        newer = db.execute("""
+            SELECT fh.id, fh.saved_at, u.username, u.display_name, fh.snapshot_json
+            FROM form_history fh
+            LEFT JOIN users u ON fh.saved_by = u.id
+            WHERE fh.show_id=? AND fh.form_type=? AND fh.id > ?
+            ORDER BY fh.saved_at DESC LIMIT 1
+        """, (show_id, form_type, hist_id)).fetchone()
+        if newer:
+            db.close()
+            return jsonify({
+                'conflict':          True,
+                'newer_saved_at':    newer['saved_at'],
+                'newer_saved_by':    newer['display_name'] or newer['username'] or 'Unknown',
+                'restoring_snapshot': snapshot,
+                'current_snapshot':  json.loads(newer['snapshot_json']),
+            }), 409
+
     if form_type == 'advance':
         adv = snapshot.get('advance_data', {})
         for key, val in adv.items():
@@ -1047,6 +1124,8 @@ def restore_history(show_id, hist_id):
     db.execute("""
         UPDATE shows SET last_saved_by=?, last_saved_at=CURRENT_TIMESTAMP WHERE id=?
     """, (session['user_id'], show_id))
+    log_audit(db, 'HISTORY_RESTORE', 'form', hist_id, show_id=show_id,
+              detail=f'type={form_type}')
     db.commit()
     db.close()
     syslog_logger.info(
@@ -1062,25 +1141,37 @@ def restore_history(show_id, hist_id):
 def get_comments(show_id):
     if not can_access_show(session['user_id'], show_id):
         abort(403)
+    is_admin = session.get('user_role') == 'admin'
     db = get_db()
     rows = db.execute("""
-        SELECT sc.id, sc.body, sc.created_at,
-               u.display_name, u.username, u.id as uid
+        SELECT sc.id, sc.body, sc.created_at, sc.edited_at, sc.deleted_at,
+               u.display_name, u.username, u.id as uid,
+               du.display_name as deleted_by_name, du.username as deleted_by_username
         FROM show_comments sc
         JOIN users u ON sc.user_id = u.id
-        WHERE sc.show_id = ?
+        LEFT JOIN users du ON sc.deleted_by = du.id
+        WHERE sc.show_id = ? AND (sc.deleted_at IS NULL OR ?)
         ORDER BY sc.created_at ASC
-    """, (show_id,)).fetchall()
+    """, (show_id, is_admin)).fetchall()
     db.close()
-    return jsonify([{
-        'id':        r['id'],
-        'body':      r['body'],
-        'created_at': r['created_at'],
-        'author':    r['display_name'] or r['username'],
-        'author_id': r['uid'],
-        'initials':  ''.join(w[0].upper() for w in (r['display_name'] or r['username']).split()[:2]),
-        'is_own':    r['uid'] == session['user_id'],
-    } for r in rows])
+    result = []
+    for r in rows:
+        author = r['display_name'] or r['username']
+        entry = {
+            'id':          r['id'],
+            'body':        r['body'],
+            'created_at':  r['created_at'],
+            'edited_at':   r['edited_at'],
+            'deleted_at':  r['deleted_at'],
+            'author':      author,
+            'author_id':   r['uid'],
+            'initials':    ''.join(w[0].upper() for w in author.split()[:2]),
+            'is_own':      r['uid'] == session['user_id'],
+        }
+        if is_admin and r['deleted_at']:
+            entry['deleted_by'] = r['deleted_by_name'] or r['deleted_by_username'] or 'Unknown'
+        result.append(entry)
+    return jsonify(result)
 
 
 @app.route('/shows/<int:show_id>/comments', methods=['POST'])
@@ -1102,6 +1193,8 @@ def post_comment(show_id):
         (show_id, session['user_id'], body)
     )
     cid = cur.lastrowid
+    log_audit(db, 'COMMENT_POST', 'comment', cid, show_id=show_id,
+              after={'body': body})
     db.commit()
     row = db.execute("""
         SELECT sc.id, sc.body, sc.created_at,
@@ -1132,7 +1225,8 @@ def delete_comment(show_id, cid):
         abort(403)
     db = get_db()
     comment = db.execute(
-        'SELECT * FROM show_comments WHERE id=? AND show_id=?', (cid, show_id)
+        'SELECT * FROM show_comments WHERE id=? AND show_id=? AND deleted_at IS NULL',
+        (cid, show_id)
     ).fetchone()
     if not comment:
         db.close()
@@ -1140,10 +1234,131 @@ def delete_comment(show_id, cid):
     if comment['user_id'] != session['user_id'] and session.get('user_role') != 'admin':
         db.close()
         abort(403)
-    db.execute('DELETE FROM show_comments WHERE id=?', (cid,))
+    log_audit(db, 'COMMENT_DELETE', 'comment', cid, show_id=show_id,
+              before={'body': comment['body']})
+    db.execute(
+        'UPDATE show_comments SET deleted_at=CURRENT_TIMESTAMP, deleted_by=? WHERE id=?',
+        (session['user_id'], cid)
+    )
     db.commit()
     db.close()
     return jsonify({'success': True})
+
+
+@app.route('/shows/<int:show_id>/comments/<int:cid>', methods=['PUT'])
+@login_required
+def edit_comment(show_id, cid):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    data = request.get_json(force=True) or {}
+    new_body = data.get('body', '').strip()
+    if not new_body:
+        return jsonify({'success': False, 'error': 'Comment cannot be empty.'}), 400
+    if len(new_body) > 2000:
+        return jsonify({'success': False, 'error': 'Comment too long (max 2000 chars).'}), 400
+    db = get_db()
+    comment = db.execute(
+        'SELECT * FROM show_comments WHERE id=? AND show_id=? AND deleted_at IS NULL',
+        (cid, show_id)
+    ).fetchone()
+    if not comment:
+        db.close()
+        abort(404)
+    if comment['user_id'] != session['user_id'] and session.get('user_role') != 'admin':
+        db.close()
+        abort(403)
+    old_body = comment['body']
+    # Save previous version
+    db.execute(
+        'INSERT INTO comment_versions (comment_id, body, edited_by) VALUES (?,?,?)',
+        (cid, old_body, session['user_id'])
+    )
+    db.execute(
+        'UPDATE show_comments SET body=?, edited_at=CURRENT_TIMESTAMP WHERE id=?',
+        (new_body, cid)
+    )
+    log_audit(db, 'COMMENT_EDIT', 'comment', cid, show_id=show_id,
+              before={'body': old_body}, after={'body': new_body})
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'body': new_body})
+
+
+@app.route('/shows/<int:show_id>/comments/<int:cid>/restore', methods=['POST'])
+@admin_required
+def restore_comment(show_id, cid):
+    db = get_db()
+    comment = db.execute(
+        'SELECT * FROM show_comments WHERE id=? AND show_id=? AND deleted_at IS NOT NULL',
+        (cid, show_id)
+    ).fetchone()
+    if not comment:
+        db.close()
+        abort(404)
+    db.execute(
+        'UPDATE show_comments SET deleted_at=NULL, deleted_by=NULL WHERE id=?', (cid,)
+    )
+    log_audit(db, 'COMMENT_RESTORE', 'comment', cid, show_id=show_id)
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/shows/<int:show_id>/comments/<int:cid>/versions', methods=['GET'])
+@admin_required
+def comment_versions_list(show_id, cid):
+    db = get_db()
+    rows = db.execute("""
+        SELECT cv.id, cv.body, cv.edited_at,
+               u.display_name, u.username
+        FROM comment_versions cv
+        LEFT JOIN users u ON cv.edited_by = u.id
+        WHERE cv.comment_id = ?
+        ORDER BY cv.edited_at DESC
+    """, (cid,)).fetchall()
+    db.close()
+    return jsonify([{
+        'id':        r['id'],
+        'body':      r['body'],
+        'edited_at': r['edited_at'],
+        'edited_by': r['display_name'] or r['username'] or 'Unknown',
+    } for r in rows])
+
+
+@app.route('/shows/<int:show_id>/comments/<int:cid>/versions/<int:vid>/restore', methods=['POST'])
+@admin_required
+def comment_version_restore(show_id, cid, vid):
+    db = get_db()
+    version = db.execute(
+        'SELECT * FROM comment_versions WHERE id=? AND comment_id=?', (vid, cid)
+    ).fetchone()
+    if not version:
+        db.close()
+        abort(404)
+    comment = db.execute(
+        'SELECT body FROM show_comments WHERE id=? AND show_id=?', (cid, show_id)
+    ).fetchone()
+    if not comment:
+        db.close()
+        abort(404)
+    old_body = comment['body']
+    # Save current as a version before restoring
+    db.execute(
+        'INSERT INTO comment_versions (comment_id, body, edited_by) VALUES (?,?,?)',
+        (cid, old_body, session['user_id'])
+    )
+    db.execute(
+        'UPDATE show_comments SET body=?, edited_at=CURRENT_TIMESTAMP WHERE id=?',
+        (version['body'], cid)
+    )
+    log_audit(db, 'COMMENT_VERSION_RESTORE', 'comment', cid, show_id=show_id,
+              before={'body': old_body}, after={'body': version['body']},
+              detail=f'version_id={vid}')
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'body': version['body']})
 
 
 # ─── File Attachments ──────────────────────────────────────────────────────────
@@ -1744,13 +1959,16 @@ def restore_show(show_id):
 
 
 @app.route('/shows/<int:show_id>/delete', methods=['POST'])
-@admin_required
+@staff_or_admin_required
 def delete_show(show_id):
     db = get_db()
+    show = db.execute('SELECT name FROM shows WHERE id=?', (show_id,)).fetchone()
+    show_name = show['name'] if show else str(show_id)
     for tbl in ['advance_data', 'schedule_rows', 'schedule_meta',
                 'post_show_notes', 'export_log', 'form_history', 'show_group_access']:
         db.execute(f'DELETE FROM {tbl} WHERE show_id=?', (show_id,))
     db.execute('DELETE FROM shows WHERE id=?', (show_id,))
+    log_audit(db, 'SHOW_DELETE', 'show', show_id, detail=show_name)
     db.commit(); db.close()
     syslog_logger.info(f"SHOW_DELETE show_id={show_id} by={session.get('username')}")
     flash('Show permanently deleted.', 'success')
@@ -1802,6 +2020,88 @@ def get_show_access(show_id):
     """, (show_id,)).fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
+
+
+# ─── Audit Log ────────────────────────────────────────────────────────────────
+
+@app.route('/admin/audit')
+@admin_required
+def audit_log_view():
+    db = get_db()
+    page = max(1, int(request.args.get('page', 1)))
+    per_page = 50
+    offset = (page - 1) * per_page
+
+    filters = []
+    params = []
+    if request.args.get('user_id'):
+        try:
+            filters.append('al.user_id = ?')
+            params.append(int(request.args['user_id']))
+        except ValueError:
+            pass
+    if request.args.get('show_id'):
+        try:
+            filters.append('al.show_id = ?')
+            params.append(int(request.args['show_id']))
+        except ValueError:
+            pass
+    if request.args.get('action'):
+        filters.append('al.action LIKE ?')
+        params.append(f"%{request.args['action'].upper()}%")
+    if request.args.get('date_from'):
+        filters.append('al.timestamp >= ?')
+        params.append(request.args['date_from'])
+    if request.args.get('date_to'):
+        filters.append('al.timestamp <= ?')
+        params.append(request.args['date_to'] + ' 23:59:59')
+
+    where = ('WHERE ' + ' AND '.join(filters)) if filters else ''
+
+    total_row = db.execute(
+        f'SELECT COUNT(*) FROM audit_log al {where}', params
+    ).fetchone()
+    total = total_row[0] if total_row else 0
+
+    rows = db.execute(f"""
+        SELECT al.id, al.timestamp, al.username, al.action, al.entity_type,
+               al.entity_id, al.show_id, al.before_json, al.after_json,
+               al.ip_address, al.detail,
+               s.name as show_name,
+               u.display_name as display_name
+        FROM audit_log al
+        LEFT JOIN shows s ON al.show_id = s.id
+        LEFT JOIN users u ON al.user_id = u.id
+        {where}
+        ORDER BY al.timestamp DESC
+        LIMIT ? OFFSET ?
+    """, params + [per_page, offset]).fetchall()
+
+    users = db.execute(
+        'SELECT id, username, display_name FROM users ORDER BY username'
+    ).fetchall()
+    shows = db.execute(
+        'SELECT id, name FROM shows ORDER BY name'
+    ).fetchall()
+    db.close()
+
+    entries = []
+    for r in rows:
+        entry = dict(r)
+        entry['display_name'] = r['display_name'] or r['username']
+        entries.append(entry)
+
+    return render_template('audit_log.html',
+        entries=entries,
+        users=users,
+        shows=shows,
+        total=total,
+        page=page,
+        per_page=per_page,
+        total_pages=max(1, (total + per_page - 1) // per_page),
+        filters=request.args,
+        user=get_current_user(),
+    )
 
 
 # ─── Settings ─────────────────────────────────────────────────────────────────
