@@ -1519,6 +1519,7 @@ async function saveWifiSettings(form) {
   });
   const d = await resp.json();
   if (msg) { msg.textContent = d.success ? '✓ Saved' : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
+  if (d.success) showSaveToast('✓ WiFi settings saved');
 }
 
 async function uploadLogo(form) {
@@ -1546,6 +1547,7 @@ async function saveUploadSize(form) {
   });
   const d = await resp.json();
   if (msg) { msg.textContent = d.success ? `✓ Max set to ${d.upload_max_mb} MB` : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
+  if (d.success) showSaveToast(`✓ Upload limit set to ${d.upload_max_mb} MB`);
 }
 
 /* ── God Mode ───────────────────────────────────────────────────── */
@@ -2011,11 +2013,12 @@ function _esc(s) {
 
 /* ── Email Tab ──────────────────────────────────────────────────── */
 async function toggleRecipient(cid, checked) {
-  await fetch(`/settings/contacts/${cid}/recipient`, {
+  const resp = await fetch(`/settings/contacts/${cid}/recipient`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({recipient: checked})
   });
+  if ((await resp.json()).success) showSaveToast(checked ? '✓ Recipient added' : '✓ Recipient removed');
 }
 
 async function saveSmtpSettings() {
@@ -2034,6 +2037,7 @@ async function saveSmtpSettings() {
   const msg = document.getElementById('smtp-msg');
   msg.style.display = 'block';
   msg.textContent = d.success ? '✓ SMTP settings saved.' : '✗ ' + (d.error || 'Error');
+  if (d.success) { showSaveToast('✓ SMTP saved'); setTimeout(() => { msg.style.display='none'; }, 3000); }
 }
 
 async function testSmtp() {
@@ -2073,6 +2077,7 @@ async function savePdfEmailSettings() {
   const msg = document.getElementById('pdf-email-msg');
   msg.style.display = 'block';
   msg.textContent = d.success ? '✓ Email schedule saved.' : '✗ ' + (d.error || 'Error');
+  if (d.success) { showSaveToast('✓ Email schedule saved'); setTimeout(() => { msg.style.display='none'; }, 3000); }
 }
 </script>
 {% endblock %}

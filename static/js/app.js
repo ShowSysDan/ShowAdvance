@@ -705,11 +705,12 @@ async function _saveFieldOrder() {
   const sectionId = document.querySelector('.field-row[draggable]')?.closest('[data-section-id]')?.dataset.sectionId;
   const url = sectionId ? `/settings/form-fields/reorder` : `/settings/form-sections/reorder`;
   const body = sectionId ? {field_ids: ids} : {section_ids: ids};
-  await fetch(url, {
+  const resp = await fetch(url, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(body)
   });
+  if ((await resp.json()).success) showSaveToast('✓ Order saved');
 }
 
 /* ── Section Drag-to-Reorder ─────────────────────────────────── */
@@ -747,11 +748,12 @@ function initSectionDrag() {
 
 async function _saveSectionOrder() {
   const ids = [...document.querySelectorAll('[data-section-id]')].map(el => Number(el.dataset.sectionId));
-  await fetch('/settings/form-sections/reorder', {
+  const resp = await fetch('/settings/form-sections/reorder', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({section_ids: ids})
   });
+  if ((await resp.json()).success) showSaveToast('✓ Order saved');
 }
 
 /* ── Schedule Meta Field Drag-to-Reorder ─────────────────────── */
@@ -783,11 +785,12 @@ function initSchedMetaDrag() {
 
 async function _saveSchedMetaOrder() {
   const ids = [...document.querySelectorAll('.sched-meta-row[draggable]')].map(r => Number(r.dataset.id));
-  await fetch('/settings/schedule-meta-fields/reorder', {
+  const resp = await fetch('/settings/schedule-meta-fields/reorder', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({field_ids: ids})
   });
+  if ((await resp.json()).success) showSaveToast('✓ Order saved');
 }
 
 /* ── Schedule Meta Field Add/Edit Modal ──────────────────────── */
@@ -1261,6 +1264,7 @@ async function saveServerSettings(form) {
       msg.className = 'field-msg field-msg-success';
       setTimeout(() => { msg.textContent = ''; msg.className = 'field-msg'; }, 6000);
     }
+    showSaveToast('✓ Server settings saved');
   }
 }
 
@@ -1281,6 +1285,7 @@ async function saveSyslogSettings(form) {
     msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
     setTimeout(() => { msg.textContent=''; msg.className='field-msg'; }, 3000);
   }
+  if (d.success) showSaveToast('✓ Syslog settings saved');
 }
 
 /* ── Backup Controls ─────────────────────────────────────────── */
@@ -1293,9 +1298,9 @@ async function runManualBackup(btn) {
   btn.textContent = 'Run Backup Now';
   if (d.success) {
     loadBackupStatus();
-    alert('Backup created successfully.');
+    showSaveToast('✓ Backup created');
   } else {
-    alert('Backup failed: ' + (d.error||'Unknown error'));
+    showSaveToast('✗ Backup failed: ' + (d.error||'Unknown error'), 'error');
   }
 }
 
