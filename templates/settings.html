@@ -88,7 +88,7 @@
         <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th>EMAIL</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="PDF report recipient">RECIPIENT</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
-          <tr data-id="{{ c.id }}" data-dept="{{ c.department }}">
+          <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
             <td class="contact-name" data-field="name">{{ c.name }}</td>
             <td class="text-dim" data-field="title">{{ c.title or '—' }}</td>
             <td>{% if c.department %}<span class="dept-badge">{{ c.department }}</span>{% else %}—{% endif %}</td>
@@ -1092,6 +1092,15 @@
       </div>
       <div class="field-group"><label class="field-label">PHONE</label><input type="text" id="edit-phone" class="field-input"></div>
       <div class="field-group"><label class="field-label">EMAIL</label><input type="email" id="edit-email" class="field-input"></div>
+      {% if user.role == 'admin' %}
+      <div class="field-group" style="margin-top:4px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+          <input type="checkbox" id="edit-recipient" style="accent-color:var(--accent)">
+          <span class="field-label" style="margin:0">PDF EMAIL RECIPIENT</span>
+        </label>
+        <span class="field-hint">Include this contact in automated PDF email sends</span>
+      </div>
+      {% endif %}
     </div>
     <div class="modal-footer">
       <button class="btn btn-ghost" onclick="closeEditModal()">Cancel</button>
@@ -1372,6 +1381,8 @@ function editContact(btn, id) {
   document.getElementById('edit-phone').value = row.querySelector('[data-field=phone]').textContent.replace('—','').trim();
   document.getElementById('edit-email').value = row.querySelector('[data-field=email]').textContent.replace('—','').trim();
   document.getElementById('edit-dept').value  = row.dataset.dept || '';
+  const recipientChk = document.getElementById('edit-recipient');
+  if (recipientChk) recipientChk.checked = row.dataset.recipient === '1';
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -1379,17 +1390,29 @@ function closeEditModal() { document.getElementById('edit-modal').classList.add(
 
 async function saveContact() {
   const id = document.getElementById('edit-id').value;
+  const recipientChk = document.getElementById('edit-recipient');
   const data = {
     name: document.getElementById('edit-name').value,
     title: document.getElementById('edit-title').value,
     department: document.getElementById('edit-dept').value,
     phone: document.getElementById('edit-phone').value,
     email: document.getElementById('edit-email').value,
+    report_recipient: recipientChk ? recipientChk.checked : undefined,
   };
   const resp = await fetch(`/settings/contacts/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
   });
-  if ((await resp.json()).success) { closeEditModal(); location.reload(); }
+  if ((await resp.json()).success) {
+    // Sync the table row's recipient state and inline checkbox without a full reload
+    const row = document.querySelector(`#contacts-table tr[data-id="${id}"]`);
+    if (row && recipientChk !== null) {
+      row.dataset.recipient = recipientChk && recipientChk.checked ? '1' : '0';
+      const inlineChk = row.querySelector('.recipient-chk');
+      if (inlineChk) inlineChk.checked = recipientChk && recipientChk.checked;
+    }
+    closeEditModal();
+    location.reload();
+  }
 }
 
 async function deleteContact(id, btn) {
