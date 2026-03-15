@@ -1240,7 +1240,7 @@ def save_postnotes(show_id):
 @login_required
 def form_history_list(show_id, form_type):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     entries = db.execute("""
         SELECT fh.id, fh.saved_at, fh.form_type,
@@ -1264,14 +1264,14 @@ def form_history_list(show_id, form_type):
 @login_required
 def history_snapshot(show_id, hist_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     entry = db.execute(
         'SELECT * FROM form_history WHERE id=? AND show_id=?', (hist_id, show_id)
     ).fetchone()
     db.close()
     if not entry:
-        abort(404)
+        return jsonify({'success': False, 'error': 'Snapshot not found.'}), 404
     return jsonify({'id': entry['id'], 'form_type': entry['form_type'],
                     'saved_at': entry['saved_at'],
                     'data': json.loads(entry['snapshot_json'])})
@@ -1291,7 +1291,7 @@ def restore_history(show_id, hist_id):
     ).fetchone()
     if not entry:
         db.close()
-        abort(404)
+        return jsonify({'success': False, 'error': 'Snapshot not found.'}), 404
 
     snapshot = json.loads(entry['snapshot_json'])
     form_type = entry['form_type']
@@ -1367,7 +1367,7 @@ def restore_history(show_id, hist_id):
 @login_required
 def get_comments(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     is_admin = session.get('user_role') == 'admin'
     db = get_db()
     rows = db.execute("""
@@ -1405,7 +1405,7 @@ def get_comments(show_id):
 @login_required
 def post_comment(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     if session.get('is_restricted'):
         return jsonify({'success': False, 'error': 'Read-only access.'}), 403
     data = request.get_json(force=True) or {}
@@ -1449,7 +1449,7 @@ def post_comment(show_id):
 @login_required
 def delete_comment(show_id, cid):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     comment = db.execute(
         'SELECT * FROM show_comments WHERE id=? AND show_id=? AND deleted_at IS NULL',
@@ -1457,10 +1457,10 @@ def delete_comment(show_id, cid):
     ).fetchone()
     if not comment:
         db.close()
-        abort(404)
+        return jsonify({'success': False, 'error': 'Comment not found.'}), 404
     if comment['user_id'] != session['user_id'] and session.get('user_role') != 'admin':
         db.close()
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     log_audit(db, 'COMMENT_DELETE', 'comment', cid, show_id=show_id,
               before={'body': comment['body']})
     db.execute(
@@ -1476,7 +1476,7 @@ def delete_comment(show_id, cid):
 @login_required
 def edit_comment(show_id, cid):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     if session.get('is_restricted'):
         return jsonify({'success': False, 'error': 'Read-only access.'}), 403
     data = request.get_json(force=True) or {}
@@ -1492,10 +1492,10 @@ def edit_comment(show_id, cid):
     ).fetchone()
     if not comment:
         db.close()
-        abort(404)
+        return jsonify({'success': False, 'error': 'Comment not found.'}), 404
     if comment['user_id'] != session['user_id'] and session.get('user_role') != 'admin':
         db.close()
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     old_body = comment['body']
     # Save previous version
     db.execute(
@@ -1523,7 +1523,7 @@ def restore_comment(show_id, cid):
     ).fetchone()
     if not comment:
         db.close()
-        abort(404)
+        return jsonify({'success': False, 'error': 'Comment not found.'}), 404
     db.execute(
         'UPDATE show_comments SET deleted_at=NULL, deleted_by=NULL WHERE id=?', (cid,)
     )
@@ -1563,13 +1563,13 @@ def comment_version_restore(show_id, cid, vid):
     ).fetchone()
     if not version:
         db.close()
-        abort(404)
+        return jsonify({'success': False, 'error': 'Version not found.'}), 404
     comment = db.execute(
         'SELECT body FROM show_comments WHERE id=? AND show_id=?', (cid, show_id)
     ).fetchone()
     if not comment:
         db.close()
-        abort(404)
+        return jsonify({'success': False, 'error': 'Comment not found.'}), 404
     old_body = comment['body']
     # Save current as a version before restoring
     db.execute(
@@ -1594,7 +1594,7 @@ def comment_version_restore(show_id, cid, vid):
 @login_required
 def get_attachments(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     rows = db.execute("""
         SELECT sa.id, sa.filename, sa.mime_type, sa.file_size, sa.created_at,
@@ -1619,7 +1619,7 @@ def get_attachments(show_id):
 @login_required
 def upload_attachment(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     if session.get('is_restricted'):
         return jsonify({'success': False, 'error': 'Read-only access.'}), 403
     f = request.files.get('file')
@@ -1645,6 +1645,7 @@ def upload_attachment(show_id):
         FROM show_attachments sa LEFT JOIN users u ON sa.uploaded_by = u.id
         WHERE sa.id = ?
     """, (aid,)).fetchone()
+    log_audit(db, 'FILE_UPLOAD', 'attachment', aid, show_id=show_id, detail=filename)
     db.close()
     syslog_logger.info(f"FILE_UPLOAD show_id={show_id} filename={filename} by={session.get('username')}")
     return jsonify({
@@ -1682,17 +1683,19 @@ def download_attachment(show_id, aid):
 @login_required
 def delete_attachment(show_id, aid):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     row = db.execute(
         'SELECT * FROM show_attachments WHERE id=? AND show_id=?', (aid, show_id)
     ).fetchone()
     if not row:
         db.close()
-        abort(404)
+        return jsonify({'success': False, 'error': 'File not found.'}), 404
     if row['uploaded_by'] != session['user_id'] and session.get('user_role') != 'admin':
         db.close()
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    log_audit(db, 'FILE_DELETE', 'attachment', aid, show_id=show_id,
+              detail=row['filename'] if row else str(aid))
     db.execute('DELETE FROM show_attachments WHERE id=?', (aid,))
     db.commit()
     db.close()
@@ -1706,12 +1709,12 @@ def delete_attachment(show_id, aid):
 @login_required
 def mark_advance_read(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     show = db.execute('SELECT advance_version FROM shows WHERE id=?', (show_id,)).fetchone()
     if not show:
         db.close()
-        abort(404)
+        return jsonify({'success': False, 'error': 'Show not found.'}), 404
     version = show['advance_version'] or 0
     db.execute("""
         INSERT INTO advance_reads (show_id, user_id, version_read, read_at)
@@ -1729,7 +1732,7 @@ def mark_advance_read(show_id):
 @login_required
 def get_advance_reads(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     rows = db.execute("""
         SELECT ar.version_read, ar.read_at,
@@ -1794,7 +1797,7 @@ def sync_advance(show_id):
     Returns changed advance_data fields + active-user presence list.
     """
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
 
     since         = request.args.get('since', '')
     tab           = request.args.get('tab', 'advance')
@@ -1846,7 +1849,7 @@ def show_heartbeat(show_id):
     data so the client can show a "someone else saved" notice.
     """
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
 
     data          = request.get_json(force=True) or {}
     tab           = data.get('tab', 'advance')
@@ -2137,9 +2140,9 @@ def download_export_history(show_id, log_id):
 def email_pdf(show_id, pdf_type):
     """Manually trigger a PDF email for advance or schedule."""
     if pdf_type not in ('advance', 'schedule'):
-        abort(400)
+        return jsonify({'success': False, 'error': 'Invalid PDF type.'}), 400
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     get_show_or_404(show_id)
     triggered_by = session.get('username') or session.get('user_display') or 'user'
     ok, msg, count = _send_pdf_email(
@@ -2200,10 +2203,8 @@ def export_postnotes(show_id):
 # ─── Show Management ──────────────────────────────────────────────────────────
 
 @app.route('/shows/<int:show_id>/archive', methods=['POST'])
-@login_required
+@staff_or_admin_required
 def archive_show(show_id):
-    if session.get('is_restricted'):
-        abort(403)
     db = get_db()
     db.execute("UPDATE shows SET status='archived' WHERE id=?", (show_id,))
     log_audit(db, 'SHOW_ARCHIVE', 'show', show_id, show_id=show_id)
@@ -2214,10 +2215,8 @@ def archive_show(show_id):
 
 
 @app.route('/shows/<int:show_id>/restore', methods=['POST'])
-@login_required
+@staff_or_admin_required
 def restore_show(show_id):
-    if session.get('is_restricted'):
-        abort(403)
     db = get_db()
     db.execute("UPDATE shows SET status='active' WHERE id=?", (show_id,))
     log_audit(db, 'SHOW_RESTORE', 'show', show_id, show_id=show_id)
@@ -2256,6 +2255,8 @@ def add_show_access(show_id):
     db = get_db()
     db.execute('INSERT OR IGNORE INTO show_group_access (show_id, group_id) VALUES (?,?)',
                (show_id, group_id))
+    log_audit(db, 'SHOW_ACCESS_ADD', 'show', show_id, show_id=show_id,
+              detail=f'group_id={group_id}')
     db.commit(); db.close()
     syslog_logger.info(
         f"SHOW_ACCESS_ADD show_id={show_id} group_id={group_id} by={session.get('username')}"
@@ -2273,6 +2274,8 @@ def remove_show_access(show_id):
     db = get_db()
     db.execute('DELETE FROM show_group_access WHERE show_id=? AND group_id=?',
                (show_id, group_id))
+    log_audit(db, 'SHOW_ACCESS_REMOVE', 'show', show_id, show_id=show_id,
+              detail=f'group_id={group_id}')
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -2491,15 +2494,17 @@ def settings():
 @content_admin_required
 def add_contact():
     db = get_db()
-    db.execute("""
+    name = request.form.get('name','').strip()
+    cur = db.execute("""
         INSERT INTO contacts (name, title, department, phone, email, report_recipient)
         VALUES (?, ?, ?, ?, ?, ?)
-    """, (request.form.get('name','').strip(),
+    """, (name,
           request.form.get('title','').strip(),
           request.form.get('department','').strip(),
           request.form.get('phone','').strip(),
           request.form.get('email','').strip(),
           1 if request.form.get('report_recipient') else 0))
+    log_audit(db, 'CONTACT_ADD', 'contact', cur.lastrowid, detail=name)
     db.commit(); db.close()
     flash('Contact added.', 'success')
     return redirect(url_for('settings') + '#contacts')
@@ -2517,6 +2522,7 @@ def edit_contact(cid):
     """, (data.get('name',''), data.get('title',''), data.get('department',''),
           data.get('phone',''), data.get('email',''),
           1 if data.get('report_recipient') else 0, cid))
+    log_audit(db, 'CONTACT_EDIT', 'contact', cid, detail=data.get('name',''))
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -2525,6 +2531,8 @@ def edit_contact(cid):
 @content_admin_required
 def delete_contact(cid):
     db = get_db()
+    row = db.execute('SELECT name FROM contacts WHERE id=?', (cid,)).fetchone()
+    log_audit(db, 'CONTACT_DELETE', 'contact', cid, detail=row['name'] if row else str(cid))
     db.execute('DELETE FROM contacts WHERE id=?', (cid,))
     db.commit(); db.close()
     return jsonify({'success': True})
@@ -2542,9 +2550,10 @@ def add_user():
         return redirect(url_for('settings') + '#users')
     db = get_db()
     try:
-        db.execute("""INSERT INTO users (username, password_hash, display_name, role)
+        cur = db.execute("""INSERT INTO users (username, password_hash, display_name, role)
                       VALUES (?, ?, ?, ?)""",
                    (username, generate_password_hash(password), display, role))
+        log_audit(db, 'USER_CREATE', 'user', cur.lastrowid, detail=f'{username} role={role}')
         db.commit()
         flash(f'User "{username}" created.', 'success')
         syslog_logger.info(f"USER_CREATE username={username} by={session.get('username')}")
@@ -2560,6 +2569,8 @@ def delete_user(uid):
     if uid == session['user_id']:
         return jsonify({'success': False, 'error': "You can't delete your own account."})
     db = get_db()
+    row = db.execute('SELECT username FROM users WHERE id=?', (uid,)).fetchone()
+    log_audit(db, 'USER_DELETE', 'user', uid, detail=row['username'] if row else str(uid))
     db.execute('DELETE FROM users WHERE id=?', (uid,))
     db.commit(); db.close()
     syslog_logger.info(f"USER_DELETE user_id={uid} by={session.get('username')}")
@@ -2575,6 +2586,7 @@ def reset_password(uid):
         return jsonify({'success': False, 'error': 'Password required.'})
     db = get_db()
     db.execute('UPDATE users SET password_hash=? WHERE id=?', (generate_password_hash(pw), uid))
+    log_audit(db, 'USER_PASSWORD_RESET', 'user', uid, detail=f'reset by {session.get("username")}')
     db.commit(); db.close()
     syslog_logger.info(f"PASSWORD_CHANGE user_id={uid} by={session.get('username')}")
     return jsonify({'success': True})
@@ -2631,6 +2643,7 @@ def add_group():
             (name, group_type, desc)
         )
         gid = cur.lastrowid
+        log_audit(db, 'GROUP_CREATE', 'group', gid, detail=name)
         db.commit()
         syslog_logger.info(f"GROUP_CREATE name={name} by={session.get('username')}")
         return jsonify({'success': True, 'id': gid})
@@ -2649,6 +2662,7 @@ def edit_group(gid):
         UPDATE user_groups SET name=?, group_type=?, description=? WHERE id=?
     """, (data.get('name',''), data.get('group_type','all_access'),
           data.get('description',''), gid))
+    log_audit(db, 'GROUP_EDIT', 'group', gid, detail=data.get('name',''))
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -2657,6 +2671,8 @@ def edit_group(gid):
 @admin_required
 def delete_group(gid):
     db = get_db()
+    row = db.execute('SELECT name FROM user_groups WHERE id=?', (gid,)).fetchone()
+    log_audit(db, 'GROUP_DELETE', 'group', gid, detail=row['name'] if row else str(gid))
     db.execute('DELETE FROM user_groups WHERE id=?', (gid,))
     db.commit(); db.close()
     return jsonify({'success': True})
@@ -2672,12 +2688,13 @@ def add_group_member(gid):
     db = get_db()
     db.execute('INSERT OR IGNORE INTO user_group_members (user_id, group_id) VALUES (?,?)',
                (uid, gid))
-    db.commit()
+    log_audit(db, 'GROUP_MEMBER_ADD', 'group', gid, detail=f'user_id={uid}')
 
     # Refresh the affected user's is_restricted in their session (best effort)
     # Session is server-side cookie; we can't update other sessions directly.
     # User will see updated access on next login.
 
+    db.commit()
     db.close()
     syslog_logger.info(
         f"GROUP_ASSIGN user_id={uid} group_id={gid} by={session.get('username')}"
@@ -2694,6 +2711,7 @@ def remove_group_member(gid):
         return jsonify({'success': False, 'error': 'user_id required'}), 400
     db = get_db()
     db.execute('DELETE FROM user_group_members WHERE user_id=? AND group_id=?', (uid, gid))
+    log_audit(db, 'GROUP_MEMBER_REMOVE', 'group', gid, detail=f'user_id={uid}')
     db.commit(); db.close()
     syslog_logger.info(
         f"GROUP_REMOVE user_id={uid} group_id={gid} by={session.get('username')}"
@@ -2809,6 +2827,7 @@ def add_form_field():
               1 if data.get('is_notes_field') else 0,
               data.get('ai_hint') or None))
         fid = cur.lastrowid
+        log_audit(db, 'FIELD_ADD', 'form_field', fid, detail=field_key)
         db.commit()
         syslog_logger.info(f"FIELD_ADD key={field_key} by={session.get('username')}")
         return jsonify({'success': True, 'id': fid})
@@ -2839,6 +2858,7 @@ def edit_form_field(fid):
           1 if data.get('is_notes_field') else 0,
           data.get('ai_hint') or None,
           fid))
+    log_audit(db, 'FIELD_EDIT', 'form_field', fid, detail=data.get('label',''))
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -2847,6 +2867,7 @@ def edit_form_field(fid):
 @content_admin_required
 def delete_form_field(fid):
     db = get_db()
+    log_audit(db, 'FIELD_DELETE', 'form_field', fid)
     db.execute('DELETE FROM form_fields WHERE id=?', (fid,))
     db.commit(); db.close()
     syslog_logger.info(f"FIELD_DELETE id={fid} by={session.get('username')}")
@@ -2884,6 +2905,7 @@ def add_form_section():
               data.get('icon', '◈'),
               0 if str(data.get('default_open', '1')) == '0' else 1))
         sid = cur.lastrowid
+        log_audit(db, 'SECTION_ADD', 'form_section', sid, detail=label)
         db.commit()
         return jsonify({'success': True, 'id': sid})
     except sqlite3.IntegrityError:
@@ -2904,6 +2926,7 @@ def edit_form_section(sid):
           data.get('icon','◈'),
           0 if str(data.get('default_open', '1')) == '0' else 1,
           sid))
+    log_audit(db, 'SECTION_EDIT', 'form_section', sid, detail=data.get('label',''))
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -2912,6 +2935,7 @@ def edit_form_section(sid):
 @content_admin_required
 def delete_form_section(sid):
     db = get_db()
+    log_audit(db, 'SECTION_DELETE', 'form_section', sid)
     db.execute('DELETE FROM form_sections WHERE id=?', (sid,))
     db.commit(); db.close()
     return jsonify({'success': True})
@@ -3028,6 +3052,7 @@ def save_server_settings():
     db = get_db()
     db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
                ('app_port', str(port_val)))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail=f'app_port={port_val}')
     db.commit(); db.close()
     syslog_logger.info(f"SETTINGS_CHANGE key=app_port value={port_val} by={session.get('username')}")
 
@@ -3078,6 +3103,7 @@ def save_syslog_settings():
         if key in data:
             db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
                        (key, str(data[key])))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='syslog')
     db.commit(); db.close()
     reload_syslog_handler()
     syslog_logger.info(f"SETTINGS_CHANGE key=syslog by={session.get('username')}")
@@ -3281,6 +3307,7 @@ def add_schedule_template():
                       VALUES (?,?,?,?,?,?)""",
                    (tid, i, row.get('start_time',''), row.get('end_time',''),
                     row.get('description',''), row.get('notes','')))
+    log_audit(db, 'TEMPLATE_ADD', 'schedule_template', tid, detail=name)
     db.commit(); db.close()
     return jsonify({'success': True, 'id': tid})
 
@@ -3301,6 +3328,7 @@ def edit_schedule_template(tid):
                       VALUES (?,?,?,?,?,?)""",
                    (tid, i, row.get('start_time',''), row.get('end_time',''),
                     row.get('description',''), row.get('notes','')))
+    log_audit(db, 'TEMPLATE_EDIT', 'schedule_template', tid, detail=name)
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -3309,6 +3337,9 @@ def edit_schedule_template(tid):
 @content_admin_required
 def delete_schedule_template(tid):
     db = get_db()
+    row = db.execute('SELECT name FROM schedule_templates WHERE id=?', (tid,)).fetchone()
+    log_audit(db, 'TEMPLATE_DELETE', 'schedule_template', tid,
+              detail=row['name'] if row else str(tid))
     db.execute('DELETE FROM schedule_templates WHERE id=?', (tid,))
     db.commit(); db.close()
     return jsonify({'success': True})
@@ -3325,6 +3356,7 @@ def save_wifi_settings():
         if key in data:
             db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
                        (key, data[key]))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='wifi')
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -3348,6 +3380,7 @@ def save_logo():
     db = get_db()
     db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
                ('logo_data', logo_data))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='logo_upload')
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -3357,6 +3390,7 @@ def save_logo():
 def delete_logo():
     db = get_db()
     db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('logo_data', '')")
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='logo_delete')
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -3373,6 +3407,7 @@ def save_upload_size():
     db = get_db()
     db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
                ('upload_max_mb', str(mb)))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail=f'upload_max_mb={mb}')
     db.commit(); db.close()
     return jsonify({'success': True, 'upload_max_mb': mb})
 
@@ -3670,6 +3705,8 @@ def toggle_contact_recipient(cid):
     val  = 1 if data.get('recipient') else 0
     db   = get_db()
     db.execute('UPDATE contacts SET report_recipient=? WHERE id=?', (val, cid))
+    log_audit(db, 'CONTACT_RECIPIENT_TOGGLE', 'contact', cid,
+              detail=f"recipient={'yes' if val else 'no'}")
     db.commit(); db.close()
     return jsonify({'success': True})
 
@@ -3688,7 +3725,7 @@ def ai_extract(show_id):
 
 def _ai_extract_impl(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
 
     # Check Ollama is enabled
     ollama_enabled = get_app_setting('ollama_enabled', '0')
@@ -4014,7 +4051,7 @@ def reorder_job_positions():
 @login_required
 def get_labor_requests(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     rows = db.execute("""
         SELECT lr.*, jp.name as position_name
@@ -4031,7 +4068,7 @@ def get_labor_requests(show_id):
 @login_required
 def add_labor_request(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     if session.get('is_restricted'):
         return jsonify({'success': False, 'error': 'Read-only access.'}), 403
     data = request.get_json(force=True) or {}
@@ -4061,7 +4098,7 @@ def add_labor_request(show_id):
 @login_required
 def update_labor_request(show_id, rid):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     if session.get('is_restricted'):
         return jsonify({'success': False, 'error': 'Read-only access.'}), 403
     data = request.get_json(force=True) or {}
@@ -4087,7 +4124,7 @@ def update_labor_request(show_id, rid):
 @login_required
 def delete_labor_request(show_id, rid):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     if session.get('is_restricted'):
         return jsonify({'success': False, 'error': 'Read-only access.'}), 403
     db = get_db()
@@ -4102,7 +4139,7 @@ def delete_labor_request(show_id, rid):
 @login_required
 def reorder_labor_requests(show_id):
     if not can_access_show(session['user_id'], show_id):
-        abort(403)
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
     data = request.get_json(force=True) or {}
     request_ids = data.get('request_ids', [])
     db = get_db()
@@ -4294,6 +4331,14 @@ def forbidden(e):
 def not_found(e):
     return render_template('error.html', code=404, message="Page not found.",
                            user=get_current_user()), 404
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    app.logger.exception("500 Internal Server Error")
+    return render_template('error.html', code=500,
+                           message="An unexpected server error occurred.",
+                           user=get_current_user()), 500
 
 
 # ─── Run ──────────────────────────────────────────────────────────────────────

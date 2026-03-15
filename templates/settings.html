@@ -1435,13 +1435,6 @@ async function changePassword() {
           data.success ? 'success' : 'error');
 }
 
-function showMsg(el, text, type) {
-  el.textContent = text;
-  el.className = 'field-msg field-msg-' + type;
-  el.style.display = 'block';
-  setTimeout(() => el.style.display='none', 4000);
-}
-
 /* ── Groups ────────────────────────────────────────────────────── */
 function openGroupModal() { document.getElementById('group-modal').style.display=''; }
 function closeGroupModal() { document.getElementById('group-modal').style.display='none'; }
@@ -1567,7 +1560,7 @@ async function loadGodMode() {
             <td>${s.user}</td>
             <td><a href="/shows/${s.show_id}" style="color:var(--accent)">${s.show}</a></td>
             <td><span class="field-type-badge">${s.tab}</span></td>
-            <td class="text-dim" style="font-size:11px">${s.last_seen ? s.last_seen.substring(0,16).replace('T',' ') : '—'}</td>
+            <td class="text-dim" style="font-size:11px">${fmtDate(s.last_seen)}</td>
           </tr>`).join('') +
           '</tbody></table>';
       }
@@ -1580,7 +1573,7 @@ async function loadGodMode() {
         <td>${u.name}</td>
         <td class="mono text-sm">${u.username}</td>
         <td><span class="role-badge role-${u.role}">${u.role.toUpperCase()}</span></td>
-        <td class="text-dim" style="font-size:11px">${u.last_login === '—' ? '—' : u.last_login.substring(0,16).replace('T',' ')}</td>
+        <td class="text-dim" style="font-size:11px">${fmtDate(u.last_login)}</td>
       </tr>`).join('');
     }
   } catch(e) {
@@ -1614,7 +1607,7 @@ async function loadFileManager() {
         <td style="font-size:11px"><a href="/shows/${f.show_id}/attachments/${f.id}/download">${f.filename}</a></td>
         <td style="font-size:11px" class="text-dim">${_fmtBytes(f.file_size)}</td>
         <td style="font-size:11px">${f.uploader}</td>
-        <td style="font-size:11px" class="text-dim">${f.created_at ? f.created_at.substring(0,16).replace('T',' ') : ''}</td>
+        <td style="font-size:11px" class="text-dim">${fmtDate(f.created_at)}</td>
         <td><button class="btn btn-xs btn-danger-ghost" onclick="adminDeleteFile(${f.show_id},${f.id},this)">×</button></td>
       </tr>`).join('') +
       '</tbody></table>';
@@ -2005,10 +1998,6 @@ async function deleteCrewMember(mid) {
   if (d.success) {
     document.querySelector(`#crew-tbody tr[data-mid="${mid}"]`)?.remove();
   } else alert(d.error || 'Error deleting technician.');
-}
-
-function _esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 /* ── Email Tab ──────────────────────────────────────────────────── */

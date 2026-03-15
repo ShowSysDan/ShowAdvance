@@ -287,6 +287,20 @@ function showSaveToast(msg, type) {
   toast._timer = setTimeout(() => { toast.className = 'save-toast'; }, 2500);
 }
 
+function showMsg(el, text, type) {
+  if (!el) return;
+  el.textContent = text;
+  el.className = 'field-msg field-msg-' + (type || 'info');
+  el.style.display = text ? 'block' : 'none';
+  clearTimeout(el._hideTimer);
+  if (text) el._hideTimer = setTimeout(() => { el.style.display = 'none'; }, 4000);
+}
+
+function fmtDate(s) {
+  if (!s) return '—';
+  return String(s).substring(0, 16).replace('T', ' ');
+}
+
 function saveActive() {
   clearTimeout(saveTimer);
   if (activeTab === 'advance')   saveAdvance();
@@ -1486,7 +1500,7 @@ async function showCommentVersions(cid) {
     const versions = await resp.json();
     if (!versions.length) { alert('No edit history for this comment.'); return; }
     const lines = versions.map((v, i) =>
-      `[${i+1}] ${v.edited_at ? v.edited_at.substring(0,16) : ''} by ${v.edited_by}:\n${v.body}`
+      `[${i+1}] ${fmtDate(v.edited_at)} by ${v.edited_by}:\n${v.body}`
     ).join('\n\n---\n\n');
     const choice = prompt(`Comment edit history (${versions.length} versions):\n\n${lines}\n\nEnter version number to restore (or cancel):`);
     if (!choice) return;
@@ -1662,7 +1676,7 @@ function renderAttachments(files) {
       : f.file_size > 1024
       ? Math.round(f.file_size / 1024) + ' KB'
       : f.file_size + ' B';
-    const time = f.created_at ? f.created_at.substring(0, 16).replace('T', ' ') : '';
+    const time = fmtDate(f.created_at);
     return `
       <div class="attachment-item">
         <div class="attachment-icon">${_fileIcon(f.mime_type)}</div>
@@ -2157,7 +2171,7 @@ async function loadReadReceipts() {
     }
     container.innerHTML = reads.map(r => {
       const color = _userColor(r.author);
-      const time  = r.read_at ? r.read_at.substring(0, 16).replace('T', ' ') : '';
+      const time  = fmtDate(r.read_at);
       return `<span class="read-receipt-chip"
                     style="border-color:${color}33;background:${color}11"
                     title="${_esc(r.author)} · v${r.version_read} · ${time}">
