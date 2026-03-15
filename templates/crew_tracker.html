@@ -375,7 +375,7 @@ function openEditModal(btn) {
             cb.checked = wasChecked;
             item.classList.toggle('qualified', wasChecked);
             if (dot) dot.classList.toggle('qualified', wasChecked);
-            alert('Error: ' + (d.error || 'Unknown'));
+            showSaveToast('✗ ' + (d.error || 'Save failed'), 'error');
           } else {
             // Keep button's data-quals in sync
             const editBtn = tr.querySelector('button[data-quals]');
@@ -385,11 +385,13 @@ function openEditModal(btn) {
               else { qs = qs.filter(q => q !== pos.id); }
               editBtn.dataset.quals = JSON.stringify(qs);
             }
+            showSaveToast('✓ Saved');
           }
         } catch(e) {
           cb.checked = wasChecked;
           item.classList.toggle('qualified', wasChecked);
           if (dot) dot.classList.toggle('qualified', wasChecked);
+          showSaveToast('✗ Network error', 'error');
         }
       });
 
