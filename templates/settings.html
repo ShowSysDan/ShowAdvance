@@ -29,7 +29,9 @@
   <button class="tab-btn" onclick="switchSettingsTab('files')">Files</button>
   <button class="tab-btn" onclick="switchSettingsTab('database')">Database</button>
   <button class="tab-btn" onclick="switchSettingsTab('ai')">AI</button>
+  <button class="tab-btn" onclick="switchSettingsTab('email')">Email</button>
   <button class="tab-btn" onclick="switchSettingsTab('godmode')">God Mode</button>
+  <a href="{{ url_for('audit_log_view') }}" class="tab-btn">Audit Log</a>
   {% endif %}
   <button class="tab-btn" onclick="switchSettingsTab('account')">My Account</button>
 </div>
@@ -83,7 +85,7 @@
         </select>
       </div>
       <table class="data-table" id="contacts-table">
-        <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th>EMAIL</th>{% if user.role == 'admin' or is_content_admin %}<th style="width:80px">ACTIONS</th>{% endif %}</tr></thead>
+        <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th>EMAIL</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="PDF report recipient">RECIPIENT</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}">
@@ -92,6 +94,14 @@
             <td>{% if c.department %}<span class="dept-badge">{{ c.department }}</span>{% else %}—{% endif %}</td>
             <td class="mono text-sm" data-field="phone">{{ c.phone or '—' }}</td>
             <td class="text-sm" data-field="email">{{ c.email or '—' }}</td>
+            {% if user.role == 'admin' %}
+            <td style="text-align:center">
+              <input type="checkbox" class="recipient-chk" data-cid="{{ c.id }}"
+                     {% if c.report_recipient %}checked{% endif %}
+                     title="Include in PDF email sends"
+                     onchange="toggleRecipient({{ c.id }}, this.checked)">
+            </td>
+            {% endif %}
             {% if user.role == 'admin' or is_content_admin %}
             <td>
               <div class="action-btns">
@@ -893,6 +903,151 @@
 {% endif %}
 
 
+{# ── EMAIL ─────────────────────────────────────────────────────────────────── #}
+{% if user.role == 'admin' %}
+<div id="stab-email" class="stab-pane" style="display:none">
+
+  {# SMTP Configuration #}
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> OUTGOING SMTP</div>
+    <div class="form-section-body">
+      <div class="form-row cols-3">
+        <div class="field-group">
+          <label class="field-label">SMTP HOST</label>
+          <input type="text" id="smtp_host" class="field-input" placeholder="smtp.example.com"
+                 value="{{ smtp_settings.smtp_host }}">
+        </div>
+        <div class="field-group">
+          <label class="field-label">PORT</label>
+          <input type="number" id="smtp_port" class="field-input" placeholder="587"
+                 value="{{ smtp_settings.smtp_port }}">
+        </div>
+        <div class="field-group">
+          <label class="field-label">SECURITY</label>
+          <select id="smtp_tls" class="field-input">
+            <option value="1" {% if smtp_settings.smtp_tls != '0' %}selected{% endif %}>STARTTLS (port 587)</option>
+            <option value="0" {% if smtp_settings.smtp_tls == '0' %}selected{% endif %}>SSL/TLS (port 465)</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row cols-3">
+        <div class="field-group">
+          <label class="field-label">USERNAME</label>
+          <input type="text" id="smtp_user" class="field-input" placeholder="user@example.com"
+                 value="{{ smtp_settings.smtp_user }}" autocomplete="off">
+        </div>
+        <div class="field-group">
+          <label class="field-label">PASSWORD</label>
+          <input type="password" id="smtp_pass" class="field-input" placeholder="••••••••"
+                 value="{{ smtp_settings.smtp_pass }}" autocomplete="off">
+        </div>
+        <div class="field-group">
+          <label class="field-label">FROM ADDRESS</label>
+          <input type="email" id="smtp_from" class="field-input" placeholder="advanceit@example.com"
+                 value="{{ smtp_settings.smtp_from }}">
+        </div>
+      </div>
+      <div class="form-row cols-2" style="max-width:480px">
+        <div class="field-group">
+          <label class="field-label">TEST SEND TO (optional)</label>
+          <input type="email" id="smtp_test_to" class="field-input" placeholder="you@example.com">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary" onclick="saveSmtpSettings()">Save SMTP</button>
+        <button class="btn btn-ghost" onclick="testSmtp()">Send Test Email</button>
+      </div>
+      <p id="smtp-msg" class="text-dim text-sm mt-sm" style="display:none"></p>
+    </div>
+  </div>
+
+  {# Advance Sheet auto-email #}
+  <div class="form-section mt-lg">
+    <div class="form-section-header"><span class="section-icon">◈</span> ADVANCE SHEET — AUTO EMAIL</div>
+    <div class="form-section-body">
+      <p class="text-dim text-sm" style="margin-bottom:12px">
+        Automatically email the Advance Sheet PDF to all report recipients a set number of days before the show.
+      </p>
+      <div class="form-row cols-3">
+        <div class="field-group">
+          <label class="field-label">ENABLE AUTO-SEND</label>
+          <select id="advance_email_enabled" class="field-input">
+            <option value="0" {% if pdf_email_settings.advance_email_enabled != '1' %}selected{% endif %}>Disabled</option>
+            <option value="1" {% if pdf_email_settings.advance_email_enabled == '1' %}selected{% endif %}>Enabled</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">DAYS BEFORE SHOW</label>
+          <input type="number" id="advance_email_days_before" class="field-input" min="1" max="60"
+                 value="{{ pdf_email_settings.advance_email_days_before }}" placeholder="7">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# Production Schedule auto-email (two configurable sends) #}
+  <div class="form-section mt-lg">
+    <div class="form-section-header"><span class="section-icon">◈</span> PRODUCTION SCHEDULE — AUTO EMAIL</div>
+    <div class="form-section-body">
+      <p class="text-dim text-sm" style="margin-bottom:12px">
+        Send the Production Schedule PDF automatically at up to two intervals before the show.
+        Either send can be disabled independently.
+      </p>
+      <h3 class="sub-section-label" style="margin-bottom:8px">FIRST SEND</h3>
+      <div class="form-row cols-3">
+        <div class="field-group">
+          <label class="field-label">ENABLE</label>
+          <select id="schedule_email_enabled_1" class="field-input">
+            <option value="0" {% if pdf_email_settings.schedule_email_enabled_1 != '1' %}selected{% endif %}>Disabled</option>
+            <option value="1" {% if pdf_email_settings.schedule_email_enabled_1 == '1' %}selected{% endif %}>Enabled</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">DAYS BEFORE SHOW</label>
+          <input type="number" id="schedule_email_days_1" class="field-input" min="1" max="60"
+                 value="{{ pdf_email_settings.schedule_email_days_1 }}" placeholder="10">
+        </div>
+      </div>
+      <h3 class="sub-section-label" style="margin-top:12px;margin-bottom:8px">SECOND SEND</h3>
+      <div class="form-row cols-3">
+        <div class="field-group">
+          <label class="field-label">ENABLE</label>
+          <select id="schedule_email_enabled_2" class="field-input">
+            <option value="0" {% if pdf_email_settings.schedule_email_enabled_2 != '1' %}selected{% endif %}>Disabled</option>
+            <option value="1" {% if pdf_email_settings.schedule_email_enabled_2 == '1' %}selected{% endif %}>Enabled</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">DAYS BEFORE SHOW</label>
+          <input type="number" id="schedule_email_days_2" class="field-input" min="1" max="60"
+                 value="{{ pdf_email_settings.schedule_email_days_2 }}" placeholder="1">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# Shared send time #}
+  <div class="form-section mt-lg">
+    <div class="form-section-header"><span class="section-icon">◈</span> SCHEDULED SEND TIME</div>
+    <div class="form-section-body">
+      <div class="form-row cols-3">
+        <div class="field-group">
+          <label class="field-label">SEND HOUR (24H, SERVER TIME)</label>
+          <input type="number" id="pdf_email_send_hour" class="field-input" min="0" max="23"
+                 value="{{ pdf_email_settings.pdf_email_send_hour }}" placeholder="6">
+          <span class="field-hint">Automated emails send at this hour each day (e.g. 6 = 6:00 AM)</span>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary" onclick="savePdfEmailSettings()">Save Email Schedule</button>
+        <p id="pdf-email-msg" class="text-dim text-sm mt-sm" style="display:none;margin-top:6px"></p>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endif %}
+
 {# ── MY ACCOUNT ────────────────────────────────────────────────────────────── #}
 <div id="stab-account" class="stab-pane" style="display:none">
   <div class="form-section">
@@ -1280,13 +1435,6 @@ async function changePassword() {
           data.success ? 'success' : 'error');
 }
 
-function showMsg(el, text, type) {
-  el.textContent = text;
-  el.className = 'field-msg field-msg-' + type;
-  el.style.display = 'block';
-  setTimeout(() => el.style.display='none', 4000);
-}
-
 /* ── Groups ────────────────────────────────────────────────────── */
 function openGroupModal() { document.getElementById('group-modal').style.display=''; }
 function closeGroupModal() { document.getElementById('group-modal').style.display='none'; }
@@ -1364,6 +1512,7 @@ async function saveWifiSettings(form) {
   });
   const d = await resp.json();
   if (msg) { msg.textContent = d.success ? '✓ Saved' : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
+  if (d.success) showSaveToast('✓ WiFi settings saved');
 }
 
 async function uploadLogo(form) {
@@ -1391,6 +1540,7 @@ async function saveUploadSize(form) {
   });
   const d = await resp.json();
   if (msg) { msg.textContent = d.success ? `✓ Max set to ${d.upload_max_mb} MB` : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
+  if (d.success) showSaveToast(`✓ Upload limit set to ${d.upload_max_mb} MB`);
 }
 
 /* ── God Mode ───────────────────────────────────────────────────── */
@@ -1410,7 +1560,7 @@ async function loadGodMode() {
             <td>${s.user}</td>
             <td><a href="/shows/${s.show_id}" style="color:var(--accent)">${s.show}</a></td>
             <td><span class="field-type-badge">${s.tab}</span></td>
-            <td class="text-dim" style="font-size:11px">${s.last_seen ? s.last_seen.substring(0,16).replace('T',' ') : '—'}</td>
+            <td class="text-dim" style="font-size:11px">${fmtDate(s.last_seen)}</td>
           </tr>`).join('') +
           '</tbody></table>';
       }
@@ -1423,7 +1573,7 @@ async function loadGodMode() {
         <td>${u.name}</td>
         <td class="mono text-sm">${u.username}</td>
         <td><span class="role-badge role-${u.role}">${u.role.toUpperCase()}</span></td>
-        <td class="text-dim" style="font-size:11px">${u.last_login === '—' ? '—' : u.last_login.substring(0,16).replace('T',' ')}</td>
+        <td class="text-dim" style="font-size:11px">${fmtDate(u.last_login)}</td>
       </tr>`).join('');
     }
   } catch(e) {
@@ -1457,7 +1607,7 @@ async function loadFileManager() {
         <td style="font-size:11px"><a href="/shows/${f.show_id}/attachments/${f.id}/download">${f.filename}</a></td>
         <td style="font-size:11px" class="text-dim">${_fmtBytes(f.file_size)}</td>
         <td style="font-size:11px">${f.uploader}</td>
-        <td style="font-size:11px" class="text-dim">${f.created_at ? f.created_at.substring(0,16).replace('T',' ') : ''}</td>
+        <td style="font-size:11px" class="text-dim">${fmtDate(f.created_at)}</td>
         <td><button class="btn btn-xs btn-danger-ghost" onclick="adminDeleteFile(${f.show_id},${f.id},this)">×</button></td>
       </tr>`).join('') +
       '</tbody></table>';
@@ -1850,8 +2000,73 @@ async function deleteCrewMember(mid) {
   } else alert(d.error || 'Error deleting technician.');
 }
 
-function _esc(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+/* ── Email Tab ──────────────────────────────────────────────────── */
+async function toggleRecipient(cid, checked) {
+  const resp = await fetch(`/settings/contacts/${cid}/recipient`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({recipient: checked})
+  });
+  if ((await resp.json()).success) showSaveToast(checked ? '✓ Recipient added' : '✓ Recipient removed');
+}
+
+async function saveSmtpSettings() {
+  const data = {
+    smtp_host: document.getElementById('smtp_host').value.trim(),
+    smtp_port: document.getElementById('smtp_port').value.trim(),
+    smtp_user: document.getElementById('smtp_user').value.trim(),
+    smtp_pass: document.getElementById('smtp_pass').value,
+    smtp_from: document.getElementById('smtp_from').value.trim(),
+    smtp_tls:  document.getElementById('smtp_tls').value,
+  };
+  const resp = await fetch('/settings/smtp', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+  });
+  const d = await resp.json();
+  const msg = document.getElementById('smtp-msg');
+  msg.style.display = 'block';
+  msg.textContent = d.success ? '✓ SMTP settings saved.' : '✗ ' + (d.error || 'Error');
+  if (d.success) { showSaveToast('✓ SMTP saved'); setTimeout(() => { msg.style.display='none'; }, 3000); }
+}
+
+async function testSmtp() {
+  const data = {
+    smtp_host: document.getElementById('smtp_host').value.trim(),
+    smtp_port: document.getElementById('smtp_port').value.trim(),
+    smtp_user: document.getElementById('smtp_user').value.trim(),
+    smtp_pass: document.getElementById('smtp_pass').value,
+    smtp_from: document.getElementById('smtp_from').value.trim(),
+    smtp_tls:  document.getElementById('smtp_tls').value,
+    test_to:   document.getElementById('smtp_test_to').value.trim(),
+  };
+  const msg = document.getElementById('smtp-msg');
+  msg.style.display = 'block';
+  msg.textContent = 'Sending…';
+  const resp = await fetch('/settings/smtp/test', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+  });
+  const d = await resp.json();
+  msg.textContent = d.success ? '✓ ' + d.message : '✗ ' + d.message;
+}
+
+async function savePdfEmailSettings() {
+  const data = {
+    pdf_email_send_hour:       document.getElementById('pdf_email_send_hour').value,
+    advance_email_enabled:     document.getElementById('advance_email_enabled').value,
+    advance_email_days_before: document.getElementById('advance_email_days_before').value,
+    schedule_email_enabled_1:  document.getElementById('schedule_email_enabled_1').value,
+    schedule_email_days_1:     document.getElementById('schedule_email_days_1').value,
+    schedule_email_enabled_2:  document.getElementById('schedule_email_enabled_2').value,
+    schedule_email_days_2:     document.getElementById('schedule_email_days_2').value,
+  };
+  const resp = await fetch('/settings/pdf-emails', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+  });
+  const d = await resp.json();
+  const msg = document.getElementById('pdf-email-msg');
+  msg.style.display = 'block';
+  msg.textContent = d.success ? '✓ Email schedule saved.' : '✗ ' + (d.error || 'Error');
+  if (d.success) { showSaveToast('✓ Email schedule saved'); setTimeout(() => { msg.style.display='none'; }, 3000); }
 }
 </script>
 {% endblock %}

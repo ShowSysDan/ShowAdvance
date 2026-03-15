@@ -1,9 +1,200 @@
 {% extends "base.html" %}
-{% block title %}Error {{ code }} — AdvanceIt{% endblock %}
+{% block title %}
+  {% if code == 403 %}Access Denied
+  {% elif code == 404 %}Page Not Found
+  {% elif code == 500 %}Server Error
+  {% else %}Error {{ code }}
+  {% endif %}
+  — AdvanceIt
+{% endblock %}
 {% block content %}
-<div style="display:flex;align-items:center;justify-content:center;height:60vh;flex-direction:column;gap:16px;text-align:center">
-  <div style="font-size:72pt;font-weight:900;color:var(--accent);opacity:.3;line-height:1">{{ code }}</div>
-  <div style="font-size:14pt;color:var(--text)">{{ message }}</div>
-  <a href="{{ url_for('dashboard') }}" class="btn btn-ghost">← Back to Dashboard</a>
+<div class="error-page">
+
+  {% if code == 403 %}
+  <div class="error-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <line x1="12" y1="8" x2="12" y2="12"/>
+      <line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+  </div>
+  <div class="error-code">403</div>
+  <div class="error-title">Access Denied</div>
+  <div class="error-description">
+    You don't have permission to view this page or perform this action.
+    If you think this is a mistake, contact your administrator.
+  </div>
+
+  {% elif code == 404 %}
+  <div class="error-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="11" cy="11" r="8"/>
+      <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      <line x1="11" y1="8" x2="11" y2="14"/>
+      <line x1="8" y1="11" x2="14" y2="11"/>
+    </svg>
+  </div>
+  <div class="error-code">404</div>
+  <div class="error-title">Page Not Found</div>
+  <div class="error-description">
+    The page you're looking for doesn't exist or may have been moved.
+    Double-check the URL or head back to where you came from.
+  </div>
+
+  {% elif code == 500 %}
+  <div class="error-icon error-icon-red">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </svg>
+  </div>
+  <div class="error-code">500</div>
+  <div class="error-title">Server Error</div>
+  <div class="error-description">
+    Something went wrong on our end. The error has been logged.
+    Please try again in a moment — if it keeps happening, contact your admin.
+  </div>
+
+  {% else %}
+  <div class="error-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="8" x2="12" y2="12"/>
+      <line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+  </div>
+  <div class="error-code">{{ code }}</div>
+  <div class="error-title">{{ message }}</div>
+  <div class="error-description">An unexpected error occurred.</div>
+  {% endif %}
+
+  <div class="error-actions">
+    <button class="btn btn-ghost" onclick="history.back()">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" style="vertical-align:middle;margin-right:5px"><polyline points="15 18 9 12 15 6"/></svg>
+      Go Back
+    </button>
+    {% if user %}
+    <a href="{{ url_for('dashboard') }}" class="btn btn-primary">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" style="vertical-align:middle;margin-right:5px"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+      Dashboard
+    </a>
+    {% else %}
+    <a href="{{ url_for('login') }}" class="btn btn-primary">Sign In</a>
+    {% endif %}
+  </div>
+
+  <div class="error-bg-num">{{ code }}</div>
+</div>
+
+<style>
+.error-page {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 65vh;
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+  padding: 40px 20px;
+}
+.error-bg-num {
+  position: absolute;
+  font-size: clamp(120px, 22vw, 260px);
+  font-weight: 900;
+  color: var(--accent);
+  opacity: .04;
+  user-select: none;
+  pointer-events: none;
+  letter-spacing: -0.05em;
+  z-index: 0;
+  line-height: 1;
+}
+.error-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: var(--accent-glow);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 20px;
+  position: relative;
+  z-index: 1;
+}
+.error-icon.error-icon-red {
+  background: rgba(239,68,68,.12);
+  color: var(--red);
+}
+.error-icon svg {
+  width: 32px;
+  height: 32px;
+}
+.error-code {
+  font-size: clamp(48px, 8vw, 80px);
+  font-weight: 900;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 10px;
+  position: relative;
+  z-index: 1;
+}
+.error-page .error-icon-red ~ .error-code {
+  color: var(--red);
+}
+.error-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 12px;
+  position: relative;
+  z-index: 1;
+}
+.error-description {
+  max-width: 420px;
+  color: var(--text-dim);
+  line-height: 1.6;
+  margin-bottom: 28px;
+  position: relative;
+  z-index: 1;
+}
+.error-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  position: relative;
+  z-index: 1;
+}
+</style>
+{% endblock %}
+
+{% block auth_content %}
+{# Shown when user is not logged in (no sidebar) #}
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg)">
+  <div style="text-align:center;padding:40px 24px;position:relative;overflow:hidden">
+    <div style="font-size:clamp(120px,22vw,260px);font-weight:900;color:var(--accent);opacity:.04;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);pointer-events:none;user-select:none;letter-spacing:-.05em">{{ code }}</div>
+
+    {% if code == 403 %}
+    <div style="font-size:clamp(48px,8vw,72px);font-weight:900;color:var(--accent,#E8980E);line-height:1;margin-bottom:10px">403</div>
+    <div style="font-size:1.2rem;font-weight:600;color:#DCE1EE;margin-bottom:10px">Access Denied</div>
+    <div style="color:#818FA4;max-width:380px;margin:0 auto 24px;line-height:1.6">You don't have permission to view this page.</div>
+    {% elif code == 404 %}
+    <div style="font-size:clamp(48px,8vw,72px);font-weight:900;color:var(--accent,#E8980E);line-height:1;margin-bottom:10px">404</div>
+    <div style="font-size:1.2rem;font-weight:600;color:#DCE1EE;margin-bottom:10px">Page Not Found</div>
+    <div style="color:#818FA4;max-width:380px;margin:0 auto 24px;line-height:1.6">The page you're looking for doesn't exist.</div>
+    {% elif code == 500 %}
+    <div style="font-size:clamp(48px,8vw,72px);font-weight:900;color:#EF4444;line-height:1;margin-bottom:10px">500</div>
+    <div style="font-size:1.2rem;font-weight:600;color:#DCE1EE;margin-bottom:10px">Server Error</div>
+    <div style="color:#818FA4;max-width:380px;margin:0 auto 24px;line-height:1.6">Something went wrong. Please try again.</div>
+    {% else %}
+    <div style="font-size:clamp(48px,8vw,72px);font-weight:900;color:var(--accent,#E8980E);line-height:1;margin-bottom:10px">{{ code }}</div>
+    <div style="font-size:1.2rem;font-weight:600;color:#DCE1EE;margin-bottom:10px">{{ message }}</div>
+    {% endif %}
+
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button onclick="history.back()" style="padding:9px 18px;border-radius:6px;border:1px solid #232840;background:transparent;color:#DCE1EE;cursor:pointer;font-size:13px">← Go Back</button>
+      <a href="/login" style="padding:9px 18px;border-radius:6px;background:#E8980E;color:#0e1015;font-weight:600;font-size:13px;text-decoration:none">Sign In</a>
+    </div>
+  </div>
 </div>
 {% endblock %}

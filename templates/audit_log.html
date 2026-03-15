@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Audit Log — AdvanceIt{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Audit Log</h1>
+    <p class="page-sub">Full history of user actions — {{ total }} total entries</p>
+  </div>
+  <a href="{{ url_for('settings') }}" class="btn btn-secondary">← Settings</a>
+</div>
+
+{# ── Filters ──────────────────────────────────────────────────────────────── #}
+<form method="get" action="{{ url_for('audit_log_view') }}" class="form-row cols-5 align-end" style="margin-bottom:1.5rem">
+  <div class="field-group">
+    <label class="field-label">USER</label>
+    <select name="user_id" class="field-input">
+      <option value="">All users</option>
+      {% for u in users %}
+      <option value="{{ u.id }}" {% if filters.get('user_id')|string == u.id|string %}selected{% endif %}>
+        {{ u.display_name or u.username }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-group">
+    <label class="field-label">SHOW</label>
+    <select name="show_id" class="field-input">
+      <option value="">All shows</option>
+      {% for s in shows %}
+      <option value="{{ s.id }}" {% if filters.get('show_id')|string == s.id|string %}selected{% endif %}>
+        {{ s.name }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="field-group">
+    <label class="field-label">ACTION</label>
+    <input type="text" name="action" value="{{ filters.get('action', '') }}"
+           placeholder="e.g. FORM_SAVE" class="field-input">
+  </div>
+  <div class="field-group">
+    <label class="field-label">FROM DATE</label>
+    <input type="date" name="date_from" value="{{ filters.get('date_from', '') }}" class="field-input">
+  </div>
+  <div class="field-group">
+    <label class="field-label">TO DATE</label>
+    <input type="date" name="date_to" value="{{ filters.get('date_to', '') }}" class="field-input">
+  </div>
+  <div class="field-group" style="align-self:flex-end">
+    <button type="submit" class="btn btn-primary">Filter</button>
+    <a href="{{ url_for('audit_log_view') }}" class="btn btn-secondary" style="margin-left:.5rem">Clear</a>
+  </div>
+</form>
+
+{# ── Table ────────────────────────────────────────────────────────────────── #}
+{% if entries %}
+<div class="form-section">
+  <table class="data-table" style="font-size:.85rem">
+    <thead>
+      <tr>
+        <th style="width:160px">TIMESTAMP</th>
+        <th style="width:130px">USER</th>
+        <th style="width:160px">ACTION</th>
+        <th style="width:90px">ENTITY</th>
+        <th>SHOW / DETAIL</th>
+        <th style="width:110px">IP</th>
+        <th style="width:36px"></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr class="audit-row {% if e.before_json or e.after_json %}has-diff{% endif %}"
+          data-id="{{ e.id }}">
+        <td class="text-dim" style="white-space:nowrap">{{ e.timestamp[:19] if e.timestamp else '—' }}</td>
+        <td><strong>{{ e.display_name }}</strong></td>
+        <td>
+          <span class="action-badge action-{{ e.action.split('_')[0].lower() }}">{{ e.action }}</span>
+        </td>
+        <td class="text-dim">{{ e.entity_type }}{% if e.entity_id %} #{{ e.entity_id }}{% endif %}</td>
+        <td>
+          {% if e.show_name %}<span class="text-dim">{{ e.show_name }} — </span>{% endif %}
+          {{ e.detail or '' }}
+        </td>
+        <td class="text-dim" style="font-size:.78rem">{{ e.ip_address or '—' }}</td>
+        <td>
+          {% if e.before_json or e.after_json %}
+          <button class="btn-icon" title="Show diff"
+                  onclick="toggleDiff({{ e.id }})">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14">
+              <polyline points="6 9 12 15 18 9"/>
+            </svg>
+          </button>
+          {% endif %}
+        </td>
+      </tr>
+      {% if e.before_json or e.after_json %}
+      <tr class="audit-diff-row" id="diff-{{ e.id }}" style="display:none">
+        <td colspan="7" style="padding:0">
+          <div class="audit-diff-container">
+            <div class="audit-diff-panel">
+              <div class="audit-diff-label">BEFORE</div>
+              <pre class="audit-diff-json">{{ e.before_json | pretty_json if e.before_json else '(none)' }}</pre>
+            </div>
+            <div class="audit-diff-panel">
+              <div class="audit-diff-label">AFTER</div>
+              <pre class="audit-diff-json">{{ e.after_json | pretty_json if e.after_json else '(none)' }}</pre>
+            </div>
+          </div>
+        </td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{# ── Pagination ───────────────────────────────────────────────────────────── #}
+{% if total_pages > 1 %}
+<div class="pagination" style="margin-top:1rem;display:flex;gap:.5rem;align-items:center;justify-content:center">
+  {% if page > 1 %}
+  <a href="{{ url_for('audit_log_view', page=page-1, **filters) }}" class="btn btn-secondary btn-sm">← Prev</a>
+  {% endif %}
+  <span class="text-dim">Page {{ page }} of {{ total_pages }}</span>
+  {% if page < total_pages %}
+  <a href="{{ url_for('audit_log_view', page=page+1, **filters) }}" class="btn btn-secondary btn-sm">Next →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+  <p>No audit log entries match your filters.</p>
+</div>
+{% endif %}
+
+<style>
+.action-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: .75rem;
+  font-family: var(--font-mono, monospace);
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+.action-login  { background: rgba(74,222,128,.15); color: #4ade80; }
+.action-logout { background: rgba(148,163,184,.12); }
+.action-show   { background: rgba(251,113,133,.15); color: #fb7185; }
+.action-form   { background: rgba(96,165,250,.15);  color: #60a5fa; }
+.action-comment{ background: rgba(251,191,36,.15);  color: #fbbf24; }
+.action-history{ background: rgba(167,139,250,.15); color: #a78bfa; }
+
+.audit-diff-container {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+.audit-diff-panel {
+  padding: .75rem 1rem;
+  border-right: 1px solid var(--border);
+}
+.audit-diff-panel:last-child { border-right: none; }
+.audit-diff-label {
+  font-size: .7rem;
+  letter-spacing: .08em;
+  color: var(--text-dim);
+  margin-bottom: .4rem;
+}
+.audit-diff-json {
+  margin: 0;
+  font-size: .78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-secondary);
+  font-family: var(--font-mono, monospace);
+  max-height: 200px;
+  overflow-y: auto;
+}
+</style>
+
+<script>
+function toggleDiff(id) {
+  const row = document.getElementById('diff-' + id);
+  if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+</script>
+{% endblock %}

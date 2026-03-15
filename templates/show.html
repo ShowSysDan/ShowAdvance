@@ -796,9 +796,15 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         <span class="version-badge">Current: v{{ show.advance_version }}</span>
         {% endif %}
       </div>
-      <a href="{{ url_for('export_advance', show_id=show.id) }}" class="btn btn-primary" target="_blank">
-        Export → v{{ (show.advance_version or 0) + 1 }}
-      </a>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a href="{{ url_for('export_advance', show_id=show.id) }}" class="btn btn-primary" target="_blank">
+          Export → v{{ (show.advance_version or 0) + 1 }}
+        </a>
+        <button class="btn btn-ghost btn-sm" title="Generate PDF and email to report recipients"
+                onclick="emailPdf({{ show.id }}, 'advance', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16" style="margin-right:4px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email
+        </button>
+      </div>
     </div>
 
     <!-- Schedule PDF -->
@@ -813,9 +819,15 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         <span class="version-badge">Current: v{{ show.schedule_version }}</span>
         {% endif %}
       </div>
-      <a href="{{ url_for('export_schedule', show_id=show.id) }}" class="btn btn-primary" target="_blank">
-        Export → v{{ (show.schedule_version or 0) + 1 }}
-      </a>
+      <div style="display:flex;gap:8px;align-items:center">
+        <a href="{{ url_for('export_schedule', show_id=show.id) }}" class="btn btn-primary" target="_blank">
+          Export → v{{ (show.schedule_version or 0) + 1 }}
+        </a>
+        <button class="btn btn-ghost btn-sm" title="Generate PDF and email to report recipients"
+                onclick="emailPdf({{ show.id }}, 'schedule', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16" style="margin-right:4px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email
+        </button>
+      </div>
     </div>
   </div>
 
@@ -923,10 +935,40 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   </div>
 </div>
 
+{# Conflict resolution modal — shown when restoring would overwrite newer changes #}
+<div id="conflict-modal" class="modal-overlay" style="display:none">
+  <div class="modal-card" style="max-width:820px;max-height:90vh;overflow-y:auto">
+    <div class="modal-header">
+      <h3 class="modal-title">Restore Conflict Detected</h3>
+      <button type="button" class="modal-close" onclick="closeConflict()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="flash flash-warning" style="margin-bottom:1rem">
+        <strong>Heads up:</strong> Someone made changes after this snapshot was saved
+        (<span id="conflict-newer-user"></span>, <span id="conflict-newer-time"></span>).
+        Review the differences below before deciding which version to keep.
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem">
+        <div>
+          <div class="field-label" style="margin-bottom:.5rem">RESTORING (older)</div>
+          <pre id="conflict-old-json" style="font-size:.75rem;white-space:pre-wrap;word-break:break-word;background:var(--bg-tertiary);padding:.75rem;border-radius:6px;max-height:340px;overflow-y:auto;margin:0"></pre>
+        </div>
+        <div>
+          <div class="field-label" style="margin-bottom:.5rem">CURRENT (newer — will be lost)</div>
+          <pre id="conflict-new-json" style="font-size:.75rem;white-space:pre-wrap;word-break:break-word;background:var(--bg-tertiary);padding:.75rem;border-radius:6px;max-height:340px;overflow-y:auto;margin:0"></pre>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="closeConflict()">Cancel — keep current</button>
+      <button type="button" class="btn btn-danger" onclick="forceRestore()">Confirm Restore (overwrite newer)</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
-{# Autosave toast — fixed bottom-right, shown briefly after each save #}
-<div id="save-toast" class="save-toast"></div>
+{# save-toast is now in base.html #}
 
 {% block scripts %}
 <style>
@@ -947,6 +989,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 </style>
 <script>
   const RESTRICTED = {{ 'true' if restricted else 'false' }};
+  const IS_ADMIN = {{ 'true' if user.role == 'admin' else 'false' }};
   const INITIAL_TAB = '{{ tab }}';
   const ALL_USERS = {{ all_users | tojson }};
   let _currentHistId = null;
@@ -1135,11 +1178,23 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     _currentHistId = null;
   }
 
-  async function confirmRestore() {
+  async function confirmRestore(force = false) {
     if (!_currentHistId) return;
-    if (!confirm('Restore this version? The current form data will be overwritten.')) return;
+    const url = `/shows/${SHOW_ID}/history/${_currentHistId}/restore` + (force ? '?force=1' : '');
     try {
-      const resp = await fetch(`/shows/${SHOW_ID}/history/${_currentHistId}/restore`, {method:'POST'});
+      const resp = await fetch(url, {method:'POST'});
+      if (resp.status === 409) {
+        const d = await resp.json();
+        if (d.conflict) {
+          // Show conflict modal instead of proceeding
+          document.getElementById('conflict-newer-user').textContent = d.newer_saved_by || 'Unknown';
+          document.getElementById('conflict-newer-time').textContent = d.newer_saved_at ? new Date(d.newer_saved_at + (d.newer_saved_at.includes('T') ? '' : 'Z')).toLocaleString() : '';
+          document.getElementById('conflict-old-json').textContent = JSON.stringify(d.restoring_snapshot, null, 2);
+          document.getElementById('conflict-new-json').textContent = JSON.stringify(d.current_snapshot, null, 2);
+          document.getElementById('conflict-modal').style.display = '';
+          return;
+        }
+      }
       const d = await resp.json();
       if (d.success) {
         closeSnapshot();
@@ -1151,6 +1206,15 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     } catch(err) {
       alert('Network error during restore.');
     }
+  }
+
+  function closeConflict() {
+    document.getElementById('conflict-modal').style.display = 'none';
+  }
+
+  async function forceRestore() {
+    closeConflict();
+    await confirmRestore(true);
   }
 
   function restoreSnapshot(histId) {
@@ -1377,6 +1441,28 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     if (data.success) tr.remove();
     else alert('Error removing row: ' + (data.error || 'Unknown'));
   }
+
+async function emailPdf(showId, pdfType, btn) {
+  const label = pdfType === 'advance' ? 'Advance Sheet' : 'Production Schedule';
+  if (!confirm(`Generate and email the ${label} PDF to all report recipients?`)) return;
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.textContent = 'Sending…';
+  try {
+    const resp = await fetch(`/shows/${showId}/email/${pdfType}`, {method: 'POST'});
+    const d = await resp.json();
+    if (d.success) {
+      btn.textContent = `✓ Sent (${d.recipients})`;
+      setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 4000);
+    } else {
+      alert('Email failed: ' + (d.message || 'Unknown error'));
+      btn.innerHTML = orig; btn.disabled = false;
+    }
+  } catch (e) {
+    alert('Network error: ' + e);
+    btn.innerHTML = orig; btn.disabled = false;
+  }
+}
 
 </script>
 {% endblock %}
