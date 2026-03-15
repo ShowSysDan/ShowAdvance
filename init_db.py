@@ -292,6 +292,11 @@ CREATE TABLE IF NOT EXISTS comment_versions (
     edited_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
     edited_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_show_id ON audit_log(show_id);
+CREATE INDEX IF NOT EXISTS idx_audit_log_action  ON audit_log(action);
+CREATE INDEX IF NOT EXISTS idx_audit_log_ts      ON audit_log(timestamp);
 """
 
 SEED_CONTACTS = [
@@ -913,6 +918,11 @@ def migrate_db():
             edited_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
             edited_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE INDEX IF NOT EXISTS idx_audit_log_user_id  ON audit_log(user_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_show_id  ON audit_log(show_id);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_action   ON audit_log(action);
+        CREATE INDEX IF NOT EXISTS idx_audit_log_ts       ON audit_log(timestamp);
     """)
 
     # Seed job positions if empty

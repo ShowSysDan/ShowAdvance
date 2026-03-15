@@ -671,6 +671,8 @@ def new_show():
                 VALUES (?, ?, ?, 0)
             """, (show_id, show_date, show_time))
 
+        log_audit(db, 'SHOW_CREATE', 'show', show_id, show_id=show_id,
+                  after={'name': name, 'show_date': show_date, 'venue': venue})
         db.commit()
         db.close()
         syslog_logger.info(f"SHOW_CREATE show_id={show_id} name={name} by={session.get('username')}")
@@ -1939,6 +1941,7 @@ def archive_show(show_id):
         abort(403)
     db = get_db()
     db.execute("UPDATE shows SET status='archived' WHERE id=?", (show_id,))
+    log_audit(db, 'SHOW_ARCHIVE', 'show', show_id, show_id=show_id)
     db.commit(); db.close()
     syslog_logger.info(f"SHOW_ARCHIVE show_id={show_id} by={session.get('username')}")
     flash('Show archived.', 'success')
@@ -1952,6 +1955,7 @@ def restore_show(show_id):
         abort(403)
     db = get_db()
     db.execute("UPDATE shows SET status='active' WHERE id=?", (show_id,))
+    log_audit(db, 'SHOW_RESTORE', 'show', show_id, show_id=show_id)
     db.commit(); db.close()
     syslog_logger.info(f"SHOW_RESTORE show_id={show_id} by={session.get('username')}")
     flash('Show restored to active.', 'success')
