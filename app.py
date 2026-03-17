@@ -370,6 +370,176 @@ def _get_smtp_settings():
     return {k: get_app_setting(k, '') for k in keys}
 
 
+def _build_mime_message(subject, from_addr, recipients, body_text=None,
+                        body_html=None, attachments=None):
+    """
+    Build a MIME email message.
+
+    Args:
+        subject (str): Email subject
+        from_addr (str): Sender address
+        recipients (list[str]): Recipient addresses
+        body_text (str|None): Plain text body
+        body_html (str|None): HTML body
+        attachments (list[dict]|None): Each dict: {'filename', 'data' (bytes), 'mimetype'}
+
+    Returns:
+        email.mime.multipart.MIMEMultipart
+    """
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders as email_encoders
+
+    msg = MIMEMultipart()
+    msg['From'] = from_addr
+    msg['To'] = ', '.join(recipients)
+    msg['Subject'] = subject
+
+    if body_text and body_html:
+        alt = MIMEMultipart('alternative')
+        alt.attach(MIMEText(body_text, 'plain'))
+        alt.attach(MIMEText(body_html, 'html'))
+        msg.attach(alt)
+    elif body_html:
+        msg.attach(MIMEText(body_html, 'html'))
+    elif body_text:
+        msg.attach(MIMEText(body_text, 'plain'))
+
+    for att in (attachments or []):
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(att['data'])
+        email_encoders.encode_base64(part)
+        mime = att.get('mimetype', 'application/octet-stream')
+        part.add_header('Content-Type', mime)
+        part.add_header('Content-Disposition',
+                        f'attachment; filename="{att["filename"]}"')
+        msg.attach(part)
+
+    return msg
+
+
+def _send_email_smtp(subject, recipients, body_text=None, body_html=None,
+                     attachments=None, from_address=None):
+    """Send email via configured SMTP relay. Returns (success, message)."""
+    import smtplib
+
+    smtp_cfg = _get_smtp_settings()
+    if not smtp_cfg.get('smtp_host'):
+        return False, 'SMTP not configured.'
+
+    from_addr = from_address or smtp_cfg.get('smtp_from') or smtp_cfg.get('smtp_user', '')
+    msg = _build_mime_message(subject, from_addr, recipients, body_text,
+                              body_html, attachments)
+
+    try:
+        port = int(smtp_cfg.get('smtp_port') or 587)
+        use_tls = smtp_cfg.get('smtp_tls', '1') not in ('0', 'false', 'False', '')
+        if use_tls:
+            server = smtplib.SMTP(smtp_cfg['smtp_host'], port, timeout=15)
+            server.ehlo()
+            server.starttls()
+            server.ehlo()
+        else:
+            server = smtplib.SMTP_SSL(smtp_cfg['smtp_host'], port, timeout=15)
+        if smtp_cfg.get('smtp_user') and smtp_cfg.get('smtp_pass'):
+            server.login(smtp_cfg['smtp_user'], smtp_cfg['smtp_pass'])
+        server.sendmail(from_addr, recipients, msg.as_string())
+        server.quit()
+    except Exception as e:
+        app.logger.error(f'SMTP send failed: {e}')
+        return False, f'SMTP error: {e}'
+
+    return True, f'Sent to {len(recipients)} recipient(s).'
+
+
+def _send_email_direct(subject, recipients, body_text=None, body_html=None,
+                       attachments=None, from_address=None):
+    """Send email directly via MX lookup (no relay). Returns (success, message)."""
+    import smtplib
+    import dns.resolver
+
+    smtp_cfg = _get_smtp_settings()
+    from_addr = from_address or smtp_cfg.get('smtp_from') or 'noreply@localhost'
+    msg = _build_mime_message(subject, from_addr, recipients, body_text,
+                              body_html, attachments)
+    msg_str = msg.as_string()
+
+    # Group recipients by domain
+    from collections import defaultdict
+    by_domain = defaultdict(list)
+    for addr in recipients:
+        if '@' in addr:
+            by_domain[addr.split('@')[1].lower()].append(addr)
+
+    errors = []
+    sent_count = 0
+
+    for domain, addrs in by_domain.items():
+        # Resolve MX records
+        try:
+            mx_records = dns.resolver.resolve(domain, 'MX')
+            mx_hosts = sorted(mx_records, key=lambda r: r.preference)
+        except Exception as e:
+            errors.append(f'MX lookup failed for {domain}: {e}')
+            continue
+
+        # Try each MX host in priority order
+        delivered = False
+        for mx in mx_hosts:
+            mx_host = str(mx.exchange).rstrip('.')
+            try:
+                server = smtplib.SMTP(mx_host, 25, timeout=15)
+                server.ehlo()
+                try:
+                    server.starttls()
+                    server.ehlo()
+                except smtplib.SMTPNotSupportedError:
+                    pass  # Server doesn't support STARTTLS, continue unencrypted
+                server.sendmail(from_addr, addrs, msg_str)
+                server.quit()
+                sent_count += len(addrs)
+                delivered = True
+                break
+            except Exception as e:
+                app.logger.warning(f'Direct send to MX {mx_host} for {domain} failed: {e}')
+                continue
+
+        if not delivered:
+            errors.append(f'All MX hosts failed for {domain}')
+
+    if errors and sent_count == 0:
+        return False, '; '.join(errors)
+    elif errors:
+        return True, f'Sent to {sent_count} recipient(s). Failures: {"; ".join(errors)}'
+    return True, f'Sent to {sent_count} recipient(s).'
+
+
+def _send_email(subject, recipients, body_text=None, body_html=None,
+                attachments=None, from_address=None):
+    """
+    General-purpose email sender. Dispatches to SMTP relay or direct MX
+    based on the email_provider setting.
+
+    Args:
+        subject (str): Email subject
+        recipients (list[str]): Recipient email addresses
+        body_text (str|None): Plain text body
+        body_html (str|None): HTML body
+        attachments (list[dict]|None): Each dict: {'filename', 'data' (bytes), 'mimetype'}
+        from_address (str|None): Override the configured from address
+
+    Returns:
+        (bool, str): (success, message)
+    """
+    provider = get_app_setting('email_provider', 'smtp')
+    if provider == 'direct':
+        return _send_email_direct(subject, recipients, body_text, body_html,
+                                  attachments, from_address)
+    return _send_email_smtp(subject, recipients, body_text, body_html,
+                            attachments, from_address)
+
+
 def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_before=None):
     """
     Build a PDF (advance or schedule) and email it to all report recipients.
@@ -380,9 +550,11 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
 
     Returns (success: bool, message: str, recipient_count: int)
     """
-    smtp_cfg = _get_smtp_settings()
-    if not smtp_cfg.get('smtp_host'):
-        return False, 'SMTP not configured.', 0
+    provider = get_app_setting('email_provider', 'smtp')
+    if provider == 'smtp':
+        smtp_cfg = _get_smtp_settings()
+        if not smtp_cfg.get('smtp_host'):
+            return False, 'SMTP not configured.', 0
 
     # Fetch recipients
     db = get_db()
@@ -454,43 +626,15 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
     safe_show = show_name.replace(' ', '_').replace('/', '-')
     filename   = f"{type_label.replace(' ','_')}_{safe_show}_{show_date}.pdf"
 
-    # Build MIME message
-    import smtplib
-    from email.mime.multipart import MIMEMultipart
-    from email.mime.text import MIMEText
-    from email.mime.base import MIMEBase
-    from email import encoders as email_encoders
-
-    msg = MIMEMultipart()
-    msg['From']    = smtp_cfg.get('smtp_from') or smtp_cfg.get('smtp_user', '')
-    msg['To']      = ', '.join(recipients)
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body_line, 'plain'))
-
-    part = MIMEBase('application', 'octet-stream')
-    part.set_payload(pdf_bytes)
-    email_encoders.encode_base64(part)
-    part.add_header('Content-Disposition', f'attachment; filename="{filename}"')
-    msg.attach(part)
-
-    # Send via SMTP
-    try:
-        port = int(smtp_cfg.get('smtp_port') or 587)
-        use_tls = smtp_cfg.get('smtp_tls', '1') not in ('0', 'false', 'False', '')
-        if use_tls:
-            server = smtplib.SMTP(smtp_cfg['smtp_host'], port, timeout=15)
-            server.ehlo()
-            server.starttls()
-            server.ehlo()
-        else:
-            server = smtplib.SMTP_SSL(smtp_cfg['smtp_host'], port, timeout=15)
-        if smtp_cfg.get('smtp_user') and smtp_cfg.get('smtp_pass'):
-            server.login(smtp_cfg['smtp_user'], smtp_cfg['smtp_pass'])
-        server.sendmail(msg['From'], recipients, msg.as_string())
-        server.quit()
-    except Exception as e:
-        app.logger.error(f'SMTP send failed show={show_id} type={pdf_type}: {e}')
-        return False, f'SMTP error: {e}', 0
+    # Send email via configured provider (SMTP relay or direct MX)
+    attachments = [{'filename': filename, 'data': pdf_bytes, 'mimetype': 'application/pdf'}]
+    success, send_message = _send_email(
+        subject=subject, recipients=recipients,
+        body_text=body_line, attachments=attachments
+    )
+    if not success:
+        app.logger.error(f'Email send failed show={show_id} type={pdf_type}: {send_message}')
+        return False, send_message, 0
 
     # Log the send
     try:
@@ -2461,6 +2605,9 @@ def settings():
         'smtp_from':  all_settings.get('smtp_from', ''),
         'smtp_tls':   all_settings.get('smtp_tls', '1'),
     }
+    email_provider_settings = {
+        'email_provider': all_settings.get('email_provider', 'smtp'),
+    }
     pdf_email_settings = {
         'pdf_email_send_hour':       all_settings.get('pdf_email_send_hour', '6'),
         'advance_email_enabled':     all_settings.get('advance_email_enabled', '0'),
@@ -2491,6 +2638,7 @@ def settings():
                            upload_max_mb=all_settings.get('upload_max_mb', '20'),
                            logo_data=all_settings.get('logo_data', ''),
                            smtp_settings=smtp_settings,
+                           email_provider_settings=email_provider_settings,
                            pdf_email_settings=pdf_email_settings,
                            user=get_current_user())
 
@@ -3699,6 +3847,43 @@ def test_smtp_connection():
         return jsonify({'success': True, 'message': 'Connected successfully (no test email sent).'})
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)})
+
+
+@app.route('/settings/email-provider', methods=['POST'])
+@admin_required
+def save_email_provider_settings():
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    provider = data.get('email_provider', 'smtp')
+    if provider not in ('smtp', 'direct'):
+        provider = 'smtp'
+    db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+               ('email_provider', provider))
+    # Also save smtp_from when in direct mode (used as sender address)
+    if 'smtp_from' in data:
+        db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+                   ('smtp_from', str(data['smtp_from'])))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None,
+              after={'email_provider': provider}, detail='email_provider')
+    db.commit(); db.close()
+    syslog_logger.info(f"SETTINGS_CHANGE key=email_provider value={provider} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/settings/email/test', methods=['POST'])
+@admin_required
+def test_email_provider():
+    """Send a test email through the currently configured email provider."""
+    data = request.get_json(force=True) or {}
+    to_addr = data.get('test_to', '').strip()
+    if not to_addr:
+        return jsonify({'success': False, 'message': 'Test recipient address is required.'})
+    success, message = _send_email(
+        subject='ShowAdvance Email Test',
+        recipients=[to_addr],
+        body_text='This is a test email from ShowAdvance to verify your email configuration.'
+    )
+    return jsonify({'success': success, 'message': message})
 
 
 @app.route('/settings/pdf-emails', methods=['POST'])

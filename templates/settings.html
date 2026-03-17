@@ -907,8 +907,54 @@
 {% if user.role == 'admin' %}
 <div id="stab-email" class="stab-pane" style="display:none">
 
-  {# SMTP Configuration #}
+  {# Email Mode Selection #}
   <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> EMAIL MODE</div>
+    <div class="form-section-body">
+      <div class="form-row cols-3">
+        <div class="field-group">
+          <label class="field-label">SENDING METHOD</label>
+          <select id="email_provider" class="field-input" onchange="toggleEmailMode()">
+            <option value="smtp" {% if email_provider_settings.email_provider != 'direct' %}selected{% endif %}>SMTP Relay</option>
+            <option value="direct" {% if email_provider_settings.email_provider == 'direct' %}selected{% endif %}>Direct Send (MX Lookup)</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary" onclick="saveEmailMode()">Save Email Mode</button>
+        <p id="email-mode-msg" class="text-dim text-sm mt-sm" style="display:none"></p>
+      </div>
+    </div>
+  </div>
+
+  {# Direct Send Configuration (shown when direct mode selected) #}
+  <div id="direct-send-config" class="form-section mt-lg" style="display:none">
+    <div class="form-section-header"><span class="section-icon">◈</span> DIRECT SEND</div>
+    <div class="form-section-body">
+      <p class="text-dim text-sm" style="margin-bottom:12px">
+        Sends email directly to the recipient's mail server via MX record lookup. No external SMTP relay needed.
+      </p>
+      <div class="form-row cols-3">
+        <div class="field-group">
+          <label class="field-label">FROM ADDRESS</label>
+          <input type="email" id="direct_from" class="field-input" placeholder="advanceit@yourdomain.com"
+                 value="{{ smtp_settings.smtp_from }}">
+        </div>
+        <div class="field-group">
+          <label class="field-label">TEST SEND TO</label>
+          <input type="email" id="direct_test_to" class="field-input" placeholder="you@example.com">
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-primary" onclick="saveEmailMode()">Save</button>
+        <button class="btn btn-ghost" onclick="testEmailDirect()">Send Test Email</button>
+      </div>
+      <p id="direct-msg" class="text-dim text-sm mt-sm" style="display:none"></p>
+    </div>
+  </div>
+
+  {# SMTP Configuration (shown when smtp mode selected) #}
+  <div id="smtp-config" class="form-section mt-lg">
     <div class="form-section-header"><span class="section-icon">◈</span> OUTGOING SMTP</div>
     <div class="form-section-body">
       <div class="form-row cols-3">
@@ -2033,6 +2079,51 @@ async function toggleRecipient(cid, checked) {
   if ((await resp.json()).success) showSaveToast(checked ? '✓ Recipient added' : '✓ Recipient removed');
 }
 
+function toggleEmailMode() {
+  const mode = document.getElementById('email_provider').value;
+  const smtpSection = document.getElementById('smtp-config');
+  const directSection = document.getElementById('direct-send-config');
+  if (mode === 'direct') {
+    smtpSection.style.display = 'none';
+    directSection.style.display = '';
+  } else {
+    smtpSection.style.display = '';
+    directSection.style.display = 'none';
+  }
+}
+
+async function saveEmailMode() {
+  const provider = document.getElementById('email_provider').value;
+  const data = { email_provider: provider };
+  // If direct mode, also save the from address
+  const directFrom = document.getElementById('direct_from');
+  if (provider === 'direct' && directFrom) {
+    data.smtp_from = directFrom.value.trim();
+  }
+  const resp = await fetch('/settings/email-provider', {
+    method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
+  });
+  const d = await resp.json();
+  const msg = document.getElementById('email-mode-msg');
+  msg.style.display = 'block';
+  msg.textContent = d.success ? '✓ Email mode saved.' : '✗ ' + (d.error || 'Error');
+  if (d.success) { showSaveToast('✓ Email mode saved'); setTimeout(() => { msg.style.display='none'; }, 3000); }
+}
+
+async function testEmailDirect() {
+  const toAddr = document.getElementById('direct_test_to').value.trim();
+  if (!toAddr) { alert('Enter a test recipient address.'); return; }
+  const msg = document.getElementById('direct-msg');
+  msg.style.display = 'block';
+  msg.textContent = 'Sending…';
+  const resp = await fetch('/settings/email/test', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ test_to: toAddr })
+  });
+  const d = await resp.json();
+  msg.textContent = d.success ? '✓ ' + d.message : '✗ ' + d.message;
+}
+
 async function saveSmtpSettings() {
   const data = {
     smtp_host: document.getElementById('smtp_host').value.trim(),
@@ -2091,5 +2182,8 @@ async function savePdfEmailSettings() {
   msg.textContent = d.success ? '✓ Email schedule saved.' : '✗ ' + (d.error || 'Error');
   if (d.success) { showSaveToast('✓ Email schedule saved'); setTimeout(() => { msg.style.display='none'; }, 3000); }
 }
+
+// Initialize email mode toggle on page load
+if (document.getElementById('email_provider')) toggleEmailMode();
 </script>
 {% endblock %}
