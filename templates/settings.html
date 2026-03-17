@@ -96,10 +96,9 @@
             <td class="text-sm" data-field="email">{{ c.email or '—' }}</td>
             {% if user.role == 'admin' %}
             <td style="text-align:center">
-              <input type="checkbox" class="recipient-chk" data-cid="{{ c.id }}"
-                     {% if c.report_recipient %}checked{% endif %}
-                     title="Include in PDF email sends"
-                     onchange="toggleRecipient({{ c.id }}, this.checked)">
+              <span class="recipient-indicator" data-cid="{{ c.id }}"
+                    title="{% if c.report_recipient %}Included in PDF email sends{% else %}Not a PDF recipient{% endif %}"
+                    style="font-size:14px;opacity:{{ '1' if c.report_recipient else '0.25' }}">●</span>
             </td>
             {% endif %}
             {% if user.role == 'admin' or is_content_admin %}
@@ -1466,9 +1465,13 @@ async function saveContact() {
     // Sync the table row's recipient state and inline checkbox without a full reload
     const row = document.querySelector(`#contacts-table tr[data-id="${id}"]`);
     if (row && recipientChk !== null) {
-      row.dataset.recipient = recipientChk && recipientChk.checked ? '1' : '0';
-      const inlineChk = row.querySelector('.recipient-chk');
-      if (inlineChk) inlineChk.checked = recipientChk && recipientChk.checked;
+      const isRecip = recipientChk && recipientChk.checked;
+      row.dataset.recipient = isRecip ? '1' : '0';
+      const indicator = row.querySelector('.recipient-indicator');
+      if (indicator) {
+        indicator.style.opacity = isRecip ? '1' : '0.25';
+        indicator.title = isRecip ? 'Included in PDF email sends' : 'Not a PDF recipient';
+      }
     }
     closeEditModal();
     location.reload();
@@ -2084,15 +2087,6 @@ async function deleteCrewMember(mid) {
 }
 
 /* ── Email Tab ──────────────────────────────────────────────────── */
-async function toggleRecipient(cid, checked) {
-  const resp = await fetch(`/settings/contacts/${cid}/recipient`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({recipient: checked})
-  });
-  if ((await resp.json()).success) showSaveToast(checked ? '✓ Recipient added' : '✓ Recipient removed');
-}
-
 function toggleEmailMode() {
   const mode = document.getElementById('email_provider').value;
   const smtpSection = document.getElementById('smtp-config');
