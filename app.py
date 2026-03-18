@@ -11,7 +11,7 @@ import logging.handlers
 import atexit
 import subprocess
 import threading
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from functools import wraps
 from io import BytesIO
 
@@ -23,8 +23,107 @@ from flask import (Flask, render_template, request, redirect, url_for,
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
+
+def _safe_content_disposition(filename):
+    """Build a safe Content-Disposition header value, stripping injection chars."""
+    safe = secure_filename(filename) or 'download'
+    return f'attachment; filename="{safe}"'
+
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'dpc-advance-secret-change-in-production')
+
+# ── SECRET_KEY — generate and persist if not provided via environment ─────────
+_secret = os.environ.get('SECRET_KEY', '')
+if not _secret:
+    _env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+    # Try to read from .env file
+    if os.path.exists(_env_path):
+        with open(_env_path) as _ef:
+            for _line in _ef:
+                if _line.strip().startswith('SECRET_KEY='):
+                    _secret = _line.strip().split('=', 1)[1]
+                    break
+    # Auto-generate if still missing (first run / dev mode)
+    if not _secret:
+        import secrets as _secrets_mod
+        _secret = _secrets_mod.token_hex(32)
+        app.logger.warning(
+            'SECRET_KEY not set — generated an ephemeral key. '
+            'Run install.sh or set SECRET_KEY in .env for persistent sessions.'
+        )
+app.secret_key = _secret
+
+# ── Session cookie security ───────────────────────────────────────────────────
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+# SESSION_COOKIE_SECURE intentionally omitted (app typically runs on LAN over HTTP)
+app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+
+
+@app.after_request
+def _set_security_headers(response):
+    """Add defense-in-depth security headers to every response."""
+    response.headers.setdefault('X-Content-Type-Options', 'nosniff')
+    response.headers.setdefault('X-Frame-Options', 'SAMEORIGIN')
+    response.headers.setdefault('Referrer-Policy', 'strict-origin-when-cross-origin')
+    return response
+
+
+# ── CSRF Protection ───────────────────────────────────────────────────────────
+# For AJAX: require X-Requested-With header (cannot be set cross-origin without CORS)
+# For form POSTs: validate Origin/Referer header matches our host
+_CSRF_SAFE_METHODS = frozenset(('GET', 'HEAD', 'OPTIONS'))
+_CSRF_EXEMPT_ENDPOINTS = frozenset(('login', 'static'))
+
+
+@app.before_request
+def _csrf_protect():
+    """Block cross-site state-changing requests."""
+    if request.method in _CSRF_SAFE_METHODS:
+        return
+    if request.endpoint in _CSRF_EXEMPT_ENDPOINTS:
+        return
+    if not session.get('user_id'):
+        return  # Not logged in — auth decorators will handle it
+
+    # AJAX requests: require X-Requested-With header
+    # (Browsers block cross-origin custom headers without CORS preflight)
+    if request.is_json or request.content_type == 'application/json':
+        if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+            return  # Valid AJAX request
+        # Also accept if Origin matches (for fetch() without custom header)
+        if _origin_matches():
+            return
+        abort(403)
+
+    # Form POSTs: validate Origin or Referer
+    if _origin_matches():
+        return
+
+    app.logger.warning(
+        f'CSRF blocked: endpoint={request.endpoint} '
+        f'origin={request.headers.get("Origin")} '
+        f'referer={request.headers.get("Referer")} '
+        f'user={session.get("username")}'
+    )
+    abort(403)
+
+
+def _origin_matches():
+    """Check that Origin or Referer header matches our server."""
+    from urllib.parse import urlparse
+    # Check Origin header first (most reliable)
+    origin = request.headers.get('Origin')
+    if origin:
+        parsed = urlparse(origin)
+        return parsed.hostname == request.host.split(':')[0]
+    # Fall back to Referer
+    referer = request.headers.get('Referer')
+    if referer:
+        parsed = urlparse(referer)
+        return parsed.hostname == request.host.split(':')[0]
+    # No Origin or Referer — could be a direct form submission from same host
+    # (some privacy extensions strip Referer). Allow only if SameSite=Lax is set.
+    return True
 
 
 @app.template_filter('pretty_json')
@@ -53,6 +152,12 @@ try:
 except ImportError:
     limiter = None
     _limiter_available = False
+    import warnings
+    warnings.warn(
+        'flask-limiter is not installed — login rate limiting is DISABLED. '
+        'Install it: pip install flask-limiter',
+        stacklevel=1,
+    )
 
 
 def _get_upload_max():
@@ -196,6 +301,32 @@ def staff_or_admin_required(f):
             abort(403)
         return f(*args, **kwargs)
     return decorated
+
+
+@app.before_request
+def _refresh_session_roles():
+    """Re-check user role/permissions from DB every 5 minutes to catch demotions."""
+    if 'user_id' not in session:
+        return
+    last_check = session.get('_role_checked_at', 0)
+    now = datetime.utcnow().timestamp()
+    if now - last_check < 300:  # 5 minutes
+        return
+    try:
+        db = get_db()
+        user = db.execute('SELECT id, role, display_name FROM users WHERE id=?',
+                          (session['user_id'],)).fetchone()
+        db.close()
+        if not user:
+            session.clear()
+            return redirect(url_for('login'))
+        session['user_role'] = user['role']
+        session['display_name'] = user['display_name'] or session.get('username', '')
+        session['is_restricted'] = is_restricted_user(user['id'])
+        session['is_content_admin'] = is_content_admin(user['id'])
+        session['_role_checked_at'] = now
+    except Exception:
+        pass
 
 
 def get_current_user():
@@ -391,10 +522,14 @@ def _build_mime_message(subject, from_addr, recipients, body_text=None,
     from email.mime.base import MIMEBase
     from email import encoders as email_encoders
 
+    # Sanitize email headers to prevent header injection
+    def _clean_header(v):
+        return v.replace('\r', '').replace('\n', '') if v else v
+
     msg = MIMEMultipart()
-    msg['From'] = from_addr
-    msg['To'] = ', '.join(recipients)
-    msg['Subject'] = subject
+    msg['From'] = _clean_header(from_addr)
+    msg['To'] = _clean_header(', '.join(recipients))
+    msg['Subject'] = _clean_header(subject)
 
     if body_text and body_html:
         alt = MIMEMultipart('alternative')
@@ -890,6 +1025,9 @@ def _login_route():
                 db.commit()
             except Exception:
                 pass
+            # Regenerate session to prevent session fixation
+            next_url = request.form.get('next') or url_for('dashboard')
+            session.clear()
             session['user_id']        = user['id']
             session['username']       = user['username']
             session['display_name']   = user['display_name'] or user['username']
@@ -897,12 +1035,27 @@ def _login_route():
             session['theme']          = user['theme'] or 'dark'
             session['is_restricted']  = is_restricted_user(user['id'])
             session['is_content_admin'] = is_content_admin(user['id'])
+            session['_role_checked_at'] = datetime.utcnow().timestamp()
             log_audit(db, 'LOGIN', 'user', user['id'], detail=username)
             db.commit()
             db.close()
+            session.permanent = True
             syslog_logger.info(f"LOGIN user={username} ip={request.remote_addr}")
-            next_url = request.form.get('next') or url_for('dashboard')
+            # Prevent open redirect — only allow relative paths
+            if not next_url or not next_url.startswith('/') or next_url.startswith('//'):
+                next_url = url_for('dashboard')
+            # Force password change if still using default
+            if user.get('must_change_password'):
+                session['must_change_password'] = True
+                return redirect(url_for('force_change_password'))
             return redirect(next_url)
+        else:
+            # Constant-time failure: always hash something to prevent user enumeration
+            if not user:
+                check_password_hash(
+                    'scrypt:32768:8:1$dummy$0000000000000000000000000000000000000000000000000000000000000000',
+                    password,
+                )
         db.close()
         flash('Invalid username or password.', 'error')
 
@@ -930,6 +1083,43 @@ def logout():
         db.close()
     session.clear()
     return redirect(url_for('login'))
+
+
+@app.route('/change-password', methods=['GET', 'POST'])
+@login_required
+def force_change_password():
+    """Force password change screen (shown after login when must_change_password is set)."""
+    if not session.get('must_change_password'):
+        return redirect(url_for('dashboard'))
+    if request.method == 'POST':
+        new_pw = request.form.get('new_password', '')
+        confirm = request.form.get('confirm_password', '')
+        if new_pw != confirm:
+            flash('Passwords do not match.', 'error')
+            return render_template('force_change_password.html', user=get_current_user())
+        pw_err = _validate_password(new_pw)
+        if pw_err:
+            flash(pw_err, 'error')
+            return render_template('force_change_password.html', user=get_current_user())
+        db = get_db()
+        db.execute('UPDATE users SET password_hash=?, must_change_password=0 WHERE id=?',
+                   (generate_password_hash(new_pw), session['user_id']))
+        db.commit()
+        db.close()
+        session.pop('must_change_password', None)
+        syslog_logger.info(f"FORCED_PASSWORD_CHANGE user_id={session['user_id']}")
+        flash('Password changed successfully.', 'success')
+        return redirect(url_for('dashboard'))
+    return render_template('force_change_password.html', user=get_current_user())
+
+
+@app.before_request
+def _enforce_password_change():
+    """Block all routes except logout/change-password if must_change_password is set."""
+    if session.get('must_change_password'):
+        allowed = ('force_change_password', 'logout', 'static')
+        if request.endpoint not in allowed:
+            return redirect(url_for('force_change_password'))
 
 
 # ─── Dashboard ────────────────────────────────────────────────────────────────
@@ -1837,7 +2027,7 @@ def download_attachment(show_id, aid):
         abort(404)
     resp = make_response(bytes(row['file_data']))
     resp.headers['Content-Type'] = row['mime_type']
-    resp.headers['Content-Disposition'] = f'attachment; filename="{row["filename"]}"'
+    resp.headers['Content-Disposition'] = _safe_content_disposition(row['filename'])
     return resp
 
 
@@ -2235,7 +2425,7 @@ def export_advance(show_id):
     if pdf_bytes:
         resp = make_response(pdf_bytes)
         resp.headers['Content-Type'] = 'application/pdf'
-        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
     # Fallback to HTML if weasyprint failed
     try:
@@ -2243,7 +2433,7 @@ def export_advance(show_id):
         pdf = HTML(string=html, base_url=request.url_root).write_pdf()
         resp = make_response(pdf)
         resp.headers['Content-Type'] = 'application/pdf'
-        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
     except Exception:
         resp = make_response(html)
@@ -2263,14 +2453,14 @@ def export_schedule(show_id):
     if pdf_bytes:
         resp = make_response(pdf_bytes)
         resp.headers['Content-Type'] = 'application/pdf'
-        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
     try:
         from weasyprint import HTML
         pdf = HTML(string=html, base_url=request.url_root).write_pdf()
         resp = make_response(pdf)
         resp.headers['Content-Type'] = 'application/pdf'
-        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
     except Exception:
         resp = make_response(html)
@@ -2293,7 +2483,7 @@ def download_export_history(show_id, log_id):
     filename = f"{row['export_type'].capitalize()}_v{row['version']}.pdf"
     resp = make_response(bytes(row['pdf_data']))
     resp.headers['Content-Type'] = 'application/pdf'
-    resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+    resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
     return resp
 
 
@@ -2357,7 +2547,7 @@ def export_postnotes(show_id):
         pdf = HTML(string=html, base_url=request.url_root).write_pdf()
         resp = make_response(pdf)
         resp.headers['Content-Type'] = 'application/pdf'
-        resp.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+        resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
     except Exception:
         resp = make_response(html)
@@ -2370,6 +2560,8 @@ def export_postnotes(show_id):
 @app.route('/shows/<int:show_id>/archive', methods=['POST'])
 @staff_or_admin_required
 def archive_show(show_id):
+    if session.get('user_role') != 'admin' and not can_access_show(session['user_id'], show_id):
+        abort(403)
     db = get_db()
     db.execute("UPDATE shows SET status='archived' WHERE id=?", (show_id,))
     log_audit(db, 'SHOW_ARCHIVE', 'show', show_id, show_id=show_id)
@@ -2382,6 +2574,8 @@ def archive_show(show_id):
 @app.route('/shows/<int:show_id>/restore', methods=['POST'])
 @staff_or_admin_required
 def restore_show(show_id):
+    if session.get('user_role') != 'admin' and not can_access_show(session['user_id'], show_id):
+        abort(403)
     db = get_db()
     db.execute("UPDATE shows SET status='active' WHERE id=?", (show_id,))
     log_audit(db, 'SHOW_RESTORE', 'show', show_id, show_id=show_id)
@@ -2392,7 +2586,7 @@ def restore_show(show_id):
 
 
 @app.route('/shows/<int:show_id>/delete', methods=['POST'])
-@staff_or_admin_required
+@admin_required
 def delete_show(show_id):
     db = get_db()
     show = db.execute('SELECT name FROM shows WHERE id=?', (show_id,)).fetchone()
@@ -2614,11 +2808,12 @@ def settings():
         'ollama_url':     all_settings.get('ollama_url', 'http://localhost:11434'),
         'ollama_model':   all_settings.get('ollama_model', 'llama3.2'),
     }
+    _is_admin = session.get('user_role') == 'admin'
     smtp_settings = {
         'smtp_host':  all_settings.get('smtp_host', ''),
         'smtp_port':  all_settings.get('smtp_port', '587'),
         'smtp_user':  all_settings.get('smtp_user', ''),
-        'smtp_pass':  all_settings.get('smtp_pass', ''),
+        'smtp_pass':  all_settings.get('smtp_pass', '') if _is_admin else '',
         'smtp_from':  all_settings.get('smtp_from', ''),
         'smtp_tls':   all_settings.get('smtp_tls', '1'),
     }
@@ -2637,14 +2832,20 @@ def settings():
         'schedule_email_days_2':     all_settings.get('schedule_email_days_2', '1'),
     }
 
+    # Strip sensitive keys from syslog_settings for non-admin users
+    safe_settings = all_settings if _is_admin else {
+        k: v for k, v in all_settings.items()
+        if k not in ('smtp_pass', 'pg_password', 'wifi_password')
+    }
+
     return render_template('settings.html',
                            contacts=contacts,
                            users=users,
                            groups=groups_data,
                            form_sections=form_sections,
                            sched_meta_fields=sched_meta_fields,
-                           syslog_settings=all_settings,
-                           db_settings=db_settings,
+                           syslog_settings=safe_settings,
+                           db_settings=db_settings if _is_admin else {},
                            ai_settings=ai_settings,
                            departments=DEPARTMENTS,
                            is_content_admin=_is_ca,
@@ -2714,6 +2915,16 @@ def delete_contact(cid):
     return jsonify({'success': True})
 
 
+_MIN_PASSWORD_LENGTH = 8
+
+
+def _validate_password(pw):
+    """Return None if password is acceptable, else an error string."""
+    if not pw or len(pw) < _MIN_PASSWORD_LENGTH:
+        return f'Password must be at least {_MIN_PASSWORD_LENGTH} characters.'
+    return None
+
+
 @app.route('/settings/users/add', methods=['POST'])
 @admin_required
 def add_user():
@@ -2723,6 +2934,10 @@ def add_user():
     role     = request.form.get('role','user')
     if not username or not password:
         flash('Username and password are required.', 'error')
+        return redirect(url_for('settings') + '#users')
+    pw_err = _validate_password(password)
+    if pw_err:
+        flash(pw_err, 'error')
         return redirect(url_for('settings') + '#users')
     db = get_db()
     try:
@@ -2760,6 +2975,9 @@ def reset_password(uid):
     pw = data.get('password','')
     if not pw:
         return jsonify({'success': False, 'error': 'Password required.'})
+    pw_err = _validate_password(pw)
+    if pw_err:
+        return jsonify({'success': False, 'error': pw_err})
     db = get_db()
     db.execute('UPDATE users SET password_hash=? WHERE id=?', (generate_password_hash(pw), uid))
     log_audit(db, 'USER_PASSWORD_RESET', 'user', uid, detail=f'reset by {session.get("username")}')
@@ -2794,6 +3012,10 @@ def change_own_password():
     if not check_password_hash(user['password_hash'], current):
         db.close()
         return jsonify({'success': False, 'error': 'Current password incorrect.'})
+    pw_err = _validate_password(new_pw)
+    if pw_err:
+        db.close()
+        return jsonify({'success': False, 'error': pw_err})
     db.execute('UPDATE users SET password_hash=? WHERE id=?',
                (generate_password_hash(new_pw), session['user_id']))
     db.commit(); db.close()
@@ -3219,9 +3441,16 @@ def reorder_sched_meta_fields():
 
 # ─── Syslog Settings ──────────────────────────────────────────────────────────
 
+_last_port_change = 0  # timestamp of last port change — rate limiter
+
 @app.route('/settings/server', methods=['POST'])
 @admin_required
 def save_server_settings():
+    global _last_port_change
+    import time as _time_mod
+    now = _time_mod.time()
+    if now - _last_port_change < 30:
+        return jsonify({'success': False, 'error': 'Port was changed recently. Wait 30 seconds.'}), 429
     data = request.get_json(force=True) or {}
     port_str = str(data.get('app_port', '5400')).strip()
     try:
@@ -3236,6 +3465,7 @@ def save_server_settings():
                ('app_port', str(port_val)))
     log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail=f'app_port={port_val}')
     db.commit(); db.close()
+    _last_port_change = now
     syslog_logger.info(f"SETTINGS_CHANGE key=app_port value={port_val} by={session.get('username')}")
 
     # Check if running under the showadvance systemd service
@@ -3280,6 +3510,22 @@ def save_server_settings():
 @admin_required
 def save_syslog_settings():
     data = request.get_json(force=True) or {}
+    # Validate syslog host — block metadata/link-local to prevent exfiltration
+    syslog_host = data.get('syslog_host', '')
+    if syslog_host and _is_blocked_host(syslog_host):
+        return jsonify({'success': False, 'error': 'Invalid syslog host.'}), 400
+    # Validate port range
+    try:
+        syslog_port = int(data.get('syslog_port', 514))
+        if not (1 <= syslog_port <= 65535):
+            raise ValueError
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'Invalid syslog port.'}), 400
+    # Validate facility against known values
+    valid_facilities = [f'LOG_LOCAL{i}' for i in range(8)] + [
+        'LOG_USER', 'LOG_DAEMON', 'LOG_SYSLOG', 'LOG_AUTH']
+    if data.get('syslog_facility') and data['syslog_facility'] not in valid_facilities:
+        return jsonify({'success': False, 'error': 'Invalid syslog facility.'}), 400
     db = get_db()
     for key in ('syslog_host', 'syslog_port', 'syslog_facility', 'syslog_enabled'):
         if key in data:
@@ -3322,7 +3568,8 @@ def manual_backup():
         run_hourly_backup()
         return jsonify({'success': True, 'message': 'Backup created successfully.'})
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        app.logger.error(f'Backup failed: {e}')
+        return jsonify({'success': False, 'error': 'Backup failed. Check server logs.'}), 500
 
 
 # ─── API ──────────────────────────────────────────────────────────────────────
@@ -3557,6 +3804,11 @@ def save_logo():
         if len(data) > 2 * 1024 * 1024:
             return jsonify({'success': False, 'error': 'Logo too large (max 2 MB).'}), 413
         mime = f.content_type or 'image/png'
+        # Only allow safe image MIME types (reject SVG — can contain JavaScript)
+        _allowed_logo_mimes = ('image/png', 'image/jpeg', 'image/gif', 'image/webp')
+        if mime not in _allowed_logo_mimes:
+            return jsonify({'success': False,
+                            'error': f'Unsupported image type. Allowed: PNG, JPEG, GIF, WebP.'}), 400
         b64 = base64.b64encode(data).decode()
         logo_data = f'data:{mime};base64,{b64}'
     else:
@@ -3724,7 +3976,7 @@ def test_database_connection():
 
     if db_type == 'sqlite':
         if os.path.exists(DATABASE):
-            return jsonify({'success': True, 'message': f'SQLite database found at {DATABASE}'})
+            return jsonify({'success': True, 'message': 'SQLite database found and accessible.'})
         return jsonify({'success': False, 'message': 'SQLite database not found. Run init_db.py first.'})
 
     if db_type == 'postgres':
@@ -3738,7 +3990,8 @@ def test_database_connection():
         )
         if ok:
             return jsonify({'success': True, 'message': 'Connected to PostgreSQL successfully.'})
-        return jsonify({'success': False, 'message': err})
+        app.logger.warning(f'PostgreSQL test failed: {err}')
+        return jsonify({'success': False, 'message': 'PostgreSQL connection failed. Check host, port, credentials, and schema.'})
 
     return jsonify({'success': False, 'message': 'Unknown database type.'})
 
@@ -3756,7 +4009,8 @@ def migrate_database():
     try:
         stats = migrate_sqlite_to_postgres(DATABASE, settings)
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
+        app.logger.error(f'Database migration failed: {e}')
+        return jsonify({'success': False, 'error': 'Migration failed. Check server logs.'}), 500
 
     if 'error' in stats:
         return jsonify({'success': False, 'error': stats['error']}), 500
@@ -3774,6 +4028,51 @@ def migrate_database():
 
 
 # ─── AI / Ollama Settings ──────────────────────────────────────────────────────
+
+def _is_blocked_host(hostname):
+    """Return True if hostname resolves to a cloud metadata or link-local address."""
+    import ipaddress
+    if not hostname:
+        return True
+    if hostname in ('169.254.169.254', 'metadata.google.internal'):
+        return True
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_link_local or ip.is_reserved:
+            return True
+        # Block metadata IP range (169.254.x.x)
+        if ip.is_private and str(ip).startswith('169.254.'):
+            return True
+    except ValueError:
+        pass  # DNS name, not an IP literal — not blocked
+    return False
+
+
+def _validate_ollama_url(url):
+    """Validate that an Ollama URL is safe (no SSRF to internal/metadata endpoints)."""
+    from urllib.parse import urlparse
+    import ipaddress
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ('http', 'https'):
+            return False
+        hostname = parsed.hostname or ''
+        # Allow localhost / 127.x (typical Ollama install)
+        if hostname in ('localhost', '127.0.0.1', '::1') or hostname.startswith('127.'):
+            return True
+        # Block cloud metadata, link-local, and private ranges
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_link_local or ip.is_loopback or ip.is_reserved:
+                return False
+        except ValueError:
+            pass  # hostname is a DNS name, not an IP — allow it
+        if _is_blocked_host(hostname):
+            return False
+        return True
+    except Exception:
+        return False
+
 
 @app.route('/settings/ai', methods=['POST'])
 @admin_required
@@ -3795,6 +4094,11 @@ def test_ai_connection():
     data = request.get_json(force=True) or {}
     url = data.get('ollama_url', 'http://localhost:11434').rstrip('/')
     model = data.get('ollama_model', 'llama3.2')
+
+    # SSRF protection — only allow http(s) to non-internal hosts (except localhost for Ollama)
+    if not _validate_ollama_url(url):
+        return jsonify({'success': False, 'message': 'Invalid Ollama URL. Only http/https to localhost or non-internal hosts allowed.'})
+
     import urllib.request
     import urllib.error
     try:
@@ -3806,9 +4110,11 @@ def test_ai_connection():
                 return jsonify({'success': True, 'message': f'Connected. Model "{model}" available.', 'models': models})
             return jsonify({'success': True, 'message': f'Connected, but model "{model}" not found. Available: {", ".join(models[:5])}', 'models': models})
     except urllib.error.URLError as e:
-        return jsonify({'success': False, 'message': f'Cannot reach Ollama at {url}: {e.reason}'})
+        app.logger.warning(f'Ollama connection failed: {e}')
+        return jsonify({'success': False, 'message': 'Cannot reach Ollama. Check URL and ensure Ollama is running.'})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        app.logger.warning(f'Ollama test error: {e}')
+        return jsonify({'success': False, 'message': 'Ollama connection test failed.'})
 
 
 # ─── SMTP / PDF Email Settings ────────────────────────────────────────────────
@@ -3845,6 +4151,16 @@ def test_smtp_connection():
     to_addr   = data.get('test_to') or user
     if not host:
         return jsonify({'success': False, 'message': 'SMTP host is required.'})
+    # Block SSRF — prevent connecting to cloud metadata or link-local addresses
+    if _is_blocked_host(host):
+        return jsonify({'success': False, 'message': 'Invalid SMTP host.'})
+    # Validate email addresses to prevent header injection / open relay abuse
+    import re
+    _email_re = re.compile(r'^[^@\s\r\n]+@[^@\s\r\n]+\.[^@\s\r\n]+$')
+    if from_addr and not _email_re.match(from_addr):
+        return jsonify({'success': False, 'message': 'Invalid from address.'})
+    if to_addr and not _email_re.match(to_addr):
+        return jsonify({'success': False, 'message': 'Invalid test recipient address.'})
     try:
         if use_tls:
             server = smtplib.SMTP(host, port, timeout=10)
@@ -3861,11 +4177,13 @@ def test_smtp_connection():
             msg['To']   = to_addr
             server.sendmail(from_addr, [to_addr], msg.as_string())
             server.quit()
+            syslog_logger.info(f"SMTP_TEST to={to_addr} by={session.get('username')}")
             return jsonify({'success': True, 'message': f'Test email sent to {to_addr}.'})
         server.quit()
         return jsonify({'success': True, 'message': 'Connected successfully (no test email sent).'})
     except Exception as e:
-        return jsonify({'success': False, 'message': str(e)})
+        app.logger.warning(f'SMTP test failed: {e}')
+        return jsonify({'success': False, 'message': 'SMTP connection failed. Check host, port, and credentials.'})
 
 
 @app.route('/settings/email-provider', methods=['POST'])
@@ -4073,7 +4391,9 @@ def _ai_extract_impl(show_id):
         f'Document text:\n{doc_text[:8000]}'
     )
 
-    # Call Ollama
+    # Call Ollama (with SSRF validation)
+    if not _validate_ollama_url(ollama_url):
+        return jsonify({'success': False, 'error': 'Invalid Ollama URL.'}), 400
     try:
         import urllib.request as _urlreq
         payload = json.dumps({
@@ -4099,7 +4419,8 @@ def _ai_extract_impl(show_id):
                 if chunk.get('done'):
                     break
     except Exception as e:
-        return jsonify({'success': False, 'error': f'Ollama request failed: {e}'}), 500
+        app.logger.error(f'Ollama request failed: {e}')
+        return jsonify({'success': False, 'error': 'AI extraction request failed. Check Ollama connection.'}), 500
 
     # Parse JSON response
     try:
@@ -4111,7 +4432,8 @@ def _ai_extract_impl(show_id):
                 clean = clean[:-3]
         extracted = json.loads(clean)
     except (json.JSONDecodeError, ValueError):
-        return jsonify({'success': False, 'error': f'AI returned invalid JSON: {raw_content[:200]}'}), 500
+        app.logger.warning(f'AI returned invalid JSON: {raw_content[:200]}')
+        return jsonify({'success': False, 'error': 'AI returned an unparseable response. Try again or use a different model.'}), 500
 
     # Build suggestions (only non-null values)
     suggestions = {}
@@ -4382,6 +4704,8 @@ def delete_labor_request(show_id, rid):
 def reorder_labor_requests(show_id):
     if not can_access_show(session['user_id'], show_id):
         return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    if session.get('is_restricted'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
     data = request.get_json(force=True) or {}
     request_ids = data.get('request_ids', [])
     db = get_db()
@@ -4626,4 +4950,4 @@ if __name__ == '__main__':
             run_port = int(_row['value']) if _row else 5400
         except Exception:
             run_port = 5400
-    app.run(debug=True, port=run_port)
+    app.run(debug=os.environ.get('FLASK_DEBUG', '0') == '1', port=run_port)

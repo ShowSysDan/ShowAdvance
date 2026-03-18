@@ -1,6 +1,6 @@
-# ShowAdvance — Production Management System
+# ShowAdvance (3·2·1→THEATER) — Production Management System
 
-ShowAdvance is a web-based production advance and day-of-show management tool built for Dr. Phillips Center for the Performing Arts (DPC). It provides a central place to fill out advance forms, build production schedules, record post-show notes, and share documents with crew and clients.
+ShowAdvance is a web-based production advance and day-of-show management tool built for Dr. Phillips Center for the Performing Arts (DPC). It provides a central place to fill out advance forms, build production schedules, record post-show notes, manage labor requests, send schedule emails, and share documents with crew and clients.
 
 ---
 
@@ -14,8 +14,10 @@ ShowAdvance is a web-based production advance and day-of-show management tool bu
    - [Advance Sheet](#advance-sheet)
    - [Production Schedule](#production-schedule)
    - [Post-Show Notes](#post-show-notes)
+   - [Labor Requests](#labor-requests)
    - [Comments](#comments)
    - [Export & Files](#export--files)
+   - [Email](#email)
    - [Public Show Page](#public-show-page)
 5. [Admin & Settings Guide](#admin--settings-guide)
    - [Contacts](#contacts)
@@ -26,11 +28,14 @@ ShowAdvance is a web-based production advance and day-of-show management tool bu
    - [WiFi Defaults](#wifi-defaults)
    - [Organisation Logo](#organisation-logo)
    - [Upload Size Limit](#upload-size-limit)
+   - [Email Settings](#email-settings)
+   - [AI Extraction (Ollama)](#ai-extraction-ollama)
    - [Syslog Settings](#syslog-settings)
    - [Database Backups](#database-backups)
    - [File Manager](#file-manager)
    - [God Mode](#god-mode)
-6. [Troubleshooting](#troubleshooting)
+6. [Security](#security)
+7. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -44,25 +49,13 @@ ShowAdvance is a web-based production advance and day-of-show management tool bu
 | Disk | 1 GB (for database and backups) |
 | Network | LAN access for crew devices |
 
-Python packages installed automatically: Flask, Werkzeug, gunicorn, WeasyPrint (PDF generation), APScheduler (backups), flask-limiter (login rate limiting), qrcode[pil] + Pillow (WiFi QR codes).
+Python packages installed automatically: Flask, Werkzeug, gunicorn, WeasyPrint (PDF generation), APScheduler (backups), flask-limiter (login rate limiting), qrcode[pil] + Pillow (WiFi QR codes), dnspython (direct MX email delivery), pdfplumber + python-docx + openpyxl + xlrd + striprtf (document import/AI extraction), psycopg2-binary (optional PostgreSQL support).
 
 ### WeasyPrint system dependencies (Ubuntu/Debian)
 
 ```bash
 sudo apt install libpango-1.0-0 libpangoft2-1.0-0 libffi-dev libcairo2
 ```
-
-This will:
-1. Create a Python virtual environment
-2. Install all dependencies from `requirements.txt`
-3. Initialize the database (`advance.db`)
-4. Configure and start a systemd service
-5. Generate a secure `SECRET_KEY` automatically
-
-Open the app at `http://<your-server-ip>:5400`
-
-**Default login:** `admin` / `admin123`
-⚠️ Change the admin password immediately after first login — Settings → My Account.
 
 ---
 
@@ -88,7 +81,7 @@ Re-run `./install.sh` (or `sudo ./install.sh`). It detects the existing database
 
 ## First Login
 
-Default credentials: **admin / admin**
+Default credentials: **admin / admin123**
 
 **Change the admin password immediately** via Settings → My Account → Change Password.
 
@@ -130,9 +123,13 @@ Record production manager (read-only from advance), crew call time, show notes, 
 
 Click **Export PDF** to generate a Post-Show Notes PDF.
 
+### Labor Requests
+
+Track labor needs per show. Add requests with department, position, quantity, date/time, and notes. Drag rows to reorder. Restricted (read-only) users can view but not modify labor requests.
+
 ### Comments
 
-Show-specific comment thread with `@mention` autocomplete. Visible to all authorised users.
+Show-specific comment thread with `@mention` autocomplete. Visible to all authorised users. Admins can view comment edit history.
 
 ### Export & Files
 
@@ -148,6 +145,15 @@ PDFs are stored in the database — use the **↓** button in Export History to 
 **Attachments:** Drag-and-drop or click **+ Attach File**. Upload progress bar shown. Files stored in database.
 
 **Read Receipts:** Tracks who opened the advance at which version.
+
+### Email
+
+Send production schedule PDFs to contacts directly from the app. Supports two delivery methods:
+
+- **SMTP relay** — send via a configured mail server (Gmail, Outlook, etc.)
+- **Direct MX delivery** — send directly to the recipient's mail server (no relay needed; requires DNS/MX access)
+
+Configure email settings in Settings → Email. A test button verifies connectivity before sending.
 
 ### Public Show Page
 
@@ -218,6 +224,24 @@ Settings → Syslog → **Upload Size Limit**
 
 Maximum file attachment size (default 20 MB, max 500 MB).
 
+### Email Settings
+
+Settings → Email. Configure outbound email for sending schedule PDFs to contacts.
+
+| Setting | Description |
+|---------|-------------|
+| Provider | `smtp` (relay) or `direct` (MX delivery) |
+| SMTP Host / Port | Mail server address and port (default 587) |
+| SMTP User / Pass | Authentication credentials |
+| From Address | Sender address |
+| Use TLS | Enable STARTTLS (recommended) |
+| EHLO Hostname | Custom EHLO hostname for direct delivery |
+| Display Name | Friendly name shown in the From field |
+
+### AI Extraction (Ollama)
+
+Settings → AI. Connect to a local [Ollama](https://ollama.com) instance for AI-powered data extraction from uploaded documents (PDF, DOCX, XLSX, RTF, TXT). Configure the Ollama server URL and enable/disable the feature. The AI can pre-populate advance form fields from uploaded rider documents.
+
 ### Syslog Settings
 
 Settings → Syslog. Send audit events to a remote syslog server via UDP.
@@ -244,6 +268,20 @@ Settings → God Mode (admin only).
 
 - **Active Sessions** — users on a show page in the last 5 minutes (user, show, tab, last seen)
 - **User Last Login** — last login timestamp per user
+
+---
+
+## Security
+
+Passwords are hashed using Werkzeug's `generate_password_hash` (scrypt with Werkzeug 3.x+, pbkdf2:sha256 with older versions). Passwords are **never** stored in plaintext.
+
+The installer generates a cryptographically random `SECRET_KEY` and stores it in `.env` (chmod 600). This key signs Flask session cookies.
+
+Login rate limiting (15 attempts/minute per IP) is enforced via `flask-limiter`.
+
+An audit log records all significant actions (logins, show changes, exports, user management) with timestamps and IP addresses. View via Settings → Audit Log (admin only).
+
+For a detailed security assessment, see [SECURITY_AUDIT.md](SECURITY_AUDIT.md).
 
 ---
 

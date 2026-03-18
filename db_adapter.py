@@ -223,8 +223,22 @@ def read_db_settings(database_path):
         return {}
 
 
+_SAFE_IDENTIFIER_RE = re.compile(r'^[a-zA-Z_][a-zA-Z0-9_]*$')
+
+
+def _validate_identifier(name, label='identifier'):
+    """Validate that a SQL identifier (schema/table name) is safe."""
+    if not name or not _SAFE_IDENTIFIER_RE.match(name):
+        raise ValueError(f'Invalid {label}: {name!r}. Must match [a-zA-Z_][a-zA-Z0-9_]*')
+    return name
+
+
 def test_postgres_connection(host, port, dbname, user, password, schema):
     """Test a PostgreSQL connection. Returns (True, None) or (False, error_message)."""
+    try:
+        _validate_identifier(schema, 'schema')
+    except ValueError as e:
+        return False, str(e)
     try:
         import psycopg2
         conn = psycopg2.connect(
@@ -264,6 +278,7 @@ def connect(database_path, settings=None):
         try:
             import psycopg2
             schema = settings.get('pg_schema', 'showadvance') or 'showadvance'
+            _validate_identifier(schema, 'schema')
             conn = psycopg2.connect(
                 host=settings.get('pg_host', 'localhost'),
                 port=int(settings.get('pg_port', 5432) or 5432),
@@ -281,11 +296,15 @@ def connect(database_path, settings=None):
             conn.commit()
             return DBConnection(conn, 'postgres', schema=schema)
         except ImportError:
-            # Fall through to SQLite if psycopg2 not installed
-            pass
-        except Exception:
-            # Fall through to SQLite on connection failure
-            pass
+            import logging
+            logging.getLogger('showadvance').warning(
+                'PostgreSQL configured but psycopg2 not installed — falling back to SQLite'
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger('showadvance').warning(
+                f'PostgreSQL connection failed — falling back to SQLite: {e}'
+            )
 
     # SQLite (default)
     conn = sqlite3.connect(database_path)

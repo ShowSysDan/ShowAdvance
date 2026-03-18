@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT DEFAULT 'user',
     theme TEXT DEFAULT 'dark',
     last_login TIMESTAMP,
+    must_change_password INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -863,6 +864,7 @@ def migrate_db():
         'ALTER TABLE show_comments ADD COLUMN deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
         'ALTER TABLE show_comments ADD COLUMN edited_at TIMESTAMP',
         'ALTER TABLE contacts ADD COLUMN report_recipient INTEGER DEFAULT 0',
+        'ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0',
     ]:
         try:
             conn.execute(alter_sql)
@@ -1023,10 +1025,10 @@ def init_db(force=False):
     conn = sqlite3.connect(DATABASE)
     conn.executescript(SCHEMA)
 
-    # Admin user
+    # Admin user (must_change_password=1 forces change on first login)
     conn.execute("""
-        INSERT OR REPLACE INTO users (username, password_hash, display_name, role)
-        VALUES (?, ?, ?, ?)
+        INSERT OR REPLACE INTO users (username, password_hash, display_name, role, must_change_password)
+        VALUES (?, ?, ?, ?, 1)
     """, ('admin', generate_password_hash('admin123'), 'Administrator', 'admin'))
 
     # Seed contacts
@@ -1062,6 +1064,7 @@ CREATE TABLE IF NOT EXISTS users (
     role TEXT DEFAULT 'user',
     theme TEXT DEFAULT 'dark',
     last_login TIMESTAMP,
+    must_change_password INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
