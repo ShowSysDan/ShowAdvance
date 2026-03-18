@@ -496,6 +496,7 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
 
         # Try each MX host in priority order
         delivered = False
+        last_error = None
         for mx in mx_hosts:
             mx_host = str(mx.exchange).rstrip('.')
             try:
@@ -513,11 +514,13 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
                 delivered = True
                 break
             except Exception as e:
+                last_error = f'{mx_host}: {e}'
                 app.logger.warning(f'Direct send to MX {mx_host} for {domain} failed: {e}')
                 continue
 
         if not delivered:
-            errors.append(f'All MX hosts failed for {domain}')
+            detail = f' ({last_error})' if last_error else ''
+            errors.append(f'All MX hosts failed for {domain}{detail}')
 
     if errors and sent_count == 0:
         return False, '; '.join(errors)
