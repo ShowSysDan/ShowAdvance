@@ -3,6 +3,22 @@
 ================================================================ */
 'use strict';
 
+/* ── CSRF: Wrap fetch() to include X-Requested-With on all requests ── */
+const _origFetch = window.fetch;
+window.fetch = function(url, opts = {}) {
+  opts.headers = opts.headers || {};
+  // Ensure headers is a plain object (not Headers instance) for easy merging
+  if (opts.headers instanceof Headers) {
+    const h = {};
+    opts.headers.forEach((v, k) => { h[k] = v; });
+    opts.headers = h;
+  }
+  if (!opts.headers['X-Requested-With']) {
+    opts.headers['X-Requested-With'] = 'XMLHttpRequest';
+  }
+  return _origFetch.call(window, url, opts);
+};
+
 let SHOW_ID = null;
 let activeTab = 'advance';
 let saveTimer = null;
@@ -1113,10 +1129,10 @@ function _appendTmplRow(tbody, r) {
   const tr = document.createElement('tr');
   tr.className = 'schedule-row';
   tr.innerHTML = `
-    <td><input type="text" class="sched-cell tmpl-cell" placeholder="8:00am" value="${r.start_time || ''}"></td>
-    <td><input type="text" class="sched-cell tmpl-cell" placeholder="10:00am" value="${r.end_time || ''}"></td>
-    <td><input type="text" class="sched-cell tmpl-cell" placeholder="Description" value="${r.description || ''}"></td>
-    <td><input type="text" class="sched-cell tmpl-cell" placeholder="Notes" value="${r.notes || ''}"></td>
+    <td><input type="text" class="sched-cell tmpl-cell" placeholder="8:00am" value="${_esc(r.start_time || '')}"></td>
+    <td><input type="text" class="sched-cell tmpl-cell" placeholder="10:00am" value="${_esc(r.end_time || '')}"></td>
+    <td><input type="text" class="sched-cell tmpl-cell" placeholder="Description" value="${_esc(r.description || '')}"></td>
+    <td><input type="text" class="sched-cell tmpl-cell" placeholder="Notes" value="${_esc(r.notes || '')}"></td>
     <td><button type="button" class="row-del-btn" onclick="this.closest('tr').remove()">×</button></td>
   `;
   tbody.appendChild(tr);
@@ -1330,9 +1346,9 @@ async function loadBackupStatus() {
     }
     container.innerHTML = data[kind].map(f => `
       <div class="settings-info-row">
-        <span class="backup-filename">${f.filename}</span>
-        <span class="backup-size">${f.size_kb} KB</span>
-        <span class="backup-mtime">${f.mtime}</span>
+        <span class="backup-filename">${_esc(f.filename)}</span>
+        <span class="backup-size">${_esc(String(f.size_kb))} KB</span>
+        <span class="backup-mtime">${_esc(f.mtime)}</span>
       </div>
     `).join('');
   }
@@ -1519,7 +1535,8 @@ async function showCommentVersions(cid) {
 function _esc(str) {
   return String(str)
     .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;')
+    .replace(/'/g,'&#39;');
 }
 
 function _renderCommentBody(text) {
