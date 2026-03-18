@@ -52,8 +52,8 @@ a:hover { text-decoration: underline; }
 .sidebar {
   width: var(--sidebar-w);
   min-height: 100vh;
-  background: var(--bg-card);
-  border-right: 1px solid var(--border);
+  background: var(--brand-navy);
+  border-right: 1px solid rgba(255,255,255,0.08);
   display: flex;
   flex-direction: column;
   position: sticky;
@@ -68,9 +68,8 @@ a:hover { text-decoration: underline; }
   align-items: center;
   gap: 10px;
   padding: 20px 16px 16px;
-  border-bottom: 1px solid rgba(25,73,128,0.6);
+  border-bottom: 1px solid rgba(255,255,255,0.1);
   margin-bottom: 8px;
-  background: var(--brand-navy);
 }
 .sidebar-brand .brand-name { color: #fff; }
 .sidebar-brand .brand-sub  { color: rgba(255,255,255,0.55); }
@@ -84,23 +83,23 @@ a:hover { text-decoration: underline; }
 
 .sidebar-nav { flex: 1; padding: 0 8px; }
 .nav-section-label {
-  font-size: 9px; font-weight: 600; letter-spacing: 0.12em; color: var(--text-muted);
+  font-size: 9px; font-weight: 600; letter-spacing: 0.12em; color: rgba(255,255,255,0.35);
   text-transform: uppercase; padding: 14px 8px 4px;
 }
 .nav-item {
   display: flex; align-items: center; gap: 9px;
   padding: 7px 10px; border-radius: var(--radius);
-  font-size: 13px; font-weight: 500; color: var(--text-dim);
+  font-size: 13px; font-weight: 500; color: rgba(255,255,255,0.65);
   transition: all 0.15s; cursor: pointer; margin-bottom: 1px;
 }
-.nav-item:hover { background: var(--bg-hover); color: var(--text); text-decoration: none; }
-.nav-item.active { background: var(--accent-glow); color: var(--accent); border-left: 2px solid var(--accent); }
+.nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; text-decoration: none; }
+.nav-item.active { background: rgba(245,127,32,0.18); color: var(--accent); border-left: 2px solid var(--accent); }
 .nav-item svg { width: 15px; height: 15px; flex-shrink: 0; }
 .nav-item.sub { padding-left: 18px; font-size: 12.5px; }
 
 .sidebar-footer {
   padding: 12px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid rgba(255,255,255,0.1);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -113,10 +112,10 @@ a:hover { text-decoration: underline; }
   font-family: var(--font-cond); font-weight: 700; font-size: 13px;
   flex-shrink: 0;
 }
-.user-name { font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.user-role { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
-.logout-btn { color: var(--text-muted); display: flex; padding: 4px; border-radius: 4px; flex-shrink: 0; }
-.logout-btn:hover { color: var(--red); background: rgba(239,68,68,.1); }
+.user-name { font-size: 12px; font-weight: 600; color: rgba(255,255,255,0.85); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-role { font-size: 10px; color: rgba(255,255,255,0.4); text-transform: uppercase; letter-spacing: 0.06em; }
+.logout-btn { color: rgba(255,255,255,0.35); display: flex; padding: 4px; border-radius: 4px; flex-shrink: 0; }
+.logout-btn:hover { color: var(--brand-red); background: rgba(240,78,35,0.15); }
 .logout-btn svg { width: 16px; height: 16px; }
 
 /* ── Page Header ───────────────────────────────────────────────── */
@@ -443,6 +442,12 @@ html[data-theme="light"] select.field-input {
 .role-staff { background: rgba(74,158,255,.12); color: var(--blue); }
 .role-user  { background: var(--bg-surface); color: var(--text-dim); }
 .dept-badge { display: inline-block; padding: 2px 7px; border-radius: 3px; font-size: 11px; background: var(--bg-surface); color: var(--text-dim); border: 1px solid var(--border); }
+.recipient-dot {
+  display: inline-block; width: 12px; height: 12px; border-radius: 50%;
+  border: 2px solid var(--border-light); background: transparent; flex-shrink: 0;
+  transition: all 0.15s;
+}
+.recipient-dot.on { background: var(--accent); border-color: var(--accent); }
 
 /* ── Modals ──────────────────────────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; z-index: 1000; }

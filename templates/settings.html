@@ -96,9 +96,8 @@
             <td class="text-sm" data-field="email">{{ c.email or '—' }}</td>
             {% if user.role == 'admin' %}
             <td style="text-align:center">
-              <span class="recipient-indicator" data-cid="{{ c.id }}"
-                    title="{% if c.report_recipient %}Included in PDF email sends{% else %}Not a PDF recipient{% endif %}"
-                    style="font-size:14px;opacity:{{ '1' if c.report_recipient else '0.25' }}">●</span>
+              <span class="recipient-indicator recipient-dot {{ 'on' if c.report_recipient else '' }}" data-cid="{{ c.id }}"
+                    title="{% if c.report_recipient %}Included in PDF email sends{% else %}Not a PDF recipient{% endif %}"></span>
             </td>
             {% endif %}
             {% if user.role == 'admin' or is_content_admin %}
@@ -1469,7 +1468,7 @@ async function saveContact() {
       row.dataset.recipient = isRecip ? '1' : '0';
       const indicator = row.querySelector('.recipient-indicator');
       if (indicator) {
-        indicator.style.opacity = isRecip ? '1' : '0.25';
+        indicator.classList.toggle('on', isRecip);
         indicator.title = isRecip ? 'Included in PDF email sends' : 'Not a PDF recipient';
       }
     }
