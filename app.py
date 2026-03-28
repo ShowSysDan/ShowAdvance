@@ -150,7 +150,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.1.0'
+APP_VERSION = '2.2.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -1234,6 +1234,7 @@ def dashboard():
                            archived_shows=archived,
                            venue_groups=venue_groups,
                            restricted=restricted,
+                           motd_messages=get_active_messages(session.get('user_id'), 'motd'),
                            user=get_current_user())
 
 
@@ -2782,7 +2783,7 @@ def settings():
     db = get_db()
     contacts = db.execute('SELECT * FROM contacts ORDER BY department, name').fetchall()
     users    = db.execute(
-        'SELECT id, username, display_name, role, created_at FROM users ORDER BY display_name'
+        'SELECT id, username, display_name, role, created_at, is_readonly FROM users ORDER BY display_name'
     ).fetchall()
     groups   = db.execute('SELECT * FROM user_groups ORDER BY name').fetchall()
 
@@ -5574,6 +5575,28 @@ def show_asset_add(show_id):
     db.commit()
     syslog_logger.info(f"ASSET_ADDED_TO_SHOW show_id={show_id} type_id={asset_type_id} qty={quantity} by={session.get('username')}")
     result = dict(row)
+    # Check for over-allocation and notify admins
+    try:
+        _avail = _get_asset_availability(db, asset_type_id, rental_start, rental_end)
+        if _avail and not _avail.get('unlimited') and _avail.get('available') is not None and _avail['available'] < 0:
+            _trow = db.execute('SELECT name FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
+            _type_name = _trow['name'] if _trow else f'Type #{asset_type_id}'
+            _show_name = show['name'] if show else f'Show #{show_id}'
+            _admin_emails = [r['email'] for r in db.execute(
+                "SELECT email FROM users WHERE role='admin' AND email != '' AND email IS NOT NULL"
+            ).fetchall()]
+            for _ae in _admin_emails:
+                _send_simple_email(
+                    _ae,
+                    f'3\u00b72\u00b71\u2192THEATER: Asset Over-Allocated \u2014 {_type_name}',
+                    f'Asset "{_type_name}" is now over-allocated for show "{_show_name}".\n\n'
+                    f'Current availability: {_avail["available"]} (negative = over-allocated)\n'
+                    f'Total units: {_avail.get("total_items","?")}, In maintenance: {_avail.get("in_maintenance",0)}, '
+                    f'Reserved spares: {_avail.get("reserve_count",0)}\n\n'
+                    f'Review the show\'s assets tab for details.',
+                )
+    except Exception:
+        pass
     db.close()
     return jsonify(result), 201
 
@@ -5712,6 +5735,77 @@ def assets_admin():
                            categories=[dict(c) for c in categories],
                            locations=[dict(l) for l in locations],
                            user=get_current_user())
+
+
+# ─── Asset Invoice PDF ───────────────────────────────────────────────────────
+
+@app.route('/shows/<int:show_id>/assets/invoice.pdf')
+@login_required
+def show_asset_invoice(show_id):
+    """Generate a PDF invoice for all show assets and external rentals."""
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    show = db.execute('SELECT * FROM shows WHERE id=?', (show_id,)).fetchone()
+    if not show:
+        db.close()
+        abort(404)
+
+    assets = db.execute("""
+        SELECT sa.quantity, sa.locked_price, sa.rental_start, sa.rental_end, sa.notes,
+               at.name as type_name, at.manufacturer, at.model,
+               ac.name as category_name
+        FROM show_assets sa
+        JOIN asset_types at ON at.id = sa.asset_type_id
+        JOIN asset_categories ac ON ac.id = at.category_id
+        WHERE sa.show_id = ? AND sa.is_hidden = 0
+        ORDER BY ac.sort_order, at.name
+    """, (show_id,)).fetchall()
+
+    external_rentals = db.execute("""
+        SELECT description, cost, pdf_filename
+        FROM show_external_rentals
+        WHERE show_id = ?
+        ORDER BY sort_order
+    """, (show_id,)).fetchall()
+
+    perf_company_row = db.execute(
+        "SELECT field_value FROM advance_data WHERE show_id=? AND field_key='performance_company'",
+        (show_id,)
+    ).fetchone()
+    performance_company = perf_company_row['field_value'] if perf_company_row else ''
+
+    assets_list = [dict(a) for a in assets]
+    ext_list    = [dict(e) for e in external_rentals]
+    assets_subtotal  = sum((a['locked_price'] or 0) * a['quantity'] for a in assets_list)
+    external_subtotal = sum(e['cost'] or 0 for e in ext_list)
+    grand_total = assets_subtotal + external_subtotal
+    db.close()
+
+    html_str = render_template(
+        'pdf/asset_invoice_pdf.html',
+        show=dict(show),
+        assets=assets_list,
+        external_rentals=ext_list,
+        assets_subtotal=assets_subtotal,
+        external_subtotal=external_subtotal,
+        grand_total=grand_total,
+        performance_company=performance_company,
+        generated_date=date.today().isoformat(),
+    )
+
+    try:
+        from weasyprint import HTML as WP_HTML
+        pdf_bytes = WP_HTML(string=html_str, base_url=request.host_url).write_pdf()
+    except Exception as e:
+        app.logger.error(f'WeasyPrint invoice error: {e}')
+        return f'PDF generation failed: {e}', 500
+
+    safe_name = secure_filename(show['name'] or f'show_{show_id}')
+    resp = make_response(pdf_bytes)
+    resp.headers['Content-Type'] = 'application/pdf'
+    resp.headers['Content-Disposition'] = _safe_content_disposition(f'{safe_name}_invoice.pdf')
+    return resp
 
 
 # ─── In-App Updates ───────────────────────────────────────────────────────────
@@ -5986,6 +6080,24 @@ def register():
                             f'<p>This link expires in 24 hours.</p>'
                         )
                         syslog_logger.info(f'REGISTER_PENDING username={username} email={email}')
+                        # Notify admins of new pending registration
+                        try:
+                            _adb = get_db()
+                            _admins = _adb.execute(
+                                "SELECT email FROM users WHERE role='admin' AND email != '' AND email IS NOT NULL"
+                            ).fetchall()
+                            _adb.close()
+                            _settings_url = url_for('settings', _external=True) + '#registrations'
+                            for _adm in _admins:
+                                _send_simple_email(
+                                    _adm['email'],
+                                    '3\u00b72\u00b71\u2192THEATER: New Registration Pending',
+                                    f'A new account registration is awaiting your approval.\n\n'
+                                    f'Username: {username}\nDisplay name: {display_name or "(none)"}\nEmail: {email}\n\n'
+                                    f'Review and approve at:\n{_settings_url}',
+                                )
+                        except Exception:
+                            pass
                         db.close()
                         return render_template('register.html',
                                                success='Registration submitted! Check your email to confirm, then wait for admin approval.',

@@ -171,7 +171,10 @@
           <tr>
             <td>{{ u.display_name or u.username }}</td>
             <td class="mono text-sm">{{ u.username }}</td>
-            <td><span class="role-badge role-{{ u.role }}">{{ u.role.upper() }}</span></td>
+            <td>
+              <span class="role-badge role-{{ u.role }}">{{ u.role.upper() }}</span>
+              {% if u.is_readonly %}<span style="font-size:9px;background:rgba(148,163,184,.15);color:#94A3B8;border:1px solid rgba(148,163,184,.3);border-radius:99px;padding:2px 6px;margin-left:4px;font-weight:600">READ-ONLY</span>{% endif %}
+            </td>
             <td class="text-dim text-sm">{{ u.created_at[:10] if u.created_at else '—' }}</td>
             <td>
               <div class="action-btns">
@@ -2396,11 +2399,23 @@ async function loadMessages() {
     return;
   }
   const typeMap = { motd:'MOTD', maintenance:'Maintenance', alert:'Alert' };
-  tbody.innerHTML = rows.map(m => `
+  const now = new Date().toISOString();
+  tbody.innerHTML = rows.map(m => {
+    let statusHtml;
+    if (!m.is_active) {
+      statusHtml = '<span style="color:var(--text-dim)">Inactive</span>';
+    } else if (m.scheduled_for && m.scheduled_for > now) {
+      statusHtml = `<span style="color:#FBBF24" title="Shows from ${m.scheduled_for.slice(0,16)}">Scheduled</span>`;
+    } else if (m.expires_at && m.expires_at < now) {
+      statusHtml = '<span style="color:var(--text-dim)">Expired</span>';
+    } else {
+      statusHtml = '<span style="color:#22C55E">Active</span>';
+    }
+    return `
     <tr id="msg-row-${m.id}">
       <td><span class="role-badge">${typeMap[m.msg_type]||m.msg_type}</span></td>
       <td><strong>${m.title}</strong></td>
-      <td>${m.is_active ? '<span style="color:#22C55E">Active</span>' : '<span style="color:var(--text-dim)">Inactive</span>'}</td>
+      <td>${statusHtml}</td>
       <td class="text-dim text-sm">${m.expires_at ? m.expires_at.slice(0,16) : '—'}</td>
       <td class="text-dim text-sm">${(m.created_at||'').slice(0,10)}</td>
       <td>
@@ -2411,7 +2426,7 @@ async function loadMessages() {
         </div>
       </td>
     </tr>
-  `).join('');
+  `; }).join('');
 }
 
 function openMsgModal(data) {
@@ -2421,6 +2436,7 @@ function openMsgModal(data) {
   document.getElementById('msg-m-body').value       = data?.body_html || '';
   document.getElementById('msg-m-type').value       = data?.msg_type || 'motd';
   document.getElementById('msg-m-dismiss').value    = data?.dismissible_by || 'user';
+  document.getElementById('msg-m-scheduled').value  = data?.scheduled_for ? data.scheduled_for.slice(0,16) : '';
   document.getElementById('msg-m-expires').value    = data?.expires_at ? data.expires_at.slice(0,16) : '';
   document.getElementById('msg-m-active').checked   = data ? data.is_active : true;
   document.getElementById('msg-m-login').checked    = data?.show_on_login || false;
@@ -2435,6 +2451,7 @@ async function saveMsg() {
     body_html:      document.getElementById('msg-m-body').value.trim(),
     msg_type:       document.getElementById('msg-m-type').value,
     dismissible_by: document.getElementById('msg-m-dismiss').value,
+    scheduled_for:  document.getElementById('msg-m-scheduled').value || null,
     expires_at:     document.getElementById('msg-m-expires').value || null,
     is_active:      document.getElementById('msg-m-active').checked,
     show_on_login:  document.getElementById('msg-m-login').checked,
@@ -2591,13 +2608,17 @@ async function pollUpdateStatus() {
       </div>
       <div class="form-row cols-2">
         <div class="field-group">
+          <label class="field-label">SHOW FROM (scheduled — optional)</label>
+          <input type="datetime-local" id="msg-m-scheduled" class="field-input">
+        </div>
+        <div class="field-group">
           <label class="field-label">EXPIRES AT (optional)</label>
           <input type="datetime-local" id="msg-m-expires" class="field-input">
         </div>
-        <div class="field-group" style="padding-top:22px;display:flex;gap:16px;align-items:center">
-          <label class="checkbox-label"><input type="checkbox" id="msg-m-active" checked> Active</label>
-          <label class="checkbox-label"><input type="checkbox" id="msg-m-login"> Show on login</label>
-        </div>
+      </div>
+      <div class="field-group" style="display:flex;gap:16px;align-items:center">
+        <label class="checkbox-label"><input type="checkbox" id="msg-m-active" checked> Active</label>
+        <label class="checkbox-label"><input type="checkbox" id="msg-m-login"> Show on login</label>
       </div>
     </div>
     <div class="modal-footer">

@@ -6,7 +6,7 @@ ShowAdvance is a web-based production advance and day-of-show management tool bu
 
 ## Version Numbering
 
-**Current version: `2.1.0`**
+**Current version: `2.2.0`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -29,6 +29,7 @@ Version history:
 - `1.x` — Initial release through security hardening and red team audit
 - `2.0.0` — Asset Manager (inventory tracking, rental pricing, show reservations, external rentals), Performance Company field, version numbering system
 - `2.1.0` — User registration with CAPTCHA, password recovery via email, pending registration approval workflow, in-app git update system with rollback, site-wide messaging (MOTD/maintenance/alerts with dismissal), AI session concurrency management, asset availability dashboards (public/private), asset usage reports by company/date range, Dashboards and Asset Reports in sidebar nav
+- `2.2.0` — Asset invoice PDF export, MOTD cards on dashboard home page, admin email notifications (new registration + asset over-allocation), password strength meter on register/reset, scheduled_for field in site messages, message Scheduled/Expired status display, read-only badge in users table, email + is_readonly in Add User form
 
 ---
 

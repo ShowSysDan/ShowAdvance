@@ -15,6 +15,24 @@
   {% endif %}
 </div>
 
+{% if motd_messages %}
+<div style="margin-bottom:20px;display:flex;flex-direction:column;gap:10px">
+  {% for m in motd_messages %}
+  {% set _type_cls = {'motd':'info','maintenance':'warning','alert':'error'} %}
+  <div class="flash flash-{{ _type_cls.get(m.msg_type,'info') }}" id="motd-{{ m.id }}"
+       style="display:flex;align-items:flex-start;gap:10px">
+    <div style="flex:1">
+      <strong style="font-size:13px">{{ m.title }}</strong>
+      {% if m.body_html %}<div style="margin-top:5px;font-size:12px;opacity:.9">{{ m.body_html | safe }}</div>{% endif %}
+    </div>
+    {% if m.dismissible_by == 'user' %}
+    <button onclick="dismissMotd({{ m.id }})" style="background:none;border:none;font-size:18px;cursor:pointer;color:inherit;opacity:.6;flex-shrink:0;padding:0" title="Dismiss">×</button>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if venue_groups %}
 
 {# ── Toolbar ──────────────────────────────────────────────────────────────── #}
@@ -176,6 +194,11 @@ function toggleVenue(btn) {
     btn.classList.remove('active');
     if (col) col.style.display = 'none';
   }
+}
+
+function dismissMotd(id) {
+  fetch('/api/messages/' + id + '/dismiss', {method:'POST'})
+    .then(() => { const el = document.getElementById('motd-'+id); if(el) el.remove(); });
 }
 </script>
 {% endblock %}

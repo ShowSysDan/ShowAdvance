@@ -688,6 +688,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     <span style="font-weight:600;font-size:13px;letter-spacing:.05em">GEAR &amp; ASSETS</span>
     <div class="ml-auto" style="display:flex;gap:6px;align-items:center">
       <span id="assets-total-cost" style="font-size:12px;color:var(--text-dim);margin-right:8px"></span>
+      <a href="/shows/{{ show.id }}/assets/invoice.pdf" target="_blank" class="btn btn-sm btn-ghost" title="Download PDF invoice">Invoice PDF</a>
       {% if is_content_admin_user and not restricted %}
       <button class="btn btn-sm btn-primary" onclick="openAssetSearch()">+ Add Asset</button>
       <button class="btn btn-sm btn-ghost" onclick="openExternalRentalModal()">+ External Rental</button>

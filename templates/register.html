@@ -46,7 +46,13 @@
       </div>
       <div class="field-group">
         <label class="field-label">PASSWORD * <span style="font-size:10px;color:var(--text-dim)">(min 8 chars)</span></label>
-        <input type="password" name="password" class="field-input" required minlength="8" id="reg-pw">
+        <input type="password" name="password" class="field-input" required minlength="8" id="reg-pw" oninput="checkPwStrength(this.value,'reg-pw-meter','reg-pw-label')">
+        <div style="margin-top:5px;display:flex;gap:4px;align-items:center">
+          <div style="flex:1;height:4px;border-radius:2px;background:var(--border);overflow:hidden">
+            <div id="reg-pw-meter" style="height:100%;width:0%;border-radius:2px;transition:width .2s,background .2s"></div>
+          </div>
+          <span id="reg-pw-label" style="font-size:10px;color:var(--text-dim);width:48px;text-align:right"></span>
+        </div>
       </div>
       <div class="field-group">
         <label class="field-label">CONFIRM PASSWORD *</label>
@@ -78,6 +84,29 @@
 
 {% block scripts %}
 <script>
+// ── Password strength meter ───────────────────────────────────────────────────
+function checkPwStrength(pw, meterId, labelId) {
+  const meter = document.getElementById(meterId);
+  const label = document.getElementById(labelId);
+  if (!meter || !label) return;
+  let score = 0;
+  if (pw.length >= 8)  score++;
+  if (pw.length >= 12) score++;
+  if (/[A-Z]/.test(pw) && /[a-z]/.test(pw)) score++;
+  if (/\d/.test(pw)) score++;
+  if (/[^A-Za-z0-9]/.test(pw)) score++;
+  const levels = [
+    {pct:'0%',  bg:'transparent', text:''},
+    {pct:'25%', bg:'#EF4444',     text:'Weak'},
+    {pct:'50%', bg:'#FBBF24',     text:'Fair'},
+    {pct:'75%', bg:'#60A5FA',     text:'Good'},
+    {pct:'100%',bg:'#22C55E',     text:'Strong'},
+  ];
+  const lvl = levels[Math.min(score, 4)];
+  meter.style.width = lvl.pct; meter.style.background = lvl.bg;
+  label.textContent = lvl.text; label.style.color = lvl.bg;
+}
+
 // ── Dino-style CAPTCHA game ───────────────────────────────────────────────────
 const canvas   = document.getElementById('dino-canvas');
 const ctx      = canvas ? canvas.getContext('2d') : null;
