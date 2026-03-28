@@ -6,7 +6,7 @@ ShowAdvance is a web-based production advance and day-of-show management tool bu
 
 ## Version Numbering
 
-**Current version: `2.2.1`**
+**Current version: `2.5.1`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -31,6 +31,12 @@ Version history:
 - `2.1.0` — User registration with CAPTCHA, password recovery via email, pending registration approval workflow, in-app git update system with rollback, site-wide messaging (MOTD/maintenance/alerts with dismissal), AI session concurrency management, asset availability dashboards (public/private), asset usage reports by company/date range, Dashboards and Asset Reports in sidebar nav
 - `2.2.0` — Asset invoice PDF export, MOTD cards on dashboard home page, admin email notifications (new registration + asset over-allocation), password strength meter on register/reset, scheduled_for field in site messages, message Scheduled/Expired status display, read-only badge in users table, email + is_readonly in Add User form
 - `2.2.1` — Security hardening: HTML sanitizer on message body_html (prevents stored XSS), access control on /api/assets/availability (respects show permissions for restricted users), unified registration error messages (prevents username enumeration), rate limiting on /register (10/min) and /forgot-password (5/min), exception details no longer exposed to users
+- `2.3.0` — Asset Manager enhancements: condition rating (excellent/good/fair/poor/retired) per unit, supplier/vendor name and contact per item type, warranty expiry date, year purchased, purchase value, straight-line depreciation with live remaining-capital calculator, per-unit maintenance log (note/damage/service/usage entries with date, author, and body)
+- `2.4.0` — Admin "View As" role switcher: admins can preview the site as Content Admin, User, or Read-only without logging out; amber preview banner shown while in preview mode; one-click return to admin
+- `2.4.1` — Soft-retire instead of hard delete: asset types and individual units can only be retired (never deleted); full history preserved permanently; dedicated Retired Assets archive page (/assets/retired); show/hide retired toggle in Asset Manager; category delete blocked while types exist
+- `2.4.2` — Asset Manager sort and search: sort type tree by name, unit count, or rental cost (asc/desc); filter units in items modal by barcode with leading-zero tolerance (normBarcode)
+- `2.5.0` — Global site-wide search: persistent search box in sidebar (/ or Ctrl+K to focus) searches shows (access-controlled), contacts, asset types, and barcodes; grouped results panel with keyboard navigation (↑↓ Enter Escape); `<mark>` highlight on matching text; leading-zero barcode tolerance client- and server-side
+- `2.5.1` — Security patch: XSS fix in Retired Assets JS template literals (esc() helper); rate limiting on /api/search (60/min); max query length guard; log_date ISO format validation; syslog coverage for ADMIN_VIEW_AS, ADMIN_VIEW_AS_RESET, ASSET_LOG_ADD, ASSET_LOG_DELETE
 
 ---
 
@@ -41,6 +47,7 @@ Version history:
 3. [First Login](#first-login)
 4. [User Guide](#user-guide)
    - [Dashboard](#dashboard)
+   - [Global Search](#global-search)
    - [Advance Sheet](#advance-sheet)
    - [Production Schedule](#production-schedule)
    - [Post-Show Notes](#post-show-notes)
@@ -53,9 +60,13 @@ Version history:
    - [Public Show Page](#public-show-page)
 5. [Admin & Settings Guide](#admin--settings-guide)
    - [Asset Manager](#asset-manager)
+   - [Asset Financial Tracking](#asset-financial-tracking)
+   - [Asset Maintenance Log](#asset-maintenance-log)
+   - [Retired Assets](#retired-assets)
    - [Asset Reports](#asset-reports)
    - [Contacts](#contacts)
    - [Users & Roles](#users--roles)
+   - [View As (Role Preview)](#view-as-role-preview)
    - [Registration Approval](#registration-approval)
    - [Groups & Show Access](#groups--show-access)
    - [Form Field Customisation](#form-field-customisation)
@@ -130,6 +141,15 @@ Default credentials: **admin / admin123**
 ### Dashboard
 
 Lists all active and archived shows. Click a show to open it. **New Show** creates a new show.
+
+### Global Search
+
+A persistent search box lives in the left sidebar (below the logo). Press **/** or **Ctrl+K** from anywhere to focus it.
+
+- Searches **shows** (by name, venue, company, date — respects your show access permissions), **contacts** (name, department, email, title), **asset types** (name, manufacturer, model — admin only), and **asset barcodes** (admin only, with leading-zero tolerance)
+- Results appear in a grouped panel with match highlighting
+- Keyboard navigation: **↑ / ↓** to move, **Enter** to open, **Escape** to close
+- Minimum 2 characters to trigger, maximum 255 characters
 
 ### Advance Sheet
 
@@ -233,16 +253,59 @@ Category (e.g. Video)
 **Categories** group related equipment. **Item Types** define a make/model with:
 - Photo, storage location, rental cost per show, reserve count (units held back as spares)
 - Consumable flag + optional quantity tracking
+- Supplier/vendor name and contact
 
 **Individual Units** are each tracked with a database ID (always unique, even without a barcode). Barcodes are optional.
 
+**Search & Sort:** Use the search bar above the type tree to filter by name/manufacturer/model. Sort by name, unit count, or rental cost (ascending/descending). Within the units modal, filter units by barcode with leading-zero tolerance.
+
 **Maintenance:** Remove a unit from service with a reason and notes. Return it to service when resolved. Both actions are captured in the Audit Log and Syslog.
+
+**Retiring:** Asset types and individual units are **never deleted** — only retired. Retiring a type also retires all its available units. Use the **Show Retired** checkbox to view retired entries inline. The **Retired Archive** link opens the full retired-assets history page.
 
 **Warehouse Locations:** Manage a central list of storage location names (click **Warehouse Locations** button). These appear as a dropdown when editing item types.
 
 **Availability:** When a unit is added to a show, the system checks real-time availability for the rental period, accounting for maintenance units, reserved spares, and other shows requesting the same item type. Negative availability is displayed — it does not prevent allocation, but makes the over-allocation visible.
 
 **Rental pricing:** Each item type has a base rental cost. When added to a show the price is **locked** immediately — if the database price is updated later, existing show reservations keep the original price. New reservations use the current price.
+
+### Asset Financial Tracking
+
+Each individual unit can store financial metadata:
+
+| Field | Description |
+|-------|-------------|
+| Condition | excellent / good / fair / poor / retired |
+| Year Purchased | Calendar year of acquisition |
+| Purchase Value | Original cost in dollars |
+| Depreciation (years) | Straight-line depreciation timeframe |
+| Warranty Expires | Date warranty coverage ends |
+
+When **Purchase Value** and **Depreciation Years** are both set, the unit detail panel shows a live **remaining capital value** with a color-coded bar (green → amber → red as the asset approaches full depreciation). The calculation is straight-line: `remaining = max(0, value − (value ÷ years) × age)`.
+
+### Asset Maintenance Log
+
+Each individual unit has a built-in log for recording its history. Access it from the **Log** tab in the unit detail pane.
+
+| Log Type | Use for |
+|----------|---------|
+| `note` | General observations |
+| `damage` | Damage noticed during use or inspection |
+| `service` | Repairs, cleaning, calibration |
+| `usage` | Notable usage events |
+
+Each entry records a date, the author (logged-in user), and a free-text body. Admins can delete entries. Entries are preserved permanently even after a unit is retired.
+
+### Retired Assets
+
+Access via **Retired Archive** link in Asset Manager, or **Retired Assets** in the sidebar.
+
+Retired assets are split into two sections:
+
+1. **Retired Item Types** — the entire type was retired. Expand each row to view all units that belonged to that type.
+2. **Individually Retired Units** — the parent type is still active, but this specific unit was retired. The table includes condition, purchase value, warranty, and a link to view the unit's full log history inline.
+
+All records are **read-only** and preserved permanently.
 
 ### Asset Reports
 
@@ -263,6 +326,18 @@ Add, edit, delete DPC contacts. Fields: name, title, department, phone, email. C
 | `user` | Access controlled by group membership |
 
 Add users via Settings → Users. Admins can reset passwords.
+
+### View As (Role Preview)
+
+Admins can preview the site from another role's perspective without logging out. The **VIEW SITE AS** control appears at the bottom of the sidebar (admin only).
+
+| Preview Mode | Simulates |
+|---|---|
+| **C.Admin** | Content Admin (can edit form fields, manage messages) |
+| **User** | Standard user (show access controlled by groups) |
+| **R/O** | Read-only user (view-only, no edits) |
+
+An amber banner appears at the top of every page while in preview mode. Click **Exit Preview** (or **RETURN TO ADMIN** in the sidebar) to restore full admin access. The real session is preserved — no actual role change occurs in the database.
 
 ### Registration Approval
 
@@ -377,7 +452,7 @@ The update progress log is displayed live in the browser. If the service restart
 
 Settings → Syslog. Send audit events to a remote syslog server via UDP.
 
-Events: LOGIN/LOGOUT · SHOW_CREATE/ARCHIVE/DELETE/RESTORE · FORM_SAVE · PDF_EXPORT · USER_CREATE/DELETE/PASSWORD_CHANGE · GROUP_ASSIGN/REMOVE · BACKUP_CREATED · SETTINGS_CHANGE · REGISTER_PENDING · EMAIL_CONFIRMED · USER_APPROVED · USER_DENIED · PASSWORD_RESET_REQUEST · PASSWORD_RESET_COMPLETE · APP_UPDATE_START · MESSAGE_CREATE · MESSAGE_EDIT · MESSAGE_DELETE
+Events: LOGIN/LOGOUT · SHOW_CREATE/ARCHIVE/DELETE/RESTORE · FORM_SAVE · PDF_EXPORT · USER_CREATE/DELETE/PASSWORD_CHANGE · GROUP_ASSIGN/REMOVE · BACKUP_CREATED · SETTINGS_CHANGE · REGISTER_PENDING · EMAIL_CONFIRMED · USER_APPROVED · USER_DENIED · PASSWORD_RESET_REQUEST · PASSWORD_RESET_COMPLETE · APP_UPDATE_START · MESSAGE_CREATE · MESSAGE_EDIT · MESSAGE_DELETE · ASSET_TYPE_RETIRE · ASSET_ITEM_RETIRE · ASSET_LOG_ADD · ASSET_LOG_DELETE · ADMIN_VIEW_AS · ADMIN_VIEW_AS_RESET
 
 ### Database Backups
 

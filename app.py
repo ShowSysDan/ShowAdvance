@@ -188,7 +188,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.5.0'
+APP_VERSION = '2.5.1'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -1175,6 +1175,7 @@ def admin_view_as():
         session['_real_is_readonly'] = session.get('is_readonly', False)
         session['_real_is_content_admin'] = session.get('is_content_admin', False)
     session['_view_as'] = view_as
+    syslog_logger.info(f"ADMIN_VIEW_AS view_as={view_as} by={session.get('username')}")
     if view_as == 'readonly':
         session['role'] = 'user'
         session['is_readonly'] = True
@@ -1200,6 +1201,7 @@ def admin_view_as_reset():
     session['is_readonly'] = session.pop('_real_is_readonly', False)
     session['is_content_admin'] = session.pop('_real_is_content_admin', False)
     session.pop('_view_as', None)
+    syslog_logger.info(f"ADMIN_VIEW_AS_RESET by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -3714,12 +3716,16 @@ def manual_backup():
 
 # ─── API ──────────────────────────────────────────────────────────────────────
 
+_gs_rate_limit = limiter.limit("60 per minute") if (_limiter_available and limiter) else (lambda f: f)
+
+
 @app.route('/api/search')
 @login_required
+@_gs_rate_limit
 def global_search():
     """Universal search across shows, contacts, asset types, and asset items."""
     q = (request.args.get('q') or '').strip()
-    if len(q) < 2:
+    if len(q) < 2 or len(q) > 255:
         return jsonify([])
 
     db = get_db()
@@ -5583,10 +5589,13 @@ def asset_item_log_add(item_id):
     log_type = data.get('log_type', 'note')
     if log_type not in ('note', 'damage', 'service', 'usage'):
         log_type = 'note'
+    import re as _re
+    from datetime import date as _date
     log_date = (data.get('log_date') or '').strip()
     if not log_date:
-        from datetime import date
-        log_date = date.today().isoformat()
+        log_date = _date.today().isoformat()
+    elif not _re.match(r'^\d{4}-\d{2}-\d{2}$', log_date):
+        return jsonify({'error': 'Invalid log_date format; use YYYY-MM-DD'}), 400
     db = get_db()
     db.execute("""
         INSERT INTO asset_logs (asset_item_id, user_id, log_date, log_type, body)
@@ -5599,6 +5608,7 @@ def asset_item_log_add(item_id):
         WHERE al.id = last_insert_rowid()
     """).fetchone()
     db.close()
+    syslog_logger.info(f"ASSET_LOG_ADD item_id={item_id} log_type={log_type} by={session.get('username')}")
     return jsonify(dict(row)), 201
 
 
@@ -5609,6 +5619,7 @@ def asset_log_delete(log_id):
     db.execute('DELETE FROM asset_logs WHERE id=?', (log_id,))
     db.commit()
     db.close()
+    syslog_logger.info(f"ASSET_LOG_DELETE log_id={log_id} by={session.get('username')}")
     return jsonify({'success': True})
 
 
