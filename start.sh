@@ -24,6 +24,7 @@ echo "[showadvance] Starting on port ${PORT}"
 
 exec "${VENV}/bin/gunicorn" \
     --workers 4 \
+    --threads 4 \
     --bind "0.0.0.0:${PORT}" \
     --timeout 120 \
     --access-logfile - \

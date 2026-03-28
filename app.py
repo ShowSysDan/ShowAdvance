@@ -3716,7 +3716,7 @@ def manual_backup():
 
 # ─── API ──────────────────────────────────────────────────────────────────────
 
-_gs_rate_limit = limiter.limit("60 per minute") if (_limiter_available and limiter) else (lambda f: f)
+_gs_rate_limit = limiter.limit("200 per minute") if (_limiter_available and limiter) else (lambda f: f)
 
 
 @app.route('/api/search')
