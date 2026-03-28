@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Register — 3·2·1→Theater{% endblock %}
+
+{% block auth_content %}
+<div class="login-page">
+  <div class="login-card" style="width:420px">
+    <div class="login-brand">
+      <svg class="brand-icon lg" width="50" height="61" viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <rect x="16.5" y="0" width="3" height="6" rx="1.5" fill="rgba(245,127,32,0.55)"/>
+        <rect x="10" y="5" width="16" height="12" rx="2.5" fill="#F57F20"/>
+        <rect x="11.5" y="6.5" width="13" height="9" rx="1.5" fill="rgba(0,0,0,0.18)"/>
+        <ellipse cx="18" cy="11" rx="4.5" ry="3.2" fill="rgba(255,255,255,0.1)"/>
+        <ellipse cx="14.5" cy="8.2" rx="2.5" ry="1.5" fill="rgba(255,255,255,0.3)"/>
+        <path d="M12,17 L24,17 L30,40 L6,40 Z" fill="rgba(245,127,32,0.13)"/>
+        <rect x="4" y="40" width="28" height="2" rx="1" fill="rgba(245,127,32,0.4)"/>
+      </svg>
+      <h1>3·2·1→THEATER</h1>
+      <p>Request an Account</p>
+    </div>
+
+    {% if success %}
+      <div class="flash flash-success" style="margin-bottom:16px">{{ success }}</div>
+      <p style="text-align:center;margin-top:12px"><a href="{{ url_for('login') }}" style="color:var(--accent)">← Back to Login</a></p>
+    {% else %}
+
+    {% if error %}
+      <div class="flash flash-error" style="margin-bottom:16px">{{ error }}</div>
+    {% endif %}
+
+    <form method="post" class="login-form" id="reg-form">
+      <input type="hidden" name="captcha_score" id="captcha_score" value="0">
+
+      <div class="field-group">
+        <label class="field-label">USERNAME *</label>
+        <input type="text" name="username" class="field-input" required autofocus
+               placeholder="jsmith" pattern="[a-z0-9_.\-]{3,32}"
+               title="3-32 characters: lowercase letters, numbers, . _ -">
+      </div>
+      <div class="field-group">
+        <label class="field-label">DISPLAY NAME</label>
+        <input type="text" name="display_name" class="field-input" placeholder="John Smith">
+      </div>
+      <div class="field-group">
+        <label class="field-label">EMAIL *</label>
+        <input type="email" name="email" class="field-input" required placeholder="you@example.com">
+      </div>
+      <div class="field-group">
+        <label class="field-label">PASSWORD * <span style="font-size:10px;color:var(--text-dim)">(min 8 chars)</span></label>
+        <input type="password" name="password" class="field-input" required minlength="8" id="reg-pw">
+      </div>
+      <div class="field-group">
+        <label class="field-label">CONFIRM PASSWORD *</label>
+        <input type="password" name="confirm_password" class="field-input" required id="reg-pw2">
+      </div>
+
+      <!-- CAPTCHA mini-game -->
+      <div class="field-group">
+        <label class="field-label">HUMAN VERIFICATION — Score at least 1 point</label>
+        <div id="dino-container" style="background:var(--bg-card);border:1px solid var(--border);border-radius:6px;overflow:hidden;position:relative;height:100px;cursor:pointer;user-select:none" onclick="dinoJump()" onkeydown="if(event.key===' '||event.key==='ArrowUp')dinoJump()" tabindex="0">
+          <canvas id="dino-canvas" width="400" height="100" style="width:100%;height:100px;display:block"></canvas>
+          <div id="dino-msg" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:11px;color:var(--text-dim);text-align:center;pointer-events:none">
+            Click or press Space to start — jump over the obstacles
+          </div>
+        </div>
+        <div id="captcha-badge" style="font-size:11px;color:var(--text-dim);margin-top:4px">Score: 0</div>
+      </div>
+
+      <button type="submit" class="btn btn-primary btn-full" id="reg-submit">Request Account</button>
+    </form>
+
+    <p class="login-footer" style="margin-top:14px">
+      Already have an account? <a href="{{ url_for('login') }}" style="color:var(--accent)">Sign in</a>
+    </p>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Dino-style CAPTCHA game ───────────────────────────────────────────────────
+const canvas   = document.getElementById('dino-canvas');
+const ctx      = canvas ? canvas.getContext('2d') : null;
+const scoreEl  = document.getElementById('captcha-badge');
+const msgEl    = document.getElementById('dino-msg');
+const scoreInp = document.getElementById('captcha_score');
+
+let dino = { x:40, y:70, w:18, h:22, vy:0, onGround:true };
+let obstacles = [];
+let frame = 0, score = 0, running = false, dead = false, speed = 3;
+let raf = null;
+
+const GROUND = 78;
+
+function dinoJump() {
+  if (dead) { resetDino(); return; }
+  if (!running) { running = true; if(msgEl) msgEl.style.display='none'; loop(); return; }
+  if (dino.onGround) { dino.vy = -9; dino.onGround = false; }
+}
+
+function resetDino() {
+  dino = { x:40, y:GROUND-22, w:18, h:22, vy:0, onGround:true };
+  obstacles = []; frame = 0; dead = false; speed = 3; running = false;
+  score = Math.max(score, parseInt(scoreInp.value)||0);
+  if(msgEl){ msgEl.style.display='block'; msgEl.textContent='Click or Space to try again'; }
+  if(ctx) ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+
+function spawnObstacle() {
+  const h = 18 + Math.random() * 14;
+  obstacles.push({ x: canvas.width + 20, y: GROUND - h, w: 12, h });
+}
+
+function loop() {
+  if (!running || dead) return;
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Ground line
+  ctx.strokeStyle = 'rgba(245,127,32,0.3)';
+  ctx.beginPath(); ctx.moveTo(0, GROUND); ctx.lineTo(canvas.width, GROUND); ctx.stroke();
+
+  // Speed
+  speed = 3 + score * 0.15;
+
+  // Spawn
+  frame++;
+  if (frame % Math.max(40, 80 - score * 3) === 0) spawnObstacle();
+
+  // Dino physics
+  dino.vy += 0.55;
+  dino.y += dino.vy;
+  if (dino.y >= GROUND - dino.h) { dino.y = GROUND - dino.h; dino.vy = 0; dino.onGround = true; }
+
+  // Draw dino
+  ctx.fillStyle = '#F57F20';
+  ctx.fillRect(dino.x, dino.y, dino.w, dino.h);
+  // Head
+  ctx.fillRect(dino.x + 4, dino.y - 8, 14, 10);
+  // Eye
+  ctx.fillStyle = '#000';
+  ctx.fillRect(dino.x + 14, dino.y - 7, 3, 3);
+
+  // Obstacles
+  ctx.fillStyle = 'rgba(245,127,32,0.7)';
+  for (let i = obstacles.length - 1; i >= 0; i--) {
+    const o = obstacles[i];
+    o.x -= speed;
+    ctx.fillRect(o.x, o.y, o.w, o.h);
+    if (o.x + o.w < 0) { obstacles.splice(i, 1); score++; scoreInp.value = score; if(scoreEl) scoreEl.textContent = `Score: ${score} ✓`; }
+    // Collision (with 3px margin)
+    if (dino.x + 3 < o.x + o.w && dino.x + dino.w - 3 > o.x &&
+        dino.y + 3 < o.y + o.h && dino.y + dino.h - 3 > o.y) {
+      dead = true;
+      running = false;
+      ctx.fillStyle = 'rgba(239,68,68,0.18)';
+      ctx.fillRect(0,0,canvas.width,canvas.height);
+      if(msgEl){ msgEl.style.display='block'; msgEl.textContent = score >= 1 ? '✓ Challenge passed! Click to play again.' : 'Hit! Click to try again.'; }
+      return;
+    }
+  }
+
+  // Score display in canvas
+  ctx.fillStyle = 'var(--text-dim, #888)';
+  ctx.font = '11px monospace';
+  ctx.fillText(score, canvas.width - 36, 14);
+
+  raf = requestAnimationFrame(loop);
+}
+
+// Keyboard on container
+const container = document.getElementById('dino-container');
+if (container) {
+  container.addEventListener('keydown', e => { if (e.key === ' ' || e.key === 'ArrowUp') { e.preventDefault(); dinoJump(); } });
+}
+
+// Form validation
+const form = document.getElementById('reg-form');
+if (form) {
+  form.addEventListener('submit', e => {
+    const pw = document.getElementById('reg-pw').value;
+    const pw2 = document.getElementById('reg-pw2').value;
+    if (pw !== pw2) { e.preventDefault(); alert('Passwords do not match.'); return; }
+    const s = parseInt(scoreInp.value) || 0;
+    if (s < 1) { e.preventDefault(); alert('Please score at least 1 point in the mini-game first.'); return; }
+  });
+}
+</script>
+{% endblock %}

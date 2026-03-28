@@ -6,7 +6,7 @@ ShowAdvance is a web-based production advance and day-of-show management tool bu
 
 ## Version Numbering
 
-**Current version: `2.0.0`**
+**Current version: `2.1.0`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -28,6 +28,7 @@ This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 Version history:
 - `1.x` — Initial release through security hardening and red team audit
 - `2.0.0` — Asset Manager (inventory tracking, rental pricing, show reservations, external rentals), Performance Company field, version numbering system
+- `2.1.0` — User registration with CAPTCHA, password recovery via email, pending registration approval workflow, in-app git update system with rollback, site-wide messaging (MOTD/maintenance/alerts with dismissal), AI session concurrency management, asset availability dashboards (public/private), asset usage reports by company/date range, Dashboards and Asset Reports in sidebar nav
 
 ---
 
@@ -43,22 +44,28 @@ Version history:
    - [Post-Show Notes](#post-show-notes)
    - [Labor Requests](#labor-requests)
    - [Assets Tab](#assets-tab)
+   - [Asset Availability Dashboards](#asset-availability-dashboards)
    - [Comments](#comments)
    - [Export & Files](#export--files)
    - [Email](#email)
    - [Public Show Page](#public-show-page)
 5. [Admin & Settings Guide](#admin--settings-guide)
    - [Asset Manager](#asset-manager)
+   - [Asset Reports](#asset-reports)
    - [Contacts](#contacts)
    - [Users & Roles](#users--roles)
+   - [Registration Approval](#registration-approval)
    - [Groups & Show Access](#groups--show-access)
    - [Form Field Customisation](#form-field-customisation)
+   - [Site-Wide Messages](#site-wide-messages)
+   - [In-App Updates](#in-app-updates)
    - [Venues & Radio Channels](#venues--radio-channels)
    - [WiFi Defaults](#wifi-defaults)
    - [Organisation Logo](#organisation-logo)
    - [Upload Size Limit](#upload-size-limit)
    - [Email Settings](#email-settings)
    - [AI Extraction (Ollama)](#ai-extraction-ollama)
+   - [AI Session Concurrency](#ai-session-concurrency)
    - [Syslog Settings](#syslog-settings)
    - [Database Backups](#database-backups)
    - [File Manager](#file-manager)
@@ -167,6 +174,14 @@ The **Assets** tab on every show allows content admins to:
 
 Availability is checked in real time when adding items. Items that are over-allocated or in maintenance show their status clearly.
 
+### Asset Availability Dashboards
+
+Access via **Dashboards** in the sidebar. Create personal or public availability views showing real-time asset status across your date range.
+
+- **Layouts:** Combined (all assets), By Category, or By Show
+- **Public dashboards** get a shareable URL (`/d/<slug>`) accessible without login — useful for tour managers and external clients
+- Each dashboard refreshes live from the `/api/assets/availability` endpoint
+
 ### Comments
 
 Show-specific comment thread with `@mention` autocomplete. Visible to all authorised users. Admins can view comment edit history.
@@ -227,6 +242,13 @@ Category (e.g. Video)
 
 **Rental pricing:** Each item type has a base rental cost. When added to a show the price is **locked** immediately — if the database price is updated later, existing show reservations keep the original price. New reservations use the current price.
 
+### Asset Reports
+
+Access via **Asset Reports** in the sidebar (admin only). Filter asset usage by performance company and date range. Export results as CSV.
+
+- Summary cards show total revenue, line item count, show count, and categories used
+- The **Performance Company** field on each show's advance sheet drives company-level filtering
+
 ### Contacts
 
 Add, edit, delete DPC contacts. Fields: name, title, department, phone, email. Contacts appear in dropdowns on advance and schedule forms.
@@ -239,6 +261,17 @@ Add, edit, delete DPC contacts. Fields: name, title, department, phone, email. C
 | `user` | Access controlled by group membership |
 
 Add users via Settings → Users. Admins can reset passwords.
+
+### Registration Approval
+
+New users can self-register at `/register`. The flow:
+1. User fills out registration form and completes the Dino CAPTCHA (score ≥ 1 to pass)
+2. A confirmation email is sent — user must click the link to verify their address
+3. Admin sees pending requests in Settings → Registrations (with badge count)
+4. Admin selects a role and clicks **Approve** (or **Deny**)
+5. User receives an approval email and can log in
+
+**Forgot password:** Available at `/forgot-password`. Sends a 2-hour reset link via email. Also requires CAPTCHA.
 
 ### Groups & Show Access
 
@@ -306,11 +339,43 @@ Settings → Email. Configure outbound email for sending schedule PDFs to contac
 
 Settings → AI. Connect to a local [Ollama](https://ollama.com) instance for AI-powered data extraction from uploaded documents (PDF, DOCX, XLSX, RTF, TXT). Configure the Ollama server URL and enable/disable the feature. The AI can pre-populate advance form fields from uploaded rider documents.
 
+### AI Session Concurrency
+
+Settings → AI → **Max Concurrent AI Sessions**. Limits how many AI extraction jobs can run simultaneously across all Gunicorn workers (stored in DB, shared across processes). Default: 2. The AI extract button is dynamically disabled in the UI when all slots are busy.
+
+### Site-Wide Messages
+
+Settings → Messages. Create banners visible to all logged-in users.
+
+| Field | Description |
+|-------|-------------|
+| Type | `MOTD` (message of the day), `Maintenance` (scheduled downtime notice), `Alert` (urgent) |
+| Dismissible by | `user` (anyone can dismiss) or `admin` (only admins, persists for regular users) |
+| Expires at | Automatically hides after this datetime |
+| Show on login | Display prominently on the login page |
+
+Messages are fetched via `/api/messages` on every page load and appear as dismissible flash banners at the top of the main content area. Admins can deactivate a message for **all** users at once with the **✕ All** button.
+
+### In-App Updates
+
+Settings → Updates. Pull the latest release from git and auto-restart the service.
+
+1. Click **Auto-Detect** to identify the systemd service name (or enter it manually)
+2. Click **Check for Updates** to see pending commits and changed files
+3. Click **Apply Update** to:
+   - Archive all changed files to `backups/pre_update_<timestamp>/` (rollback point)
+   - Run `git pull`
+   - Run `python init_db.py --migrate` (applies any schema changes)
+   - Restart the systemd service
+   - If any step fails, the archived files are restored and the service restarted
+
+The update progress log is displayed live in the browser. If the service restarts, the page automatically detects when Flask comes back up.
+
 ### Syslog Settings
 
 Settings → Syslog. Send audit events to a remote syslog server via UDP.
 
-Events: LOGIN/LOGOUT · SHOW_CREATE/ARCHIVE/DELETE/RESTORE · FORM_SAVE · PDF_EXPORT · USER_CREATE/DELETE/PASSWORD_CHANGE · GROUP_ASSIGN/REMOVE · BACKUP_CREATED · SETTINGS_CHANGE
+Events: LOGIN/LOGOUT · SHOW_CREATE/ARCHIVE/DELETE/RESTORE · FORM_SAVE · PDF_EXPORT · USER_CREATE/DELETE/PASSWORD_CHANGE · GROUP_ASSIGN/REMOVE · BACKUP_CREATED · SETTINGS_CHANGE · REGISTER_PENDING · EMAIL_CONFIRMED · USER_APPROVED · USER_DENIED · PASSWORD_RESET_REQUEST · PASSWORD_RESET_COMPLETE · APP_UPDATE_START · MESSAGE_CREATE · MESSAGE_EDIT · MESSAGE_DELETE
 
 ### Database Backups
 

@@ -395,6 +395,83 @@ CREATE INDEX IF NOT EXISTS idx_show_assets_show   ON show_assets(show_id);
 CREATE INDEX IF NOT EXISTS idx_show_assets_type   ON show_assets(asset_type_id);
 CREATE INDEX IF NOT EXISTS idx_asset_items_type   ON asset_items(asset_type_id);
 CREATE INDEX IF NOT EXISTS idx_asset_maint_item   ON asset_maintenance(asset_item_id);
+
+-- ── User Registration & Recovery ─────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS user_pending_registration (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    username     TEXT UNIQUE NOT NULL,
+    display_name TEXT DEFAULT '',
+    email        TEXT NOT NULL,
+    password_hash TEXT NOT NULL,
+    confirm_token TEXT UNIQUE NOT NULL,
+    token_expires TIMESTAMP NOT NULL,
+    email_confirmed INTEGER DEFAULT 0,
+    admin_approved  INTEGER DEFAULT 0,
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token      TEXT UNIQUE NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    used       INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- ── Site-Wide Messaging ───────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS site_messages (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    title           TEXT NOT NULL DEFAULT '',
+    body_html       TEXT NOT NULL DEFAULT '',
+    msg_type        TEXT NOT NULL DEFAULT 'motd',
+    is_active       INTEGER DEFAULT 1,
+    show_on_login   INTEGER DEFAULT 0,
+    dismissible_by  TEXT DEFAULT 'user',
+    expires_at      TIMESTAMP,
+    scheduled_for   TIMESTAMP,
+    created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS site_message_dismissals (
+    message_id INTEGER NOT NULL REFERENCES site_messages(id) ON DELETE CASCADE,
+    user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (message_id, user_id)
+);
+
+-- ── Asset Dashboard ───────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS asset_dashboards (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL DEFAULT 'My Dashboard',
+    is_public   INTEGER DEFAULT 0,
+    public_slug TEXT UNIQUE,
+    layout      TEXT DEFAULT 'combined',
+    config_json TEXT DEFAULT '{}',
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_asset_dashboards_user ON asset_dashboards(user_id);
+CREATE INDEX IF NOT EXISTS idx_asset_dashboards_slug ON asset_dashboards(public_slug);
+
+-- ── AI Session Tracking ───────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS ai_sessions (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    show_id    INTEGER REFERENCES shows(id) ON DELETE SET NULL,
+    started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    ended_at   TIMESTAMP,
+    status     TEXT DEFAULT 'running'
+);
+
+CREATE INDEX IF NOT EXISTS idx_ai_sessions_status ON ai_sessions(status);
 """
 
 SEED_CONTACTS = [
@@ -1122,14 +1199,90 @@ def migrate_db():
         CREATE INDEX IF NOT EXISTS idx_asset_maint_item ON asset_maintenance(asset_item_id);
     """)
 
-    # New column migrations for asset manager
+    # New column migrations
     for alter_sql in [
         "ALTER TABLE shows ADD COLUMN performance_company TEXT DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN email TEXT DEFAULT ''",
+        "ALTER TABLE users ADD COLUMN is_readonly INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN email_confirmed INTEGER DEFAULT 1",
+        "ALTER TABLE users ADD COLUMN pending_approval INTEGER DEFAULT 0",
     ]:
         try:
             conn.execute(alter_sql)
         except Exception:
             pass  # Column already exists
+
+    # User registration, messaging, dashboard, AI session tables
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS user_pending_registration (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            username      TEXT UNIQUE NOT NULL,
+            display_name  TEXT DEFAULT '',
+            email         TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            confirm_token TEXT UNIQUE NOT NULL,
+            token_expires TIMESTAMP NOT NULL,
+            email_confirmed INTEGER DEFAULT 0,
+            admin_approved  INTEGER DEFAULT 0,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS password_reset_tokens (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token      TEXT UNIQUE NOT NULL,
+            expires_at TIMESTAMP NOT NULL,
+            used       INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS site_messages (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            title           TEXT NOT NULL DEFAULT '',
+            body_html       TEXT NOT NULL DEFAULT '',
+            msg_type        TEXT NOT NULL DEFAULT 'motd',
+            is_active       INTEGER DEFAULT 1,
+            show_on_login   INTEGER DEFAULT 0,
+            dismissible_by  TEXT DEFAULT 'user',
+            expires_at      TIMESTAMP,
+            scheduled_for   TIMESTAMP,
+            created_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS site_message_dismissals (
+            message_id INTEGER NOT NULL REFERENCES site_messages(id) ON DELETE CASCADE,
+            user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            dismissed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (message_id, user_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS asset_dashboards (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            name        TEXT NOT NULL DEFAULT 'My Dashboard',
+            is_public   INTEGER DEFAULT 0,
+            public_slug TEXT UNIQUE,
+            layout      TEXT DEFAULT 'combined',
+            config_json TEXT DEFAULT '{}',
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_asset_dashboards_user ON asset_dashboards(user_id);
+        CREATE INDEX IF NOT EXISTS idx_asset_dashboards_slug ON asset_dashboards(public_slug);
+
+        CREATE TABLE IF NOT EXISTS ai_sessions (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            show_id    INTEGER REFERENCES shows(id) ON DELETE SET NULL,
+            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ended_at   TIMESTAMP,
+            status     TEXT DEFAULT 'running'
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_ai_sessions_status ON ai_sessions(status);
+    """)
 
     # Seed job positions if empty
     _seed_job_positions(conn)

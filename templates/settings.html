@@ -24,6 +24,11 @@
   <button class="tab-btn" onclick="switchSettingsTab('technicians')">Technicians</button>
   {% endif %}
   {% if user.role == 'admin' %}
+  <button class="tab-btn" onclick="switchSettingsTab('registrations')">
+    Registrations{% if pending_regs %} <span style="background:var(--accent);color:#000;border-radius:99px;font-size:10px;padding:1px 6px;margin-left:4px">{{ pending_regs|length }}</span>{% endif %}
+  </button>
+  <button class="tab-btn" onclick="switchSettingsTab('messages')">Messages</button>
+  <button class="tab-btn" onclick="switchSettingsTab('update')">Updates</button>
   <button class="tab-btn" onclick="switchSettingsTab('syslog')">Syslog</button>
   <button class="tab-btn" onclick="switchSettingsTab('backups')">Backups</button>
   <button class="tab-btn" onclick="switchSettingsTab('files')">Files</button>
@@ -760,9 +765,109 @@
         <strong>Setup:</strong> Install <a href="https://ollama.com" target="_blank" style="color:var(--accent)">Ollama</a>, then run: <code style="font-family:var(--font-mono);font-size:11px">ollama pull llama3.2</code><br>
         For better accuracy on structured extraction, <code style="font-family:var(--font-mono);font-size:11px">mistral</code> or <code style="font-family:var(--font-mono);font-size:11px">llama3.1:8b</code> may perform better.
       </div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+      <h3 class="sub-section-label">AI SESSION CONCURRENCY</h3>
+      <p class="field-hint">Limit how many AI extraction jobs can run simultaneously across all Gunicorn workers. Recommended: 1–2.</p>
+      <div class="field-group">
+        <label class="field-label">MAX CONCURRENT AI SESSIONS</label>
+        <input type="number" id="ai-max-sessions" class="field-input" value="{{ ai_max_sessions }}" min="1" max="10" style="width:80px">
+      </div>
+      <div id="ai-slots-msg" class="field-msg" style="display:none;margin-top:4px"></div>
+      <div style="margin-top:8px">
+        <button class="btn btn-primary" onclick="saveAiSessions()">Save Limit</button>
+        <span id="ai-live-status" style="font-size:11px;color:var(--text-dim);margin-left:12px"></span>
+      </div>
     </div>
   </div>
 </div>
+
+{# ── PENDING REGISTRATIONS ─────────────────────────────────────────────────── #}
+<div id="stab-registrations" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> PENDING ACCOUNT REQUESTS
+      <button class="btn btn-sm btn-ghost ml-auto" onclick="loadPendingRegs()">↻ Refresh</button>
+    </div>
+    <div class="form-section-body no-pad">
+      <table class="data-table" id="pending-reg-table">
+        <thead><tr><th>USERNAME</th><th>DISPLAY NAME</th><th>EMAIL</th><th>REQUESTED</th><th>EMAIL CONFIRMED</th><th style="width:160px">ACTIONS</th></tr></thead>
+        <tbody id="pending-reg-tbody">
+          {% for r in pending_regs %}
+          <tr id="reg-row-{{ r.id }}">
+            <td class="mono">{{ r.username }}</td>
+            <td>{{ r.display_name or '—' }}</td>
+            <td class="text-sm">{{ r.email }}</td>
+            <td class="text-dim text-sm">{{ r.created_at[:10] if r.created_at else '—' }}</td>
+            <td>{% if r.email_confirmed %}<span style="color:#22C55E">✓ Yes</span>{% else %}<span style="color:#FBBF24">Pending</span>{% endif %}</td>
+            <td>
+              <div class="action-btns">
+                <select id="role-{{ r.id }}" class="field-input field-input-sm" style="width:90px">
+                  <option value="user">User</option>
+                  <option value="staff">Staff</option>
+                  <option value="admin">Admin</option>
+                </select>
+                <button class="btn btn-xs btn-primary" onclick="approveReg({{ r.id }})">Approve</button>
+                <button class="btn btn-xs btn-danger-ghost" onclick="denyReg({{ r.id }})">Deny</button>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr id="reg-empty"><td colspan="6" style="text-align:center;padding:24px;color:var(--text-dim)">No pending registrations.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{# ── SITE MESSAGES ─────────────────────────────────────────────────────────── #}
+<div id="stab-messages" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> SITE-WIDE MESSAGES
+      <button class="btn btn-sm btn-primary ml-auto" onclick="openMsgModal()">+ New Message</button>
+    </div>
+    <div class="form-section-body no-pad">
+      <table class="data-table" id="msg-table">
+        <thead><tr><th>TYPE</th><th>TITLE</th><th>STATUS</th><th>EXPIRES</th><th>CREATED</th><th style="width:120px">ACTIONS</th></tr></thead>
+        <tbody id="msg-tbody">
+          <tr id="msg-loading"><td colspan="6" style="text-align:center;padding:20px;color:var(--text-dim)">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+{# ── IN-APP UPDATES ────────────────────────────────────────────────────────── #}
+<div id="stab-update" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> IN-APP UPDATES</div>
+    <div class="form-section-body" style="max-width:720px">
+      <p class="field-hint">Pull the latest version from git and automatically restart the service. Changed files are archived before pull so you can roll back manually.</p>
+
+      <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px">
+        <div class="field-group" style="margin:0;flex:1">
+          <label class="field-label">SYSTEMD SERVICE NAME (auto-detected)</label>
+          <input type="text" id="update-service" class="field-input" placeholder="showadvance">
+        </div>
+        <button class="btn btn-ghost" onclick="detectService()">Auto-Detect</button>
+        <button class="btn btn-ghost" onclick="checkUpdates()">Check for Updates</button>
+        <button class="btn btn-primary" id="update-apply-btn" onclick="applyUpdate()" style="display:none">Apply Update</button>
+      </div>
+
+      <div id="update-status-box" style="display:none">
+        <div id="update-commits" style="margin-bottom:12px"></div>
+        <div id="update-files" style="margin-bottom:12px"></div>
+        <div style="background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:var(--font-mono);font-size:11px;max-height:320px;overflow-y:auto" id="update-log">
+          <div style="color:var(--text-dim)">Ready.</div>
+        </div>
+        <div id="update-phase-badge" style="margin-top:8px;font-size:12px;font-weight:600"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endif %}
 
 {# ── JOB POSITIONS ─────────────────────────────────────────────────────────── #}
@@ -2193,5 +2298,304 @@ async function savePdfEmailSettings() {
 
 // Initialize email mode toggle on page load
 if (document.getElementById('email_provider')) toggleEmailMode();
+
+// ── AI Session Limit ──────────────────────────────────────────────────────────
+async function saveAiSessions() {
+  const val = parseInt(document.getElementById('ai-max-sessions').value) || 2;
+  const resp = await fetch('/settings/ai', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ ollama_enabled: document.getElementById('ollama-enabled').checked ? '1':'0',
+                           ollama_url: document.getElementById('ollama-url').value.trim(),
+                           ollama_model: document.getElementById('ollama-model').value.trim(),
+                           ai_max_sessions: String(val) })
+  });
+  const d = await resp.json();
+  const msg = document.getElementById('ai-slots-msg');
+  msg.style.display = 'block';
+  msg.textContent = d.success ? `✓ Limit set to ${val} session(s).` : '✗ ' + (d.error || 'Error');
+  if (d.success) { showSaveToast('✓ AI session limit saved'); setTimeout(()=>{msg.style.display='none';},3000); }
+}
+
+async function pollAiSlots() {
+  try {
+    const resp = await fetch('/api/ai/slots');
+    const d = await resp.json();
+    const el = document.getElementById('ai-live-status');
+    if (el) el.textContent = `Live: ${d.active}/${d.limit} slots in use`;
+  } catch(e) {}
+}
+if (document.getElementById('stab-ai')) setInterval(pollAiSlots, 5000);
+
+// ── Pending Registrations ─────────────────────────────────────────────────────
+async function loadPendingRegs() {
+  const resp = await fetch('/settings/pending-registrations');
+  const rows = await resp.json();
+  const tbody = document.getElementById('pending-reg-tbody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr id="reg-empty"><td colspan="6" style="text-align:center;padding:24px;color:var(--text-dim)">No pending registrations.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = rows.map(r => `
+    <tr id="reg-row-${r.id}">
+      <td class="mono">${r.username}</td>
+      <td>${r.display_name || '—'}</td>
+      <td class="text-sm">${r.email}</td>
+      <td class="text-dim text-sm">${(r.created_at||'').slice(0,10) || '—'}</td>
+      <td>${r.email_confirmed ? '<span style="color:#22C55E">✓ Yes</span>' : '<span style="color:#FBBF24">Pending</span>'}</td>
+      <td>
+        <div class="action-btns">
+          <select id="role-${r.id}" class="field-input field-input-sm" style="width:90px">
+            <option value="user">User</option><option value="staff">Staff</option><option value="admin">Admin</option>
+          </select>
+          <button class="btn btn-xs btn-primary" onclick="approveReg(${r.id})">Approve</button>
+          <button class="btn btn-xs btn-danger-ghost" onclick="denyReg(${r.id})">Deny</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+async function approveReg(id) {
+  const role = document.getElementById('role-'+id)?.value || 'user';
+  const resp = await fetch(`/settings/pending-registrations/${id}/approve`, {
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({role})
+  });
+  const d = await resp.json();
+  if (d.success) { document.getElementById('reg-row-'+id)?.remove(); showSaveToast('✓ Account approved'); }
+  else alert(d.error || 'Error approving registration');
+}
+
+async function denyReg(id) {
+  if (!confirm('Deny and delete this registration request?')) return;
+  const resp = await fetch(`/settings/pending-registrations/${id}/deny`, { method:'POST' });
+  const d = await resp.json();
+  if (d.success) { document.getElementById('reg-row-'+id)?.remove(); showSaveToast('Registration denied'); }
+}
+
+// ── Site Messages ─────────────────────────────────────────────────────────────
+let _editingMsgId = null;
+
+async function loadMessages() {
+  const resp = await fetch('/settings/messages');
+  const rows = await resp.json();
+  const tbody = document.getElementById('msg-tbody');
+  if (!tbody) return;
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-dim)">No messages yet.</td></tr>';
+    return;
+  }
+  const typeMap = { motd:'MOTD', maintenance:'Maintenance', alert:'Alert' };
+  tbody.innerHTML = rows.map(m => `
+    <tr id="msg-row-${m.id}">
+      <td><span class="role-badge">${typeMap[m.msg_type]||m.msg_type}</span></td>
+      <td><strong>${m.title}</strong></td>
+      <td>${m.is_active ? '<span style="color:#22C55E">Active</span>' : '<span style="color:var(--text-dim)">Inactive</span>'}</td>
+      <td class="text-dim text-sm">${m.expires_at ? m.expires_at.slice(0,16) : '—'}</td>
+      <td class="text-dim text-sm">${(m.created_at||'').slice(0,10)}</td>
+      <td>
+        <div class="action-btns">
+          <button class="btn btn-xs btn-ghost" onclick="editMsg(${m.id})">✎</button>
+          <button class="btn btn-xs btn-ghost" onclick="dismissAllMsg(${m.id})" title="Deactivate for everyone">✕ All</button>
+          <button class="btn btn-xs btn-danger-ghost" onclick="deleteMsg(${m.id})">×</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function openMsgModal(data) {
+  _editingMsgId = data?.id || null;
+  document.getElementById('msg-modal-title').textContent = _editingMsgId ? 'Edit Message' : 'New Message';
+  document.getElementById('msg-m-title').value      = data?.title || '';
+  document.getElementById('msg-m-body').value       = data?.body_html || '';
+  document.getElementById('msg-m-type').value       = data?.msg_type || 'motd';
+  document.getElementById('msg-m-dismiss').value    = data?.dismissible_by || 'user';
+  document.getElementById('msg-m-expires').value    = data?.expires_at ? data.expires_at.slice(0,16) : '';
+  document.getElementById('msg-m-active').checked   = data ? data.is_active : true;
+  document.getElementById('msg-m-login').checked    = data?.show_on_login || false;
+  document.getElementById('msg-modal').style.display = 'flex';
+}
+
+function closeMsgModal() { document.getElementById('msg-modal').style.display='none'; }
+
+async function saveMsg() {
+  const payload = {
+    title:          document.getElementById('msg-m-title').value.trim(),
+    body_html:      document.getElementById('msg-m-body').value.trim(),
+    msg_type:       document.getElementById('msg-m-type').value,
+    dismissible_by: document.getElementById('msg-m-dismiss').value,
+    expires_at:     document.getElementById('msg-m-expires').value || null,
+    is_active:      document.getElementById('msg-m-active').checked,
+    show_on_login:  document.getElementById('msg-m-login').checked,
+  };
+  if (!payload.title) { alert('Title required'); return; }
+  const url    = _editingMsgId ? `/settings/messages/${_editingMsgId}` : '/settings/messages';
+  const method = _editingMsgId ? 'PUT' : 'POST';
+  const resp   = await fetch(url, { method, headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+  if (resp.ok) { closeMsgModal(); loadMessages(); showSaveToast('✓ Message saved'); }
+  else { const e = await resp.json(); alert(e.error || 'Error saving message'); }
+}
+
+async function editMsg(id) {
+  const resp = await fetch('/settings/messages');
+  const rows = await resp.json();
+  const m = rows.find(r => r.id === id);
+  if (m) openMsgModal(m);
+}
+
+async function dismissAllMsg(id) {
+  if (!confirm('Deactivate this message for everyone?')) return;
+  await fetch(`/settings/messages/${id}/dismiss-all`, { method:'POST' });
+  loadMessages();
+  showSaveToast('Message deactivated');
+}
+
+async function deleteMsg(id) {
+  if (!confirm('Delete this message?')) return;
+  await fetch(`/settings/messages/${id}`, { method:'DELETE' });
+  document.getElementById('msg-row-'+id)?.remove();
+  showSaveToast('Message deleted');
+}
+
+// ── In-App Update ─────────────────────────────────────────────────────────────
+async function detectService() {
+  const resp = await fetch('/settings/update/detect-service');
+  const d = await resp.json();
+  document.getElementById('update-service').value = d.service || '';
+  if (!d.service) alert('Could not auto-detect service name. Enter it manually.');
+}
+
+async function checkUpdates() {
+  document.getElementById('update-status-box').style.display='block';
+  const logEl = document.getElementById('update-log');
+  logEl.innerHTML = '<div style="color:var(--text-dim)">Fetching…</div>';
+  const resp = await fetch('/settings/update/check');
+  const d = await resp.json();
+  if (d.error) { logEl.innerHTML = `<div style="color:#EF4444">Error: ${d.error}</div>`; return; }
+  const commitEl = document.getElementById('update-commits');
+  const filesEl  = document.getElementById('update-files');
+  if (!d.available) {
+    commitEl.innerHTML = '<div style="color:#22C55E;font-weight:600">✓ Up to date — no updates available.</div>';
+    filesEl.innerHTML  = '';
+    logEl.innerHTML    = '';
+    document.getElementById('update-apply-btn').style.display = 'none';
+    return;
+  }
+  commitEl.innerHTML = `<div style="margin-bottom:8px"><strong>${d.commits.length} commit(s) available:</strong><ul style="margin:4px 0 0 16px;font-size:12px;color:var(--text-dim)">${d.commits.map(c=>`<li>${c}</li>`).join('')}</ul></div>`;
+  filesEl.innerHTML  = d.files.length ? `<div style="font-size:11px;color:var(--text-dim)">Changed files: ${d.files.join(', ')}</div>` : '';
+  logEl.innerHTML    = '<div style="color:#FBBF24">Updates available. Click "Apply Update" to proceed.</div>';
+  document.getElementById('update-apply-btn').style.display = 'inline-flex';
+}
+
+let _updatePollTimer = null;
+
+async function applyUpdate() {
+  if (!confirm('This will pull from git and restart the service. A backup of changed files will be made first. Continue?')) return;
+  const service = document.getElementById('update-service').value.trim();
+  document.getElementById('update-apply-btn').disabled = true;
+  const resp = await fetch('/settings/update/apply', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ service_name: service })
+  });
+  const d = await resp.json();
+  if (!resp.ok) { alert(d.error || 'Failed to start update'); document.getElementById('update-apply-btn').disabled=false; return; }
+  // Start polling
+  _updatePollTimer = setInterval(pollUpdateStatus, 1500);
+}
+
+async function pollUpdateStatus() {
+  try {
+    const resp = await fetch('/api/update/status');
+    if (!resp.ok) {
+      // Flask is restarting — show reconnecting state
+      document.getElementById('update-log').innerHTML += '<div style="color:#FBBF24">Service restarting…</div>';
+      return;
+    }
+    const d = await resp.json();
+    const logEl = document.getElementById('update-log');
+    // Show new log lines
+    if (d.log && d.log.length) logEl.innerHTML = d.log.map(l=>`<div>${l}</div>`).join('');
+    const phaseEl = document.getElementById('update-phase-badge');
+    if (d.phase === 'done') {
+      phaseEl.innerHTML = '<span style="color:#22C55E">✓ Update complete!</span>';
+      clearInterval(_updatePollTimer);
+      setTimeout(() => location.reload(), 2000);
+    } else if (d.phase === 'failed') {
+      phaseEl.innerHTML = `<span style="color:#EF4444">✗ Update failed: ${d.error || 'unknown error'}</span>`;
+      clearInterval(_updatePollTimer);
+      document.getElementById('update-apply-btn').disabled=false;
+    } else {
+      phaseEl.innerHTML = `<span style="color:#FBBF24">${d.phase}…</span>`;
+    }
+  } catch(e) {
+    document.getElementById('update-log').innerHTML += '<div style="color:#FBBF24">Waiting for service to come back…</div>';
+  }
+}
+
+// Auto-detect service on update tab open
+(function(){
+  const origSwitch = window.switchSettingsTab;
+  window.switchSettingsTab = function(name) {
+    origSwitch(name);
+    if (name === 'registrations') loadPendingRegs();
+    if (name === 'messages')      loadMessages();
+    if (name === 'update')        detectService();
+  };
+})();
 </script>
+
+<!-- Message Modal -->
+{% if user.role == 'admin' %}
+<div id="msg-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeMsgModal()">
+  <div class="modal-box" style="width:540px">
+    <div class="modal-header">
+      <span class="modal-title" id="msg-modal-title">New Message</span>
+      <button class="modal-close" onclick="closeMsgModal()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">TYPE</label>
+          <select id="msg-m-type" class="field-input">
+            <option value="motd">MOTD (Message of the Day)</option>
+            <option value="maintenance">Maintenance Notice</option>
+            <option value="alert">Alert</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label class="field-label">DISMISSIBLE BY</label>
+          <select id="msg-m-dismiss" class="field-input">
+            <option value="user">Anyone (user can dismiss)</option>
+            <option value="admin">Admin only</option>
+          </select>
+        </div>
+      </div>
+      <div class="field-group">
+        <label class="field-label">TITLE *</label>
+        <input type="text" id="msg-m-title" class="field-input" placeholder="e.g. Scheduled Maintenance">
+      </div>
+      <div class="field-group">
+        <label class="field-label">BODY (HTML allowed)</label>
+        <textarea id="msg-m-body" class="field-input" rows="4" placeholder="Optional detail text..."></textarea>
+      </div>
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">EXPIRES AT (optional)</label>
+          <input type="datetime-local" id="msg-m-expires" class="field-input">
+        </div>
+        <div class="field-group" style="padding-top:22px;display:flex;gap:16px;align-items:center">
+          <label class="checkbox-label"><input type="checkbox" id="msg-m-active" checked> Active</label>
+          <label class="checkbox-label"><input type="checkbox" id="msg-m-login"> Show on login</label>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeMsgModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveMsg()">Save</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% endblock %}

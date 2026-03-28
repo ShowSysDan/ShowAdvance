@@ -82,11 +82,19 @@
       {% endif %}
 
       <div class="nav-section-label">SYSTEM</div>
+      <a href="{{ url_for('dashboards_list') }}" class="nav-item {% if request.endpoint in ['dashboards_list','dashboard_view'] %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+        Dashboards
+      </a>
       <a href="{{ url_for('crew_tracker') }}" class="nav-item {% if request.endpoint == 'crew_tracker' %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         Skill Tracker
       </a>
       {% if user.role == 'admin' %}
+      <a href="{{ url_for('asset_reports') }}" class="nav-item {% if request.endpoint == 'asset_reports' %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+        Asset Reports
+      </a>
       <a href="{{ url_for('assets_admin') }}" class="nav-item {% if request.endpoint == 'assets_admin' %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
         Asset Manager
@@ -144,6 +152,9 @@
       {% endif %}
     {% endwith %}
 
+    <!-- Site-wide message banners -->
+    <div id="site-msg-container"></div>
+
     {% block content %}{% endblock %}
   </main>
 
@@ -155,5 +166,33 @@
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% block scripts %}{% endblock %}
 <div id="save-toast" class="save-toast"></div>
+
+{% if user %}
+<script>
+// ── Site-wide message banners ─────────────────────────────────────────────────
+(function loadSiteMsgs() {
+  fetch('/api/messages').then(r => r.json()).then(msgs => {
+    const container = document.getElementById('site-msg-container');
+    if (!container || !msgs.length) return;
+    container.innerHTML = msgs.map(m => {
+      const typeMap = { motd:'info', maintenance:'warning', alert:'error' };
+      const cls = typeMap[m.msg_type] || 'info';
+      const dismissBtn = m.dismissible_by === 'user' || {{ 'true' if user.role == 'admin' else 'false' }}
+        ? `<button onclick="dismissMsg(${m.id},this)" style="background:none;border:none;font-size:18px;cursor:pointer;color:inherit;opacity:.6;margin-left:auto">×</button>`
+        : '';
+      return `<div class="flash flash-${cls}" id="site-msg-${m.id}" style="display:flex;align-items:flex-start;gap:8px">
+        <div style="flex:1"><strong>${m.title}</strong>${m.body_html ? '<br><div style="margin-top:4px;font-size:12px">'+m.body_html+'</div>' : ''}</div>
+        ${dismissBtn}
+      </div>`;
+    }).join('');
+  }).catch(() => {});
+})();
+
+function dismissMsg(id, btn) {
+  fetch('/api/messages/' + id + '/dismiss', { method:'POST' })
+    .then(() => { const el = document.getElementById('site-msg-'+id); if(el) el.remove(); });
+}
+</script>
+{% endif %}
 </body>
 </html>
