@@ -188,7 +188,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.3.0'
+APP_VERSION = '2.4.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -1153,6 +1153,54 @@ def logout():
         db.close()
     session.clear()
     return redirect(url_for('login'))
+
+
+@app.route('/admin/view-as', methods=['POST'])
+@login_required
+def admin_view_as():
+    """Admin-only: temporarily view the site as a different role."""
+    if session.get('role') != 'admin' and not session.get('_real_role'):
+        return jsonify({'error': 'Forbidden'}), 403
+    # If already in view-as mode, restore real role first before switching
+    real_role = session.get('_real_role', session.get('role'))
+    if real_role != 'admin':
+        return jsonify({'error': 'Forbidden'}), 403
+    data = request.get_json() or {}
+    view_as = data.get('role', '')
+    if view_as not in ('user', 'readonly', 'content_admin'):
+        return jsonify({'error': 'Invalid role'}), 400
+    # Save real values if not already saved
+    if '_real_role' not in session:
+        session['_real_role'] = session.get('role')
+        session['_real_is_readonly'] = session.get('is_readonly', False)
+        session['_real_is_content_admin'] = session.get('is_content_admin', False)
+    session['_view_as'] = view_as
+    if view_as == 'readonly':
+        session['role'] = 'user'
+        session['is_readonly'] = True
+        session['is_content_admin'] = False
+    elif view_as == 'user':
+        session['role'] = 'user'
+        session['is_readonly'] = False
+        session['is_content_admin'] = False
+    elif view_as == 'content_admin':
+        session['role'] = 'user'
+        session['is_readonly'] = False
+        session['is_content_admin'] = True
+    return jsonify({'success': True, 'view_as': view_as})
+
+
+@app.route('/admin/view-as/reset', methods=['POST'])
+@login_required
+def admin_view_as_reset():
+    """Restore the admin's real role after view-as preview."""
+    if '_real_role' not in session:
+        return jsonify({'success': True})
+    session['role'] = session.pop('_real_role')
+    session['is_readonly'] = session.pop('_real_is_readonly', False)
+    session['is_content_admin'] = session.pop('_real_is_content_admin', False)
+    session.pop('_view_as', None)
+    return jsonify({'success': True})
 
 
 @app.route('/change-password', methods=['GET', 'POST'])
@@ -5177,8 +5225,9 @@ def asset_type_add():
     db.execute("""
         INSERT INTO asset_types
           (category_id, parent_type_id, name, manufacturer, model,
-           storage_location, rental_cost, reserve_count, is_consumable, track_quantity, sort_order)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?)
+           storage_location, rental_cost, reserve_count, is_consumable, track_quantity,
+           supplier_name, supplier_contact, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         category_id,
         data.get('parent_type_id') or None,
@@ -5190,6 +5239,8 @@ def asset_type_add():
         int(data.get('reserve_count') or 0),
         1 if data.get('is_consumable') else 0,
         1 if data.get('track_quantity', True) else 0,
+        (data.get('supplier_name') or '').strip(),
+        (data.get('supplier_contact') or '').strip(),
         max_order + 1,
     ))
     db.commit()
@@ -5215,6 +5266,7 @@ def asset_type_edit(type_id):
         UPDATE asset_types SET
           name=?, manufacturer=?, model=?, storage_location=?,
           rental_cost=?, reserve_count=?, is_consumable=?, track_quantity=?,
+          supplier_name=?, supplier_contact=?,
           category_id=?, parent_type_id=?
         WHERE id=?
     """, (
@@ -5226,6 +5278,8 @@ def asset_type_edit(type_id):
         int(data.get('reserve_count') or 0),
         1 if data.get('is_consumable') else 0,
         1 if data.get('track_quantity', True) else 0,
+        (data.get('supplier_name') or '').strip(),
+        (data.get('supplier_contact') or '').strip(),
         data.get('category_id'),
         data.get('parent_type_id') or None,
         type_id,
@@ -5342,10 +5396,86 @@ def asset_item_add(type_id):
 def asset_item_edit(item_id):
     data = request.get_json() or {}
     db = get_db()
-    db.execute('UPDATE asset_items SET barcode=? WHERE id=?',
-               ((data.get('barcode') or '').strip(), item_id))
+    def _int_or_none(v):
+        try: return int(v) if v not in (None, '', 'null') else None
+        except (ValueError, TypeError): return None
+    def _float_or_none(v):
+        try: return float(v) if v not in (None, '', 'null') else None
+        except (ValueError, TypeError): return None
+    valid_conditions = {'excellent', 'good', 'fair', 'poor', 'retired'}
+    condition = data.get('condition', 'good')
+    if condition not in valid_conditions:
+        condition = 'good'
+    db.execute("""
+        UPDATE asset_items SET
+          barcode=?, condition=?, year_purchased=?, purchase_value=?,
+          depreciation_years=?, warranty_expires=?
+        WHERE id=?
+    """, (
+        (data.get('barcode') or '').strip(),
+        condition,
+        _int_or_none(data.get('year_purchased')),
+        _float_or_none(data.get('purchase_value')),
+        _int_or_none(data.get('depreciation_years')),
+        (data.get('warranty_expires') or '').strip() or None,
+        item_id,
+    ))
     db.commit()
     log_audit(db, 'ASSET_ITEM_EDIT', 'asset_item', item_id)
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/asset-items/<int:item_id>/logs', methods=['GET'])
+@admin_required
+def asset_item_logs_list(item_id):
+    db = get_db()
+    rows = db.execute("""
+        SELECT al.*, u.display_name as author_name
+        FROM asset_logs al
+        LEFT JOIN users u ON u.id = al.user_id
+        WHERE al.asset_item_id = ?
+        ORDER BY al.log_date DESC, al.created_at DESC
+    """, (item_id,)).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/settings/asset-items/<int:item_id>/logs', methods=['POST'])
+@admin_required
+def asset_item_log_add(item_id):
+    data = request.get_json() or {}
+    body = (data.get('body') or '').strip()
+    if not body:
+        return jsonify({'error': 'Entry body required'}), 400
+    log_type = data.get('log_type', 'note')
+    if log_type not in ('note', 'damage', 'service', 'usage'):
+        log_type = 'note'
+    log_date = (data.get('log_date') or '').strip()
+    if not log_date:
+        from datetime import date
+        log_date = date.today().isoformat()
+    db = get_db()
+    db.execute("""
+        INSERT INTO asset_logs (asset_item_id, user_id, log_date, log_type, body)
+        VALUES (?,?,?,?,?)
+    """, (item_id, session['user_id'], log_date, log_type, body))
+    db.commit()
+    row = db.execute("""
+        SELECT al.*, u.display_name as author_name
+        FROM asset_logs al LEFT JOIN users u ON u.id = al.user_id
+        WHERE al.id = last_insert_rowid()
+    """).fetchone()
+    db.close()
+    return jsonify(dict(row)), 201
+
+
+@app.route('/settings/asset-logs/<int:log_id>', methods=['DELETE'])
+@admin_required
+def asset_log_delete(log_id):
+    db = get_db()
+    db.execute('DELETE FROM asset_logs WHERE id=?', (log_id,))
     db.commit()
     db.close()
     return jsonify({'success': True})

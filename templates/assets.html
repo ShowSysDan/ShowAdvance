@@ -91,6 +91,14 @@
           <label class="field-label">RESERVE COUNT (spares)</label>
           <input type="number" id="type-reserve" class="field-input" value="0" min="0">
         </div>
+        <div class="field-group">
+          <label class="field-label">SUPPLIER / VENDOR</label>
+          <input type="text" id="type-supplier-name" class="field-input" placeholder="e.g. B&H Photo">
+        </div>
+        <div class="field-group">
+          <label class="field-label">SUPPLIER CONTACT</label>
+          <input type="text" id="type-supplier-contact" class="field-input" placeholder="Phone, email, rep name…">
+        </div>
         <div class="field-group" style="grid-column:span 2;display:flex;gap:20px;align-items:center">
           <label class="checkbox-label">
             <input type="checkbox" id="type-consumable">
@@ -117,18 +125,91 @@
 
 {# Individual Items Modal #}
 <div id="items-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeItemsModal()">
-  <div class="modal-card" style="max-width:640px;max-height:90vh;display:flex;flex-direction:column">
+  <div class="modal-card" style="max-width:860px;max-height:90vh;display:flex;flex-direction:column">
     <div class="modal-header">
       <span id="items-modal-title">Items</span>
       <button onclick="closeItemsModal()" class="modal-close">×</button>
     </div>
-    <div class="modal-body" style="overflow-y:auto;flex:1">
-      <div style="display:flex;gap:8px;margin-bottom:12px;align-items:center">
-        <input type="number" id="add-items-count" class="field-input" value="1" min="1" style="width:80px" title="Number of units to add">
-        <input type="text" id="add-item-barcode" class="field-input" placeholder="Barcode (single unit only)" style="flex:1">
-        <button class="btn btn-primary btn-sm" onclick="addItems()">+ Add Units</button>
+    <div style="display:flex;flex:1;overflow:hidden">
+      {# Left pane: unit list #}
+      <div style="width:280px;min-width:280px;display:flex;flex-direction:column;border-right:1px solid var(--border)">
+        <div style="padding:10px 12px;border-bottom:1px solid var(--border);display:flex;gap:6px;align-items:center">
+          <input type="number" id="add-items-count" class="field-input" value="1" min="1" style="width:56px;padding:4px 6px" title="Number of units to add">
+          <input type="text" id="add-item-barcode" class="field-input" placeholder="Barcode" style="flex:1;padding:4px 6px">
+          <button class="btn btn-primary btn-sm" onclick="addItems()">+</button>
+        </div>
+        <div id="items-list" style="overflow-y:auto;flex:1;padding:4px 0"></div>
       </div>
-      <div id="items-list"></div>
+      {# Right pane: item detail #}
+      <div id="item-detail-pane" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:0">
+        <div id="item-detail-empty" style="color:var(--text-dim);font-size:12px;text-align:center;padding:40px 0;margin:auto">
+          Select a unit to view details
+        </div>
+        <div id="item-detail-content" style="display:none">
+          {# Tabs #}
+          <div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:14px">
+            <button id="detail-tab-info" class="detail-tab active" onclick="switchDetailTab('info')">Info</button>
+            <button id="detail-tab-log" class="detail-tab" onclick="switchDetailTab('log')">Log <span id="log-count-badge" style="font-size:10px;opacity:.7"></span></button>
+          </div>
+          {# Info tab #}
+          <div id="detail-panel-info">
+            <input type="hidden" id="detail-item-id">
+            <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:8px">
+              <div class="field-group" style="grid-column:span 2">
+                <label class="field-label">BARCODE / SERIAL</label>
+                <input type="text" id="detail-barcode" class="field-input" placeholder="Optional">
+              </div>
+              <div class="field-group" style="grid-column:span 2">
+                <label class="field-label">CONDITION</label>
+                <select id="detail-condition" class="field-input">
+                  <option value="excellent">Excellent</option>
+                  <option value="good">Good</option>
+                  <option value="fair">Fair</option>
+                  <option value="poor">Poor</option>
+                  <option value="retired">Retired</option>
+                </select>
+              </div>
+              <div class="field-group">
+                <label class="field-label">YEAR PURCHASED</label>
+                <input type="number" id="detail-year" class="field-input" placeholder="e.g. 2021" min="1900" max="2099">
+              </div>
+              <div class="field-group">
+                <label class="field-label">PURCHASE VALUE ($)</label>
+                <input type="number" id="detail-purchase-value" class="field-input" placeholder="0.00" min="0" step="0.01">
+              </div>
+              <div class="field-group">
+                <label class="field-label">DEPRECIATION (years)</label>
+                <input type="number" id="detail-depreciation-years" class="field-input" placeholder="e.g. 5" min="1">
+              </div>
+              <div class="field-group">
+                <label class="field-label">WARRANTY EXPIRES</label>
+                <input type="date" id="detail-warranty" class="field-input">
+              </div>
+            </div>
+            <div id="detail-depreciation-calc" style="margin-top:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;display:none">
+            </div>
+            <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
+              <button class="btn btn-ghost btn-sm" style="color:#e53e3e" onclick="deleteItem(document.getElementById('detail-item-id').value)">Delete Unit</button>
+              <button class="btn btn-primary btn-sm" onclick="saveItemDetail()">Save</button>
+            </div>
+          </div>
+          {# Log tab #}
+          <div id="detail-panel-log" style="display:none">
+            <div style="display:flex;gap:6px;margin-bottom:10px">
+              <select id="log-type-sel" class="field-input" style="width:110px;padding:5px 6px">
+                <option value="note">Note</option>
+                <option value="damage">Damage</option>
+                <option value="service">Service</option>
+                <option value="usage">Usage</option>
+              </select>
+              <input type="date" id="log-date-inp" class="field-input" style="width:140px;padding:5px 6px">
+              <input type="text" id="log-body-inp" class="field-input" placeholder="Entry…" style="flex:1;padding:5px 6px">
+              <button class="btn btn-primary btn-sm" onclick="addLogEntry()">+</button>
+            </div>
+            <div id="log-entries-list"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -190,6 +271,18 @@
 .item-status { display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600 }
 .item-status.available { background:rgba(72,187,120,.15);color:#48BB78 }
 .item-status.maintenance { background:rgba(252,129,74,.15);color:#FC814A }
+.item-row.selected { background:rgba(245,127,32,.1) }
+.detail-tab { background:none;border:none;border-bottom:2px solid transparent;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text-dim);letter-spacing:.04em;transition:color .15s }
+.detail-tab.active { color:var(--accent,#F57F20);border-bottom-color:var(--accent,#F57F20) }
+.log-entry { padding:7px 0;border-bottom:1px solid var(--border);font-size:12px }
+.log-entry:last-child { border-bottom:none }
+.log-type-badge { display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600;text-transform:uppercase;margin-right:5px }
+.log-type-note    { background:rgba(99,179,237,.15);color:#63B3ED }
+.log-type-damage  { background:rgba(252,129,74,.15);color:#FC814A }
+.log-type-service { background:rgba(72,187,120,.15);color:#48BB78 }
+.log-type-usage   { background:rgba(214,188,250,.15);color:#B794F4 }
+.cond-excellent { color:#48BB78 } .cond-good { color:#68D391 }
+.cond-fair { color:#F6AD55 } .cond-poor { color:#FC814A } .cond-retired { color:#FC8181 }
 </style>
 
 <script>
@@ -332,6 +425,8 @@ window.openTypeModal = async function(id, defaultCatId) {
       document.getElementById('type-reserve').value = t.reserve_count || 0;
       document.getElementById('type-consumable').checked = !!t.is_consumable;
       document.getElementById('type-track-qty').checked = t.track_quantity !== 0;
+      document.getElementById('type-supplier-name').value = t.supplier_name || '';
+      document.getElementById('type-supplier-contact').value = t.supplier_contact || '';
       document.getElementById('type-photo-preview').innerHTML = t.photo
         ? `<img src="/asset-types/${t.id}/photo" style="height:60px;border-radius:4px;object-fit:cover">` : '';
     }
@@ -346,6 +441,8 @@ window.openTypeModal = async function(id, defaultCatId) {
     document.getElementById('type-reserve').value = '0';
     document.getElementById('type-consumable').checked = false;
     document.getElementById('type-track-qty').checked = true;
+    document.getElementById('type-supplier-name').value = '';
+    document.getElementById('type-supplier-contact').value = '';
     document.getElementById('type-photo-preview').innerHTML = '';
     document.getElementById('type-photo').value = '';
   }
@@ -365,6 +462,8 @@ window.saveType = async function() {
     reserve_count: parseInt(document.getElementById('type-reserve').value) || 0,
     is_consumable: document.getElementById('type-consumable').checked,
     track_quantity: document.getElementById('type-track-qty').checked,
+    supplier_name: document.getElementById('type-supplier-name').value.trim(),
+    supplier_contact: document.getElementById('type-supplier-contact').value.trim(),
   };
   if (!payload.name || !payload.category_id) { alert('Name and category required'); return; }
   const url = id ? `/settings/asset-types/${id}` : '/settings/asset-types';
@@ -395,40 +494,177 @@ window.deleteType = async function(id) {
 window.openItemsModal = async function(typeId, typeName) {
   _currentTypeId = typeId;
   _currentTypeName = typeName;
+  _selectedItemId = null;
   document.getElementById('items-modal-title').textContent = `Units: ${typeName}`;
   document.getElementById('items-modal').style.display = 'flex';
   document.getElementById('add-items-count').value = 1;
   document.getElementById('add-item-barcode').value = '';
+  document.getElementById('item-detail-empty').style.display = '';
+  document.getElementById('item-detail-content').style.display = 'none';
   await loadItems();
 };
 window.closeItemsModal = function() { document.getElementById('items-modal').style.display = 'none'; };
 
+let _currentItems = [];
+let _selectedItemId = null;
+
 async function loadItems() {
   const r = await fetch(`/settings/asset-types/${_currentTypeId}/items`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
-  const items = await r.json();
+  _currentItems = await r.json();
+  renderItemsList();
+  const t = _allTypes.find(x => x.id === _currentTypeId);
+  if (t) { t.item_count = _currentItems.length; renderTree(); }
+}
+
+function renderItemsList() {
   const container = document.getElementById('items-list');
-  if (items.length === 0) {
+  if (_currentItems.length === 0) {
     container.innerHTML = '<p style="color:var(--text-dim);font-size:12px;text-align:center;padding:16px">No units yet.</p>';
     return;
   }
-  container.innerHTML = items.map(item => `
-    <div class="item-row" id="item-${item.id}">
-      <span style="color:var(--text-dim);font-size:10px;min-width:40px">ID:${item.id}</span>
-      <span class="item-status ${item.status === 'maintenance' ? 'maintenance' : 'available'}">${item.status}</span>
-      <span style="flex:1;font-size:11px">${item.barcode ? '🔖 ' + esc(item.barcode) : '<span style="color:var(--text-dim)">No barcode</span>'}</span>
-      ${item.maint_reason ? `<span style="font-size:10px;color:var(--text-dim);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(item.maint_reason||'')}">⚠ ${esc(item.maint_reason)}</span>` : ''}
-      <div style="display:flex;gap:4px">
-        ${item.status === 'maintenance'
-          ? `<button class="btn btn-xs btn-ghost" style="color:#48BB78" onclick="resolveMaintenance(${item.id})">Return</button>`
-          : `<button class="btn btn-xs btn-ghost" onclick="openMaintModal(${item.id})">Maint.</button>`}
-        <button class="btn btn-xs btn-ghost" style="color:#e53e3e" onclick="deleteItem(${item.id})">✕</button>
+  const condIcons = {excellent:'★',good:'◆',fair:'◇',poor:'△',retired:'×'};
+  container.innerHTML = _currentItems.map(item => {
+    const cond = item.condition || 'good';
+    const condIcon = condIcons[cond] || '◆';
+    const isSelected = item.id === _selectedItemId;
+    return `<div class="item-row${isSelected?' selected':''}" id="item-${item.id}" onclick="selectItem(${item.id})" style="cursor:pointer;padding:7px 12px">
+      <span style="color:var(--text-dim);font-size:10px;min-width:36px">ID:${item.id}</span>
+      <span class="item-status ${item.status==='maintenance'?'maintenance':'available'}" style="flex-shrink:0">${item.status}</span>
+      <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 4px">
+        ${item.barcode ? esc(item.barcode) : '<span style="color:var(--text-dim)">—</span>'}
+      </span>
+      <span class="cond-${cond}" style="font-size:10px;flex-shrink:0" title="${cond}">${condIcon}</span>
+    </div>`;
+  }).join('');
+}
+
+window.selectItem = async function(itemId) {
+  _selectedItemId = itemId;
+  renderItemsList();
+  const item = _currentItems.find(x => x.id === itemId);
+  if (!item) return;
+  document.getElementById('item-detail-empty').style.display = 'none';
+  document.getElementById('item-detail-content').style.display = '';
+  // Populate info tab
+  document.getElementById('detail-item-id').value = item.id;
+  document.getElementById('detail-barcode').value = item.barcode || '';
+  document.getElementById('detail-condition').value = item.condition || 'good';
+  document.getElementById('detail-year').value = item.year_purchased || '';
+  document.getElementById('detail-purchase-value').value = item.purchase_value != null ? item.purchase_value : '';
+  document.getElementById('detail-depreciation-years').value = item.depreciation_years || '';
+  document.getElementById('detail-warranty').value = item.warranty_expires || '';
+  updateDepreciationCalc();
+  // Load log
+  switchDetailTab('info');
+  await loadLogEntries(itemId);
+};
+
+function updateDepreciationCalc() {
+  const calcEl = document.getElementById('detail-depreciation-calc');
+  const pv = parseFloat(document.getElementById('detail-purchase-value').value);
+  const yr = parseInt(document.getElementById('detail-year').value);
+  const dy = parseInt(document.getElementById('detail-depreciation-years').value);
+  if (!pv || !yr || !dy || isNaN(pv) || isNaN(yr) || isNaN(dy)) {
+    calcEl.style.display = 'none'; return;
+  }
+  const currentYear = new Date().getFullYear();
+  const age = currentYear - yr;
+  const annualDep = pv / dy;
+  const remaining = Math.max(0, pv - annualDep * age);
+  const pct = Math.round((remaining / pv) * 100);
+  calcEl.style.display = '';
+  calcEl.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:baseline">
+      <span style="color:var(--text-dim)">Remaining Book Value</span>
+      <strong style="font-size:14px;color:${pct>50?'#48BB78':pct>25?'#F6AD55':'#FC814A'}">$${remaining.toFixed(2)} (${pct}%)</strong>
+    </div>
+    <div style="background:var(--border);border-radius:3px;height:4px;margin-top:6px">
+      <div style="background:${pct>50?'#48BB78':pct>25?'#F6AD55':'#FC814A'};width:${pct}%;height:100%;border-radius:3px;transition:width .3s"></div>
+    </div>
+    <div style="color:var(--text-dim);margin-top:4px">Age: ${age} yr · Annual depreciation: $${annualDep.toFixed(2)}/yr · Fully depreciated ${yr+dy}</div>
+  `;
+}
+['detail-purchase-value','detail-year','detail-depreciation-years'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener('input', updateDepreciationCalc);
+});
+
+window.switchDetailTab = function(tab) {
+  document.getElementById('detail-panel-info').style.display = tab==='info' ? '' : 'none';
+  document.getElementById('detail-panel-log').style.display  = tab==='log'  ? '' : 'none';
+  document.getElementById('detail-tab-info').classList.toggle('active', tab==='info');
+  document.getElementById('detail-tab-log').classList.toggle('active',  tab==='log');
+};
+
+window.saveItemDetail = async function() {
+  const id = document.getElementById('detail-item-id').value;
+  const payload = {
+    barcode: document.getElementById('detail-barcode').value.trim(),
+    condition: document.getElementById('detail-condition').value,
+    year_purchased: document.getElementById('detail-year').value || null,
+    purchase_value: document.getElementById('detail-purchase-value').value || null,
+    depreciation_years: document.getElementById('detail-depreciation-years').value || null,
+    warranty_expires: document.getElementById('detail-warranty').value || null,
+  };
+  const r = await fetch(`/settings/asset-items/${id}`, {
+    method:'PUT', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) { alert('Save failed'); return; }
+  await loadItems();
+};
+
+// Log entries
+async function loadLogEntries(itemId) {
+  const r = await fetch(`/settings/asset-items/${itemId}/logs`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
+  const entries = await r.json();
+  const badge = document.getElementById('log-count-badge');
+  if (badge) badge.textContent = entries.length ? `(${entries.length})` : '';
+  const container = document.getElementById('log-entries-list');
+  if (!container) return;
+  if (entries.length === 0) {
+    container.innerHTML = '<p style="color:var(--text-dim);font-size:12px;text-align:center;padding:16px">No log entries yet.</p>';
+    return;
+  }
+  container.innerHTML = entries.map(e => `
+    <div class="log-entry" id="log-${e.id}">
+      <div style="display:flex;align-items:baseline;gap:6px">
+        <span class="log-type-badge log-type-${e.log_type}">${e.log_type}</span>
+        <span style="color:var(--text-dim);font-size:10px">${e.log_date}</span>
+        ${e.author_name ? `<span style="color:var(--text-dim);font-size:10px">· ${esc(e.author_name)}</span>` : ''}
+        <button class="btn btn-xs btn-ghost" style="color:#e53e3e;margin-left:auto;font-size:10px" onclick="deleteLogEntry(${e.id})">✕</button>
       </div>
+      <div style="margin-top:3px">${esc(e.body)}</div>
     </div>
   `).join('');
-  // Update count on tree
-  const t = _allTypes.find(x => x.id === _currentTypeId);
-  if (t) { t.item_count = items.length; renderTree(); }
+  // Set default date to today
+  const dateInp = document.getElementById('log-date-inp');
+  if (dateInp && !dateInp.value) dateInp.value = new Date().toISOString().slice(0,10);
 }
+
+window.addLogEntry = async function() {
+  const itemId = document.getElementById('detail-item-id').value;
+  const body = document.getElementById('log-body-inp').value.trim();
+  if (!body) return;
+  const payload = {
+    log_type: document.getElementById('log-type-sel').value,
+    log_date: document.getElementById('log-date-inp').value || new Date().toISOString().slice(0,10),
+    body,
+  };
+  const r = await fetch(`/settings/asset-items/${itemId}/logs`, {
+    method:'POST', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+    body: JSON.stringify(payload)
+  });
+  if (!r.ok) { alert('Error saving entry'); return; }
+  document.getElementById('log-body-inp').value = '';
+  await loadLogEntries(itemId);
+};
+
+window.deleteLogEntry = async function(logId) {
+  if (!confirm('Delete this log entry?')) return;
+  await fetch(`/settings/asset-logs/${logId}`, {method:'DELETE',headers:{'X-Requested-With':'XMLHttpRequest'}});
+  await loadLogEntries(_selectedItemId);
+};
 
 window.addItems = async function() {
   const count = parseInt(document.getElementById('add-items-count').value) || 1;
@@ -445,6 +681,11 @@ window.addItems = async function() {
 window.deleteItem = async function(id) {
   if (!confirm('Remove this unit permanently?')) return;
   await fetch(`/settings/asset-items/${id}`, {method:'DELETE',headers:{'X-Requested-With':'XMLHttpRequest'}});
+  if (_selectedItemId == id) {
+    _selectedItemId = null;
+    document.getElementById('item-detail-empty').style.display = '';
+    document.getElementById('item-detail-content').style.display = 'none';
+  }
   await loadItems();
 };
 

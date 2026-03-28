@@ -118,9 +118,31 @@
         <div class="user-avatar">{{ user.display_name[0].upper() }}</div>
         <div class="user-info">
           <div class="user-name">{{ user.display_name }}</div>
-          <div class="user-role">{{ user.role }}</div>
+          <div class="user-role">
+            {% if session.get('_view_as') %}
+            <span style="color:#F6AD55">viewing as {{ session['_view_as'] }}</span>
+            {% else %}
+            {{ user.role }}
+            {% endif %}
+          </div>
         </div>
       </div>
+      {% if session.get('_real_role') == 'admin' or user.role == 'admin' %}
+      <div style="padding:4px 8px 6px;border-top:1px solid var(--border)">
+        {% if session.get('_view_as') %}
+        <button onclick="resetViewAs()" style="width:100%;font-size:10px;padding:5px 8px;background:rgba(246,173,85,.15);border:1px solid rgba(246,173,85,.4);color:#F6AD55;border-radius:4px;cursor:pointer;letter-spacing:.04em;font-weight:600">
+          ↩ RETURN TO ADMIN
+        </button>
+        {% else %}
+        <div style="font-size:9px;color:var(--text-dim);margin-bottom:4px;letter-spacing:.06em;text-align:center">VIEW SITE AS</div>
+        <div style="display:flex;gap:4px">
+          <button onclick="setViewAs('content_admin')" class="view-as-btn" title="Content Admin">C.Admin</button>
+          <button onclick="setViewAs('user')" class="view-as-btn" title="Regular User">User</button>
+          <button onclick="setViewAs('readonly')" class="view-as-btn" title="Read-only">R/O</button>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
       <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()"
               title="Toggle light / dark mode">
         {% if user.theme == 'light' %}
@@ -139,6 +161,13 @@
 
   <!-- Main -->
   <main class="main-content">
+    {% if session.get('_view_as') %}
+    <div style="background:rgba(246,173,85,.15);border-bottom:1px solid rgba(246,173,85,.35);padding:7px 20px;display:flex;align-items:center;gap:10px;font-size:12px;position:sticky;top:0;z-index:50">
+      <span style="color:#F6AD55;font-weight:700;letter-spacing:.05em">PREVIEW MODE</span>
+      <span style="color:var(--text-dim)">You are viewing the site as a <strong style="color:#F6AD55">{{ session['_view_as'].replace('_',' ') }}</strong> — changes you make will take effect as if you had that role.</span>
+      <button onclick="resetViewAs()" style="margin-left:auto;font-size:11px;padding:3px 10px;background:rgba(246,173,85,.2);border:1px solid rgba(246,173,85,.5);color:#F6AD55;border-radius:4px;cursor:pointer;font-weight:600">Exit Preview</button>
+    </div>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="flash-container">
@@ -166,6 +195,27 @@
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% block scripts %}{% endblock %}
 <div id="save-toast" class="save-toast"></div>
+<style>
+.view-as-btn {
+  flex:1;font-size:10px;padding:4px 6px;background:var(--surface);
+  border:1px solid var(--border);color:var(--text-dim);border-radius:4px;
+  cursor:pointer;font-weight:600;letter-spacing:.04em;transition:background .15s,color .15s;
+}
+.view-as-btn:hover { background:rgba(245,127,32,.12);color:#F57F20;border-color:rgba(245,127,32,.4) }
+</style>
+<script>
+async function setViewAs(role) {
+  const r = await fetch('/admin/view-as', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({role})
+  });
+  if (r.ok) location.reload();
+}
+async function resetViewAs() {
+  await fetch('/admin/view-as/reset', {method:'POST'});
+  location.reload();
+}
+</script>
 
 {% if user %}
 <script>

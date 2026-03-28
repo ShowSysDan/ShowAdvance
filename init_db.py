@@ -342,6 +342,8 @@ CREATE TABLE IF NOT EXISTS asset_types (
     reserve_count    INTEGER DEFAULT 0,
     is_consumable    INTEGER DEFAULT 0,
     track_quantity   INTEGER DEFAULT 1,
+    supplier_name    TEXT DEFAULT '',
+    supplier_contact TEXT DEFAULT '',
     sort_order       INTEGER DEFAULT 0,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -351,8 +353,23 @@ CREATE TABLE IF NOT EXISTS asset_items (
     asset_type_id     INTEGER NOT NULL REFERENCES asset_types(id) ON DELETE CASCADE,
     barcode           TEXT DEFAULT '',
     status            TEXT DEFAULT 'available',
+    condition         TEXT DEFAULT 'good',
+    year_purchased    INTEGER DEFAULT NULL,
+    purchase_value    REAL DEFAULT NULL,
+    depreciation_years INTEGER DEFAULT NULL,
+    warranty_expires  DATE DEFAULT NULL,
     sort_order        INTEGER DEFAULT 0,
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS asset_logs (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    asset_item_id INTEGER NOT NULL REFERENCES asset_items(id) ON DELETE CASCADE,
+    user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    log_date      DATE NOT NULL,
+    log_type      TEXT NOT NULL DEFAULT 'note',
+    body          TEXT NOT NULL DEFAULT '',
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS asset_maintenance (
@@ -395,6 +412,8 @@ CREATE INDEX IF NOT EXISTS idx_show_assets_show   ON show_assets(show_id);
 CREATE INDEX IF NOT EXISTS idx_show_assets_type   ON show_assets(asset_type_id);
 CREATE INDEX IF NOT EXISTS idx_asset_items_type   ON asset_items(asset_type_id);
 CREATE INDEX IF NOT EXISTS idx_asset_maint_item   ON asset_maintenance(asset_item_id);
+CREATE INDEX IF NOT EXISTS idx_asset_logs_item    ON asset_logs(asset_item_id);
+CREATE INDEX IF NOT EXISTS idx_asset_logs_date    ON asset_logs(log_date);
 
 -- ── User Registration & Recovery ─────────────────────────────────────────────
 
@@ -1197,6 +1216,19 @@ def migrate_db():
         CREATE INDEX IF NOT EXISTS idx_show_assets_type ON show_assets(asset_type_id);
         CREATE INDEX IF NOT EXISTS idx_asset_items_type ON asset_items(asset_type_id);
         CREATE INDEX IF NOT EXISTS idx_asset_maint_item ON asset_maintenance(asset_item_id);
+
+        CREATE TABLE IF NOT EXISTS asset_logs (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            asset_item_id INTEGER NOT NULL REFERENCES asset_items(id) ON DELETE CASCADE,
+            user_id       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            log_date      DATE NOT NULL,
+            log_type      TEXT NOT NULL DEFAULT 'note',
+            body          TEXT NOT NULL DEFAULT '',
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_asset_logs_item ON asset_logs(asset_item_id);
+        CREATE INDEX IF NOT EXISTS idx_asset_logs_date ON asset_logs(log_date);
     """)
 
     # New column migrations
@@ -1206,6 +1238,14 @@ def migrate_db():
         "ALTER TABLE users ADD COLUMN is_readonly INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN email_confirmed INTEGER DEFAULT 1",
         "ALTER TABLE users ADD COLUMN pending_approval INTEGER DEFAULT 0",
+        # Asset manager enhancements
+        "ALTER TABLE asset_types ADD COLUMN supplier_name TEXT DEFAULT ''",
+        "ALTER TABLE asset_types ADD COLUMN supplier_contact TEXT DEFAULT ''",
+        "ALTER TABLE asset_items ADD COLUMN condition TEXT DEFAULT 'good'",
+        "ALTER TABLE asset_items ADD COLUMN year_purchased INTEGER DEFAULT NULL",
+        "ALTER TABLE asset_items ADD COLUMN purchase_value REAL DEFAULT NULL",
+        "ALTER TABLE asset_items ADD COLUMN depreciation_years INTEGER DEFAULT NULL",
+        "ALTER TABLE asset_items ADD COLUMN warranty_expires DATE DEFAULT NULL",
     ]:
         try:
             conn.execute(alter_sql)
