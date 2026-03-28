@@ -188,7 +188,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.4.2'
+APP_VERSION = '2.5.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -3713,6 +3713,116 @@ def manual_backup():
 
 
 # ─── API ──────────────────────────────────────────────────────────────────────
+
+@app.route('/api/search')
+@login_required
+def global_search():
+    """Universal search across shows, contacts, asset types, and asset items."""
+    q = (request.args.get('q') or '').strip()
+    if len(q) < 2:
+        return jsonify([])
+
+    db = get_db()
+    results = []
+    like = f'%{q}%'
+    is_admin = session.get('role') == 'admin'
+
+    # ── Shows ────────────────────────────────────────────────────────────────
+    accessible = get_accessible_shows(session['user_id'])  # None=all, []=none, list=ids
+    if accessible != []:
+        if accessible is None:
+            show_rows = db.execute("""
+                SELECT id, name, show_date, venue, performance_company, status
+                FROM shows
+                WHERE name LIKE ? OR venue LIKE ? OR performance_company LIKE ? OR show_date LIKE ?
+                ORDER BY show_date DESC LIMIT 6
+            """, (like, like, like, like)).fetchall()
+        else:
+            placeholders = ','.join('?' * len(accessible))
+            show_rows = db.execute(f"""
+                SELECT id, name, show_date, venue, performance_company, status
+                FROM shows
+                WHERE id IN ({placeholders})
+                  AND (name LIKE ? OR venue LIKE ? OR performance_company LIKE ? OR show_date LIKE ?)
+                ORDER BY show_date DESC LIMIT 6
+            """, (*accessible, like, like, like, like)).fetchall()
+        for r in show_rows:
+            sub_parts = [p for p in [r['show_date'], r['venue'], r['performance_company']] if p]
+            results.append({
+                'type': 'show',
+                'icon': '🎭',
+                'label': r['name'],
+                'sub': '  ·  '.join(sub_parts),
+                'url': f"/shows/{r['id']}",
+                'status': r['status'],
+            })
+
+    # ── Contacts ────────────────────────────────────────────────────────────
+    contact_rows = db.execute("""
+        SELECT id, name, title, department, email, phone
+        FROM contacts
+        WHERE name LIKE ? OR department LIKE ? OR email LIKE ? OR phone LIKE ? OR title LIKE ?
+        ORDER BY department, name LIMIT 5
+    """, (like, like, like, like, like)).fetchall()
+    for r in contact_rows:
+        sub_parts = [p for p in [r['department'], r['title'], r['email']] if p]
+        results.append({
+            'type': 'contact',
+            'icon': '👤',
+            'label': r['name'],
+            'sub': '  ·  '.join(sub_parts),
+            'url': None,  # contacts don't have their own page; sub-label carries the info
+        })
+
+    # ── Asset Types (admin only) ─────────────────────────────────────────────
+    if is_admin:
+        type_rows = db.execute("""
+            SELECT at.id, at.name, at.manufacturer, at.model, ac.name as cat_name,
+                   at.storage_location, at.is_retired
+            FROM asset_types at
+            JOIN asset_categories ac ON ac.id = at.category_id
+            WHERE at.name LIKE ? OR at.manufacturer LIKE ? OR at.model LIKE ?
+            ORDER BY at.is_retired, at.name LIMIT 5
+        """, (like, like, like)).fetchall()
+        for r in type_rows:
+            label_parts = [p for p in [r['manufacturer'], r['model']] if p]
+            sub_parts = [r['cat_name']] + ([r['storage_location']] if r['storage_location'] else [])
+            results.append({
+                'type': 'asset_type',
+                'icon': '◈',
+                'label': r['name'] + (f" — {' '.join(label_parts)}" if label_parts else ''),
+                'sub': '  ·  '.join(sub_parts) + ('  ·  RETIRED' if r['is_retired'] else ''),
+                'url': '/assets',
+                'retired': bool(r['is_retired']),
+            })
+
+        # ── Asset Items / Barcodes (leading-zero tolerant) ──────────────────
+        # Strip leading zeros from stored barcodes and compare with stripped query
+        norm_q = q.lstrip('0') or '0'
+        item_rows = db.execute("""
+            SELECT ai.id, ai.barcode, ai.status, ai.condition,
+                   at.name as type_name, at.id as type_id, ac.name as cat_name
+            FROM asset_items ai
+            JOIN asset_types at ON at.id = ai.asset_type_id
+            JOIN asset_categories ac ON ac.id = at.category_id
+            WHERE ai.barcode LIKE ?
+               OR ltrim(ai.barcode, '0') = ?
+               OR ai.barcode = ?
+            ORDER BY ai.status, ai.id LIMIT 5
+        """, (like, norm_q, q)).fetchall()
+        for r in item_rows:
+            results.append({
+                'type': 'asset_item',
+                'icon': '🔖',
+                'label': f"Unit #{r['id']}" + (f" — {r['barcode']}" if r['barcode'] else ''),
+                'sub': f"{r['type_name']}  ·  {r['cat_name']}  ·  {r['status']}",
+                'url': '/assets',
+                'status': r['status'],
+            })
+
+    db.close()
+    return jsonify(results)
+
 
 @app.route('/api/contacts')
 @login_required

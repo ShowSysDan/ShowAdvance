@@ -43,6 +43,21 @@
       </div>
     </div>
 
+    <!-- Global Search -->
+    <div class="gs-wrap" id="gs-wrap">
+      <div class="gs-input-row">
+        <svg class="gs-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+        <input id="gs-input" class="gs-input" type="text" placeholder="Search shows, assets, barcodes…"
+               autocomplete="off" spellcheck="false"
+               oninput="_gsOnInput()" onfocus="_gsOpen()" onkeydown="_gsKey(event)">
+        <button id="gs-clear" class="gs-clear" style="display:none" onclick="_gsClear()" tabindex="-1">×</button>
+      </div>
+    </div>
+    <!-- Results panel (fixed, floats right of sidebar) -->
+    <div id="gs-panel" class="gs-panel" style="display:none">
+      <div id="gs-results"></div>
+    </div>
+
     <nav class="sidebar-nav">
       <a href="{{ url_for('dashboard') }}" class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
@@ -200,6 +215,85 @@
 {% block scripts %}{% endblock %}
 <div id="save-toast" class="save-toast"></div>
 <style>
+/* ── Global search ───────────────────────────────────────────────── */
+.gs-wrap {
+  margin: 4px 10px 8px;
+  position: relative;
+}
+.gs-input-row {
+  display: flex;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 8px;
+  gap: 6px;
+  transition: border-color .15s;
+}
+.gs-input-row:focus-within {
+  border-color: var(--accent, #F57F20);
+  box-shadow: 0 0 0 2px rgba(245,127,32,.12);
+}
+.gs-icon { width:13px;height:13px;flex-shrink:0;color:var(--text-dim);opacity:.7 }
+.gs-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 12px;
+  color: var(--text);
+  padding: 7px 0;
+  min-width: 0;
+}
+.gs-input::placeholder { color: var(--text-dim); opacity: .6 }
+.gs-clear {
+  background: none; border: none; cursor: pointer;
+  color: var(--text-dim); font-size: 15px; padding: 0 2px; line-height: 1;
+}
+.gs-panel {
+  position: fixed;
+  left: calc(var(--sidebar-w, 230px) + 10px);
+  top: 8px;
+  width: 400px;
+  max-height: 80vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 32px rgba(0,0,0,.3);
+  z-index: 300;
+  padding: 8px 0;
+}
+.gs-group-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--text-dim);
+  padding: 6px 14px 3px;
+  text-transform: uppercase;
+}
+.gs-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 14px;
+  cursor: pointer;
+  text-decoration: none;
+  color: var(--text);
+  transition: background .1s;
+  border-radius: 4px;
+  margin: 0 4px;
+}
+.gs-item:hover, .gs-item.active {
+  background: rgba(245,127,32,.1);
+}
+.gs-item-icon { font-size: 14px; flex-shrink: 0; opacity: .8; width: 18px; text-align: center }
+.gs-item-body { flex: 1; min-width: 0 }
+.gs-item-label { font-size: 12px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+.gs-item-sub   { font-size: 10px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 1px }
+.gs-retired .gs-item-label { text-decoration: line-through; opacity: .6 }
+.gs-empty { padding: 20px 14px; font-size: 12px; color: var(--text-dim); text-align: center }
+.gs-separator { border: none; border-top: 1px solid var(--border); margin: 4px 0 }
 .view-as-btn {
   flex:1;font-size:10px;padding:4px 6px;background:var(--surface);
   border:1px solid var(--border);color:var(--text-dim);border-radius:4px;
@@ -219,7 +313,152 @@ async function resetViewAs() {
   await fetch('/admin/view-as/reset', {method:'POST'});
   location.reload();
 }
+
+// ── Global Search ─────────────────────────────────────────────────────────────
+let _gsTimer = null;
+let _gsActiveIdx = -1;
+let _gsItems = [];
+
+function _gsOnInput() {
+  const q = document.getElementById('gs-input').value;
+  document.getElementById('gs-clear').style.display = q ? '' : 'none';
+  clearTimeout(_gsTimer);
+  if (q.trim().length < 2) { _gsHidePanel(); return; }
+  _gsTimer = setTimeout(() => _gsFetch(q.trim()), 280);
+}
+
+async function _gsFetch(q) {
+  const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+  const data = await r.json();
+  _gsRender(data, q);
+}
+
+function _gsRender(results, q) {
+  const panel = document.getElementById('gs-panel');
+  const container = document.getElementById('gs-results');
+  _gsActiveIdx = -1;
+  _gsItems = [];
+
+  if (results.length === 0) {
+    container.innerHTML = `<div class="gs-empty">No results for "<strong>${_gsEsc(q)}</strong>"</div>`;
+    panel.style.display = '';
+    return;
+  }
+
+  // Group by type
+  const groups = {};
+  const order = ['show','contact','asset_type','asset_item'];
+  const groupLabels = {show:'Shows', contact:'Contacts', asset_type:'Asset Types', asset_item:'Units / Barcodes'};
+  results.forEach(r => { (groups[r.type] = groups[r.type] || []).push(r); });
+
+  let html = '';
+  let first = true;
+  order.filter(k => groups[k]).forEach(key => {
+    if (!first) html += '<hr class="gs-separator">';
+    first = false;
+    html += `<div class="gs-group-label">${groupLabels[key]}</div>`;
+    groups[key].forEach(item => {
+      const idx = _gsItems.length;
+      _gsItems.push(item);
+      const href = item.url ? `href="${item.url}"` : '';
+      const tag = item.url ? 'a' : 'div';
+      const retiredCls = item.retired ? ' gs-retired' : '';
+      html += `<${tag} ${href} class="gs-item${retiredCls}" data-idx="${idx}" onmousedown="_gsNavigate(event,${idx})">
+        <span class="gs-item-icon">${item.icon}</span>
+        <span class="gs-item-body">
+          <div class="gs-item-label">${_gsHighlight(item.label, q)}</div>
+          ${item.sub ? `<div class="gs-item-sub">${_gsEsc(item.sub)}</div>` : ''}
+        </span>
+      </${tag}>`;
+    });
+  });
+
+  container.innerHTML = html;
+  panel.style.display = '';
+}
+
+function _gsNavigate(e, idx) {
+  e.preventDefault();
+  const item = _gsItems[idx];
+  if (item && item.url) { window.location.href = item.url; }
+  _gsHidePanel();
+}
+
+function _gsKey(e) {
+  const panel = document.getElementById('gs-panel');
+  if (panel.style.display === 'none') return;
+  if (e.key === 'Escape') { _gsClear(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); _gsMoveCursor(1); }
+  if (e.key === 'ArrowUp')   { e.preventDefault(); _gsMoveCursor(-1); }
+  if (e.key === 'Enter') {
+    const active = _gsItems[_gsActiveIdx];
+    if (active && active.url) { window.location.href = active.url; _gsHidePanel(); }
+  }
+}
+
+function _gsMoveCursor(dir) {
+  const items = document.querySelectorAll('.gs-item');
+  if (!items.length) return;
+  items.forEach(el => el.classList.remove('active'));
+  _gsActiveIdx = Math.max(0, Math.min(_gsItems.length - 1, _gsActiveIdx + dir));
+  items[_gsActiveIdx]?.classList.add('active');
+  items[_gsActiveIdx]?.scrollIntoView({block:'nearest'});
+}
+
+function _gsOpen() {
+  const q = document.getElementById('gs-input').value.trim();
+  if (q.length >= 2 && document.getElementById('gs-results').innerHTML) {
+    document.getElementById('gs-panel').style.display = '';
+  }
+}
+
+function _gsHidePanel() {
+  document.getElementById('gs-panel').style.display = 'none';
+  _gsActiveIdx = -1;
+}
+
+function _gsClear() {
+  document.getElementById('gs-input').value = '';
+  document.getElementById('gs-clear').style.display = 'none';
+  _gsHidePanel();
+}
+
+function _gsEsc(s) {
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function _gsHighlight(text, q) {
+  const safe = _gsEsc(text);
+  if (!q) return safe;
+  const re = new RegExp(`(${q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')})`, 'gi');
+  return safe.replace(re, '<mark style="background:rgba(245,127,32,.3);border-radius:2px;padding:0 1px">$1</mark>');
+}
+
+// Close panel when clicking outside
+document.addEventListener('mousedown', e => {
+  const panel = document.getElementById('gs-panel');
+  const wrap  = document.getElementById('gs-wrap');
+  if (panel && wrap && !panel.contains(e.target) && !wrap.contains(e.target)) {
+    _gsHidePanel();
+  }
+});
+
+// Keyboard shortcut: / or Ctrl+K focuses search
+document.addEventListener('keydown', e => {
+  if ((e.key === '/' || (e.ctrlKey && e.key === 'k')) && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+    e.preventDefault();
+    document.getElementById('gs-input')?.focus();
+  }
+});
 </script>
+<style>
+.view-as-btn {
+  flex:1;font-size:10px;padding:4px 6px;background:var(--surface);
+  border:1px solid var(--border);color:var(--text-dim);border-radius:4px;
+  cursor:pointer;font-weight:600;letter-spacing:.04em;transition:background .15s,color .15s;
+}
+.view-as-btn:hover { background:rgba(245,127,32,.12);color:#F57F20;border-color:rgba(245,127,32,.4) }
+</style>
 
 {% if user %}
 <script>
