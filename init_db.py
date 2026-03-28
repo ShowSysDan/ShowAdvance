@@ -344,6 +344,8 @@ CREATE TABLE IF NOT EXISTS asset_types (
     track_quantity   INTEGER DEFAULT 1,
     supplier_name    TEXT DEFAULT '',
     supplier_contact TEXT DEFAULT '',
+    is_retired       INTEGER DEFAULT 0,
+    retired_at       TIMESTAMP DEFAULT NULL,
     sort_order       INTEGER DEFAULT 0,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -1163,6 +1165,10 @@ def migrate_db():
             reserve_count    INTEGER DEFAULT 0,
             is_consumable    INTEGER DEFAULT 0,
             track_quantity   INTEGER DEFAULT 1,
+            supplier_name    TEXT DEFAULT '',
+            supplier_contact TEXT DEFAULT '',
+            is_retired       INTEGER DEFAULT 0,
+            retired_at       TIMESTAMP DEFAULT NULL,
             sort_order       INTEGER DEFAULT 0,
             created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -1241,6 +1247,8 @@ def migrate_db():
         # Asset manager enhancements
         "ALTER TABLE asset_types ADD COLUMN supplier_name TEXT DEFAULT ''",
         "ALTER TABLE asset_types ADD COLUMN supplier_contact TEXT DEFAULT ''",
+        "ALTER TABLE asset_types ADD COLUMN is_retired INTEGER DEFAULT 0",
+        "ALTER TABLE asset_types ADD COLUMN retired_at TIMESTAMP DEFAULT NULL",
         "ALTER TABLE asset_items ADD COLUMN condition TEXT DEFAULT 'good'",
         "ALTER TABLE asset_items ADD COLUMN year_purchased INTEGER DEFAULT NULL",
         "ALTER TABLE asset_items ADD COLUMN purchase_value REAL DEFAULT NULL",

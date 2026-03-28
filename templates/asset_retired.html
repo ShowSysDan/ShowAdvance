@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Retired Assets — 3·2·1→Theater{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Retired Assets</h1>
+    <p class="page-sub">Full history of retired equipment — records are read-only and preserved permanently</p>
+  </div>
+  <div class="header-actions">
+    <a href="/assets" class="btn btn-ghost btn-sm">← Asset Manager</a>
+  </div>
+</div>
+
+{% if not retired_types and not standalone_items %}
+<div style="text-align:center;padding:60px 0;color:var(--text-dim)">
+  <div style="font-size:32px;margin-bottom:12px">◈</div>
+  <div style="font-size:14px">No retired assets yet.</div>
+</div>
+{% endif %}
+
+{# ── Retired Types ──────────────────────────────────────────────────────────── #}
+{% if retired_types %}
+<div class="form-section" style="margin-bottom:28px">
+  <div class="form-section-header">
+    <span class="section-icon">⊘</span> RETIRED ITEM TYPES
+    <span style="font-size:11px;font-weight:400;color:var(--text-dim);margin-left:8px">{{ retired_types|length }} type{{ 's' if retired_types|length != 1 }}</span>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:0">
+    {% for t in retired_types %}
+    <div class="retired-type-row" id="retired-type-{{ t.id }}">
+      <div style="display:flex;align-items:center;gap:12px">
+        {% if t.photo %}
+        <img src="/asset-types/{{ t.id }}/photo" style="width:40px;height:40px;border-radius:4px;object-fit:cover;opacity:.6" alt="">
+        {% else %}
+        <div style="width:40px;height:40px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:16px;opacity:.6">◈</div>
+        {% endif %}
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px;text-decoration:line-through;color:var(--text-dim)">
+            {{ t.name }}
+            {% if t.manufacturer or t.model %}
+            <span style="font-weight:400;font-size:11px">— {{ [t.manufacturer, t.model]|select|join(' ') }}</span>
+            {% endif %}
+            <span class="retired-badge">RETIRED</span>
+          </div>
+          <div style="font-size:11px;color:var(--text-dim);margin-top:2px">
+            {{ t.category_name }}
+            {% if t.storage_location %} · {{ t.storage_location }}{% endif %}
+            {% if t.rental_cost %} · ${{ '%.2f'|format(t.rental_cost) }}/show{% endif %}
+            · {{ t.total_items }} unit{{ 's' if t.total_items != 1 }} total
+            {% if t.retired_at %} · retired {{ t.retired_at[:10] }}{% endif %}
+          </div>
+          {% if t.supplier_name %}
+          <div style="font-size:11px;color:var(--text-dim)">Supplier: {{ t.supplier_name }}{% if t.supplier_contact %} — {{ t.supplier_contact }}{% endif %}</div>
+          {% endif %}
+        </div>
+        <button class="btn btn-xs btn-ghost" onclick="toggleTypeUnits({{ t.id }})">View Units</button>
+      </div>
+      <div id="type-units-{{ t.id }}" style="display:none;margin-top:10px;margin-left:52px">
+        <div class="units-loading" style="color:var(--text-dim);font-size:12px">Loading…</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
+
+{# ── Individually-retired units (type is still active) ──────────────────────── #}
+{% if standalone_items %}
+<div class="form-section">
+  <div class="form-section-header">
+    <span class="section-icon">⊘</span> INDIVIDUALLY RETIRED UNITS
+    <span style="font-size:11px;font-weight:400;color:var(--text-dim);margin-left:8px">{{ standalone_items|length }} unit{{ 's' if standalone_items|length != 1 }}</span>
+  </div>
+  <div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="border-bottom:1px solid var(--border);color:var(--text-dim);font-size:10px;letter-spacing:.05em">
+          <th style="text-align:left;padding:6px 10px">ID</th>
+          <th style="text-align:left;padding:6px 10px">TYPE</th>
+          <th style="text-align:left;padding:6px 10px">CATEGORY</th>
+          <th style="text-align:left;padding:6px 10px">BARCODE</th>
+          <th style="text-align:left;padding:6px 10px">CONDITION</th>
+          <th style="text-align:right;padding:6px 10px">PURCHASE VALUE</th>
+          <th style="text-align:left;padding:6px 10px">WARRANTY</th>
+          <th style="text-align:center;padding:6px 10px">LOG</th>
+          <th style="text-align:left;padding:6px 10px">ADDED</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in standalone_items %}
+        <tr style="border-bottom:1px solid var(--border);opacity:.75" class="standalone-item-row">
+          <td style="padding:7px 10px;color:var(--text-dim)">{{ item.id }}</td>
+          <td style="padding:7px 10px;font-weight:500">{{ item.type_name }}{% if item.manufacturer or item.model %}<span style="color:var(--text-dim);font-weight:400"> — {{ [item.manufacturer, item.model]|select|join(' ') }}</span>{% endif %}</td>
+          <td style="padding:7px 10px;color:var(--text-dim)">{{ item.category_name }}</td>
+          <td style="padding:7px 10px">{{ item.barcode or '—' }}</td>
+          <td style="padding:7px 10px">
+            {% if item.condition %}
+            <span class="cond-pill cond-{{ item.condition }}">{{ item.condition }}</span>
+            {% else %}—{% endif %}
+          </td>
+          <td style="padding:7px 10px;text-align:right">
+            {% if item.purchase_value %}${{ '%.2f'|format(item.purchase_value) }}{% else %}—{% endif %}
+          </td>
+          <td style="padding:7px 10px;color:var(--text-dim)">{{ item.warranty_expires or '—' }}</td>
+          <td style="padding:7px 10px;text-align:center">
+            {% if item.log_count > 0 %}
+            <a href="#" onclick="loadItemLog({{ item.id }}, this); return false" style="font-size:11px;color:var(--accent)">{{ item.log_count }} entr{{ 'y' if item.log_count == 1 else 'ies' }}</a>
+            {% else %}—{% endif %}
+          </td>
+          <td style="padding:7px 10px;color:var(--text-dim)">{{ item.created_at[:10] if item.created_at else '—' }}</td>
+        </tr>
+        {% if item.log_count > 0 %}
+        <tr id="item-log-row-{{ item.id }}" style="display:none">
+          <td colspan="9" style="padding:0 10px 12px 48px">
+            <div id="item-log-content-{{ item.id }}" style="font-size:11px"></div>
+          </td>
+        </tr>
+        {% endif %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<style>
+.retired-type-row {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+.retired-type-row:last-child { border-bottom: none }
+.retired-badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  background: rgba(252,129,74,.15);
+  color: #FC814A;
+  margin-left: 8px;
+  text-decoration: none;
+  vertical-align: middle;
+  letter-spacing: .06em;
+}
+.cond-pill {
+  display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600
+}
+.cond-excellent { background:rgba(72,187,120,.15);color:#48BB78 }
+.cond-good      { background:rgba(104,211,145,.12);color:#68D391 }
+.cond-fair      { background:rgba(246,173,85,.15);color:#F6AD55 }
+.cond-poor      { background:rgba(252,129,74,.15);color:#FC814A }
+.cond-retired   { background:rgba(160,160,160,.12);color:#888 }
+</style>
+
+<script>
+async function toggleTypeUnits(typeId) {
+  const container = document.getElementById(`type-units-${typeId}`);
+  if (container.style.display === 'none') {
+    container.style.display = '';
+    if (container.querySelector('.units-loading')) {
+      const r = await fetch(`/settings/asset-types/${typeId}/items?show_retired=1`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const items = await r.json();
+      if (items.length === 0) {
+        container.innerHTML = '<p style="color:var(--text-dim);font-size:11px">No units on record.</p>';
+        return;
+      }
+      const condLabel = {excellent:'Excellent',good:'Good',fair:'Fair',poor:'Poor',retired:'Retired'};
+      container.innerHTML = `<table style="width:100%;border-collapse:collapse;font-size:11px;max-width:600px">
+        <thead><tr style="color:var(--text-dim);font-size:10px;letter-spacing:.04em;border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:4px 8px">ID</th>
+          <th style="text-align:left;padding:4px 8px">BARCODE</th>
+          <th style="text-align:left;padding:4px 8px">STATUS</th>
+          <th style="text-align:left;padding:4px 8px">CONDITION</th>
+          <th style="text-align:right;padding:4px 8px">PURCHASE VALUE</th>
+          <th style="text-align:left;padding:4px 8px">WARRANTY</th>
+        </tr></thead>
+        <tbody>
+          ${items.map(it => `<tr style="border-bottom:1px solid var(--border);opacity:.8">
+            <td style="padding:5px 8px;color:var(--text-dim)">${it.id}</td>
+            <td style="padding:5px 8px">${it.barcode || '—'}</td>
+            <td style="padding:5px 8px"><span style="font-size:10px;font-weight:600;text-transform:uppercase">${it.status}</span></td>
+            <td style="padding:5px 8px">${condLabel[it.condition] || it.condition || '—'}</td>
+            <td style="padding:5px 8px;text-align:right">${it.purchase_value ? '$' + Number(it.purchase_value).toFixed(2) : '—'}</td>
+            <td style="padding:5px 8px;color:var(--text-dim)">${it.warranty_expires || '—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>`;
+    }
+  } else {
+    container.style.display = 'none';
+  }
+}
+
+async function loadItemLog(itemId, link) {
+  const row = document.getElementById(`item-log-row-${itemId}`);
+  const content = document.getElementById(`item-log-content-${itemId}`);
+  if (row.style.display === 'none' || row.style.display === '') {
+    row.style.display = '';
+    link.textContent = 'Hide';
+    if (!content.dataset.loaded) {
+      const r = await fetch(`/settings/asset-items/${itemId}/logs`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
+      const entries = await r.json();
+      const typeColors = {note:'#63B3ED',damage:'#FC814A',service:'#48BB78',usage:'#B794F4'};
+      content.innerHTML = entries.map(e => `
+        <div style="padding:5px 0;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:baseline">
+          <span style="color:${typeColors[e.log_type]||'#888'};font-weight:600;font-size:10px;text-transform:uppercase;min-width:50px">${e.log_type}</span>
+          <span style="color:var(--text-dim);min-width:80px">${e.log_date}</span>
+          ${e.author_name ? `<span style="color:var(--text-dim)">${e.author_name}</span>` : ''}
+          <span>${e.body}</span>
+        </div>
+      `).join('');
+      content.dataset.loaded = '1';
+    }
+  } else {
+    row.style.display = 'none';
+    link.textContent = `${link.textContent.replace('Hide', '')}`;
+  }
+}
+</script>
+{% endblock %}

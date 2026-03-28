@@ -188,7 +188,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.4.0'
+APP_VERSION = '2.4.1'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -5154,8 +5154,14 @@ def asset_category_edit(cat_id):
 @admin_required
 def asset_category_delete(cat_id):
     db = get_db()
+    # Block deletion if any types (including retired) exist — preserves history
+    type_count = db.execute(
+        'SELECT COUNT(*) FROM asset_types WHERE category_id=?', (cat_id,)
+    ).fetchone()[0]
+    if type_count > 0:
+        db.close()
+        return jsonify({'error': f'Cannot delete: this category still has {type_count} item type(s). Retire all types first.'}), 400
     row = db.execute('SELECT name FROM asset_categories WHERE id=?', (cat_id,)).fetchone()
-    # Cascades to asset_types
     db.execute('DELETE FROM asset_categories WHERE id=?', (cat_id,))
     db.commit()
     log_audit(db, 'ASSET_CATEGORY_DELETE', 'asset_category', cat_id,
@@ -5170,7 +5176,7 @@ def asset_category_delete(cat_id):
 @app.route('/api/asset-types', methods=['GET'])
 @login_required
 def asset_types_api():
-    """Return all asset types (with category info) for search/browse."""
+    """Return active (non-retired) asset types for search/browse."""
     db = get_db()
     rows = db.execute("""
         SELECT at.*, ac.name as category_name,
@@ -5178,6 +5184,7 @@ def asset_types_api():
         FROM asset_types at
         JOIN asset_categories ac ON ac.id = at.category_id
         LEFT JOIN asset_types pt ON pt.id = at.parent_type_id
+        WHERE at.is_retired = 0
         ORDER BY ac.sort_order, ac.name, at.sort_order, at.name
     """).fetchall()
     db.close()
@@ -5193,13 +5200,17 @@ def asset_types_api():
 @admin_required
 def asset_types_admin_list():
     db = get_db()
-    rows = db.execute("""
+    show_retired = request.args.get('show_retired') == '1'
+    where = '' if show_retired else 'WHERE at.is_retired = 0'
+    rows = db.execute(f"""
         SELECT at.*, ac.name as category_name,
                pt.name as parent_name,
-               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id) as item_count
+               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id) as item_count,
+               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id AND ai.status = 'retired') as retired_item_count
         FROM asset_types at
         JOIN asset_categories ac ON ac.id = at.category_id
         LEFT JOIN asset_types pt ON pt.id = at.parent_type_id
+        {where}
         ORDER BY ac.sort_order, ac.name, at.sort_order, at.name
     """).fetchall()
     db.close()
@@ -5294,13 +5305,21 @@ def asset_type_edit(type_id):
 @app.route('/settings/asset-types/<int:type_id>', methods=['DELETE'])
 @admin_required
 def asset_type_delete(type_id):
+    """Retire an asset type (soft delete) — history is preserved."""
     db = get_db()
     row = db.execute('SELECT name FROM asset_types WHERE id=?', (type_id,)).fetchone()
-    db.execute('DELETE FROM asset_types WHERE id=?', (type_id,))
+    db.execute("""
+        UPDATE asset_types SET is_retired=1, retired_at=CURRENT_TIMESTAMP WHERE id=?
+    """, (type_id,))
+    # Retire all active items under this type too
+    db.execute("""
+        UPDATE asset_items SET status='retired' WHERE asset_type_id=? AND status='available'
+    """, (type_id,))
     db.commit()
-    log_audit(db, 'ASSET_TYPE_DELETE', 'asset_type', type_id,
+    log_audit(db, 'ASSET_TYPE_RETIRE', 'asset_type', type_id,
               detail=row['name'] if row else str(type_id))
     db.commit()
+    syslog_logger.info(f"ASSET_TYPE_RETIRE type_id={type_id} by={session.get('username')}")
     db.close()
     return jsonify({'success': True})
 
@@ -5352,7 +5371,9 @@ def asset_type_photo(type_id):
 @admin_required
 def asset_items_list(type_id):
     db = get_db()
-    rows = db.execute("""
+    show_retired = request.args.get('show_retired') == '1'
+    status_filter = '' if show_retired else "AND ai.status != 'retired'"
+    rows = db.execute(f"""
         SELECT ai.*,
                COALESCE(am.status, 'available') as maint_status,
                am.reason as maint_reason,
@@ -5360,8 +5381,8 @@ def asset_items_list(type_id):
                am.id as maint_id
         FROM asset_items ai
         LEFT JOIN asset_maintenance am ON am.asset_item_id = ai.id AND am.status = 'in_progress'
-        WHERE ai.asset_type_id = ?
-        ORDER BY ai.sort_order, ai.id
+        WHERE ai.asset_type_id = ? {status_filter}
+        ORDER BY ai.status, ai.sort_order, ai.id
     """, (type_id,)).fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
@@ -5484,11 +5505,13 @@ def asset_log_delete(log_id):
 @app.route('/settings/asset-items/<int:item_id>', methods=['DELETE'])
 @admin_required
 def asset_item_delete(item_id):
+    """Retire an asset item (soft delete) — history is preserved."""
     db = get_db()
-    db.execute('DELETE FROM asset_items WHERE id=?', (item_id,))
+    db.execute("UPDATE asset_items SET status='retired' WHERE id=?", (item_id,))
     db.commit()
-    log_audit(db, 'ASSET_ITEM_DELETE', 'asset_item', item_id)
+    log_audit(db, 'ASSET_ITEM_RETIRE', 'asset_item', item_id)
     db.commit()
+    syslog_logger.info(f"ASSET_ITEM_RETIRE item_id={item_id} by={session.get('username')}")
     db.close()
     return jsonify({'success': True})
 
@@ -5624,7 +5647,7 @@ def assets_availability_bulk():
     date_from = request.args.get('from')
     date_to   = request.args.get('to')
     db = get_db()
-    type_ids = [r['id'] for r in db.execute('SELECT id FROM asset_types').fetchall()]
+    type_ids = [r['id'] for r in db.execute('SELECT id FROM asset_types WHERE is_retired=0').fetchall()]
     by_type = {}
     for tid in type_ids:
         info = _get_asset_availability(db, tid, date_from, date_to)
@@ -5910,6 +5933,38 @@ def assets_admin():
     return render_template('assets.html',
                            categories=[dict(c) for c in categories],
                            locations=[dict(l) for l in locations],
+                           user=get_current_user())
+
+
+@app.route('/assets/retired')
+@admin_required
+def assets_retired():
+    db = get_db()
+    # Retired types with their items and log counts
+    types = db.execute("""
+        SELECT at.*, ac.name as category_name,
+               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id) as total_items,
+               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id AND ai.status='retired') as retired_items
+        FROM asset_types at
+        JOIN asset_categories ac ON ac.id = at.category_id
+        WHERE at.is_retired = 1
+        ORDER BY at.retired_at DESC
+    """).fetchall()
+    # Also standalone retired items (type is still active, but item was individually retired)
+    standalone = db.execute("""
+        SELECT ai.*, at.name as type_name, at.manufacturer, at.model,
+               ac.name as category_name,
+               (SELECT COUNT(*) FROM asset_logs al WHERE al.asset_item_id = ai.id) as log_count
+        FROM asset_items ai
+        JOIN asset_types at ON at.id = ai.asset_type_id
+        JOIN asset_categories ac ON ac.id = at.category_id
+        WHERE ai.status = 'retired' AND at.is_retired = 0
+        ORDER BY ai.created_at DESC
+    """).fetchall()
+    db.close()
+    return render_template('asset_retired.html',
+                           retired_types=[dict(t) for t in types],
+                           standalone_items=[dict(s) for s in standalone],
                            user=get_current_user())
 
 

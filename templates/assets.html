@@ -7,7 +7,12 @@
     <h1 class="page-title">Asset Manager</h1>
     <p class="page-sub">Manage inventory categories, item types, and individual units</p>
   </div>
-  <div class="header-actions">
+  <div class="header-actions" style="align-items:center">
+    <label class="checkbox-label" style="font-size:12px;cursor:pointer" title="Show retired types and units inline">
+      <input type="checkbox" id="show-retired-toggle" onchange="toggleShowRetired(this.checked)">
+      Show Retired
+    </label>
+    <a href="/assets/retired" class="btn btn-ghost btn-sm">Retired Archive</a>
     <button class="btn btn-ghost btn-sm" onclick="openWarehouseModal()">Warehouse Locations</button>
     <button class="btn btn-primary" onclick="openCategoryModal()">+ New Category</button>
   </div>
@@ -189,7 +194,7 @@
             <div id="detail-depreciation-calc" style="margin-top:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;display:none">
             </div>
             <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">
-              <button class="btn btn-ghost btn-sm" style="color:#e53e3e" onclick="deleteItem(document.getElementById('detail-item-id').value)">Delete Unit</button>
+              <button id="detail-retire-btn" class="btn btn-ghost btn-sm" style="color:#FC814A" onclick="retireItem(document.getElementById('detail-item-id').value)">Retire Unit</button>
               <button class="btn btn-primary btn-sm" onclick="saveItemDetail()">Save</button>
             </div>
           </div>
@@ -271,6 +276,7 @@
 .item-status { display:inline-block;padding:2px 7px;border-radius:3px;font-size:10px;font-weight:600 }
 .item-status.available { background:rgba(72,187,120,.15);color:#48BB78 }
 .item-status.maintenance { background:rgba(252,129,74,.15);color:#FC814A }
+.item-status.retired { background:rgba(160,160,160,.12);color:#888 }
 .item-row.selected { background:rgba(245,127,32,.1) }
 .detail-tab { background:none;border:none;border-bottom:2px solid transparent;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;color:var(--text-dim);letter-spacing:.04em;transition:color .15s }
 .detail-tab.active { color:var(--accent,#F57F20);border-bottom-color:var(--accent,#F57F20) }
@@ -291,6 +297,7 @@ const _locations  = {{ locations | tojson }};
 let _allTypes = [];
 let _currentTypeId = null;
 let _currentTypeName = '';
+let _showRetired = false;
 
 // ── Initial Load ──────────────────────────────────────────────────────────────
 (async function init() {
@@ -299,9 +306,16 @@ let _currentTypeName = '';
 })();
 
 async function loadTypes() {
-  const r = await fetch('/settings/asset-types', {headers:{'X-Requested-With':'XMLHttpRequest'}});
+  const param = _showRetired ? '?show_retired=1' : '';
+  const r = await fetch(`/settings/asset-types${param}`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
   _allTypes = await r.json();
 }
+
+window.toggleShowRetired = async function(checked) {
+  _showRetired = checked;
+  await loadTypes();
+  renderTree();
+};
 
 function renderTree() {
   const container = document.getElementById('asset-tree');
@@ -337,23 +351,28 @@ function renderTypeRow(t) {
   const label = [t.manufacturer, t.model].filter(Boolean).join(' ') || t.name;
   const thumb = t.photo ? `<img src="/asset-types/${t.id}/photo" class="asset-type-thumb" alt="">` :
     `<div class="asset-type-thumb" style="display:flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:18px">◈</div>`;
-  const avail = (t.item_count || 0) - (t.reserve_count || 0);
+  const isRetired = !!t.is_retired;
+  const retiredStyle = isRetired ? 'opacity:.45;' : '';
   return `
-    <div class="asset-type-row">
+    <div class="asset-type-row" style="${retiredStyle}">
       ${thumb}
       <div style="flex:1;min-width:0">
-        <div class="asset-type-name">${esc(label)}</div>
+        <div class="asset-type-name" style="${isRetired?'text-decoration:line-through;color:var(--text-dim)':''}">
+          ${esc(label)}
+          ${isRetired ? '<span style="font-size:10px;font-weight:600;color:#FC814A;text-decoration:none;margin-left:6px">RETIRED</span>' : ''}
+        </div>
         ${t.manufacturer ? `<div class="asset-type-meta">${esc(t.name)}</div>` : ''}
         <div class="asset-type-meta">
           ${t.item_count} units · ${t.reserve_count} reserved · $${Number(t.rental_cost||0).toFixed(2)}/show
           ${t.storage_location ? ' · ' + esc(t.storage_location) : ''}
           ${t.is_consumable ? ' · <em>consumable</em>' : ''}
+          ${isRetired && t.retired_at ? ' · retired ' + t.retired_at.slice(0,10) : ''}
         </div>
       </div>
       <div style="display:flex;gap:4px;flex-shrink:0">
         <button class="btn btn-xs btn-ghost" onclick="openItemsModal(${t.id},'${esc(label).replace(/'/g,"\\'")}')">Items (${t.item_count})</button>
-        <button class="btn btn-xs btn-ghost" onclick="openTypeModal(${t.id})">Edit</button>
-        <button class="btn btn-xs btn-ghost" style="color:#e53e3e" onclick="deleteType(${t.id})">✕</button>
+        ${!isRetired ? `<button class="btn btn-xs btn-ghost" onclick="openTypeModal(${t.id})">Edit</button>` : ''}
+        ${!isRetired ? `<button class="btn btn-xs btn-ghost" style="color:#FC814A" onclick="retireType(${t.id})" title="Retire this type and all its units">Retire</button>` : ''}
       </div>
     </div>
   `;
@@ -483,10 +502,11 @@ window.saveType = async function() {
   await loadTypes();
   renderTree();
 };
-window.deleteType = async function(id) {
-  if (!confirm('Delete this item type and all its units? This cannot be undone.')) return;
-  await fetch(`/settings/asset-types/${id}`, {method:'DELETE',headers:{'X-Requested-With':'XMLHttpRequest'}});
-  _allTypes = _allTypes.filter(t => t.id !== id);
+window.retireType = async function(id) {
+  if (!confirm('Retire this item type? All active units will also be retired. The record and history are preserved and viewable in the Retired Archive.')) return;
+  const r = await fetch(`/settings/asset-types/${id}`, {method:'DELETE',headers:{'X-Requested-With':'XMLHttpRequest'}});
+  if (!r.ok) { const d = await r.json(); alert(d.error || 'Error'); return; }
+  await loadTypes();
   renderTree();
 };
 
@@ -509,7 +529,8 @@ let _currentItems = [];
 let _selectedItemId = null;
 
 async function loadItems() {
-  const r = await fetch(`/settings/asset-types/${_currentTypeId}/items`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
+  const param = _showRetired ? '?show_retired=1' : '';
+  const r = await fetch(`/settings/asset-types/${_currentTypeId}/items${param}`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
   _currentItems = await r.json();
   renderItemsList();
   const t = _allTypes.find(x => x.id === _currentTypeId);
@@ -524,16 +545,17 @@ function renderItemsList() {
   }
   const condIcons = {excellent:'★',good:'◆',fair:'◇',poor:'△',retired:'×'};
   container.innerHTML = _currentItems.map(item => {
+    const isRetiredItem = item.status === 'retired';
     const cond = item.condition || 'good';
-    const condIcon = condIcons[cond] || '◆';
+    const condIcon = isRetiredItem ? '×' : (condIcons[cond] || '◆');
     const isSelected = item.id === _selectedItemId;
-    return `<div class="item-row${isSelected?' selected':''}" id="item-${item.id}" onclick="selectItem(${item.id})" style="cursor:pointer;padding:7px 12px">
+    return `<div class="item-row${isSelected?' selected':''}" id="item-${item.id}" onclick="selectItem(${item.id})" style="cursor:pointer;padding:7px 12px${isRetiredItem?';opacity:.45':''}">
       <span style="color:var(--text-dim);font-size:10px;min-width:36px">ID:${item.id}</span>
-      <span class="item-status ${item.status==='maintenance'?'maintenance':'available'}" style="flex-shrink:0">${item.status}</span>
-      <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 4px">
+      <span class="item-status ${item.status==='maintenance'?'maintenance':item.status==='retired'?'retired':'available'}" style="flex-shrink:0">${item.status}</span>
+      <span style="flex:1;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0 4px${isRetiredItem?';text-decoration:line-through':''}">
         ${item.barcode ? esc(item.barcode) : '<span style="color:var(--text-dim)">—</span>'}
       </span>
-      <span class="cond-${cond}" style="font-size:10px;flex-shrink:0" title="${cond}">${condIcon}</span>
+      <span class="cond-${isRetiredItem?'poor':cond}" style="font-size:10px;flex-shrink:0" title="${isRetiredItem?'retired':cond}">${condIcon}</span>
     </div>`;
   }).join('');
 }
@@ -554,6 +576,9 @@ window.selectItem = async function(itemId) {
   document.getElementById('detail-depreciation-years').value = item.depreciation_years || '';
   document.getElementById('detail-warranty').value = item.warranty_expires || '';
   updateDepreciationCalc();
+  // Show/hide retire button based on status
+  const retireBtn = document.getElementById('detail-retire-btn');
+  if (retireBtn) retireBtn.style.display = item.status === 'retired' ? 'none' : '';
   // Load log
   switchDetailTab('info');
   await loadLogEntries(itemId);
@@ -678,15 +703,13 @@ window.addItems = async function() {
   await loadItems();
 };
 
-window.deleteItem = async function(id) {
-  if (!confirm('Remove this unit permanently?')) return;
+window.retireItem = async function(id) {
+  if (!confirm('Retire this unit? It will be hidden from active inventory but its record and history are preserved.')) return;
   await fetch(`/settings/asset-items/${id}`, {method:'DELETE',headers:{'X-Requested-With':'XMLHttpRequest'}});
-  if (_selectedItemId == id) {
-    _selectedItemId = null;
-    document.getElementById('item-detail-empty').style.display = '';
-    document.getElementById('item-detail-content').style.display = 'none';
-  }
   await loadItems();
+  // Re-select to refresh the detail pane
+  const item = _currentItems.find(x => x.id == id);
+  if (item) selectItem(id);
 };
 
 window.openMaintModal = function(itemId) {
