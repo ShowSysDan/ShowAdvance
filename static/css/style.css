@@ -98,12 +98,13 @@ a:hover { text-decoration: underline; }
 .nav-item.sub { padding-left: 18px; font-size: 12.5px; }
 
 .sidebar-footer {
-  padding: 12px;
+  padding: 10px 12px;
   border-top: 1px solid rgba(255,255,255,0.1);
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
 }
+.sidebar-footer-row { display: flex; align-items: center; gap: 8px; }
 .sidebar-user { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
 .user-avatar {
   width: 30px; height: 30px; border-radius: 50%;
