@@ -3112,7 +3112,7 @@ def delete_user(uid):
 
 @app.route('/settings/users/<int:uid>/reset_password', methods=['POST'])
 @admin_required
-def reset_password(uid):
+def admin_reset_user_password(uid):
     data = request.get_json(force=True) or {}
     pw = data.get('password','')
     if not pw:
