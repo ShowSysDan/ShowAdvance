@@ -209,7 +209,7 @@ def read_db_settings(database_path):
         return {}
     try:
         conn = sqlite3.connect(database_path)
-        conn.row_factory = sqlite3.Row
+        conn.row_factory = lambda c, r: {col[0]: r[i] for i, col in enumerate(c.description)}
         rows = conn.execute(
             "SELECT key, value FROM app_settings WHERE key IN "
             "('db_type','pg_host','pg_port','pg_dbname','pg_user','pg_password','pg_schema')"
@@ -308,7 +308,9 @@ def connect(database_path, settings=None):
 
     # SQLite (default)
     conn = sqlite3.connect(database_path)
-    conn.row_factory = sqlite3.Row
+    # Return plain dicts so .get() works on all Python versions (sqlite3.Row
+    # dropped undocumented .get() support in Python 3.12+)
+    conn.row_factory = lambda c, r: {col[0]: r[i] for i, col in enumerate(c.description)}
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     return DBConnection(conn, 'sqlite')
