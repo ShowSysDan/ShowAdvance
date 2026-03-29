@@ -26,6 +26,10 @@ dist/
 build/
 .eggs/
 
+# ── Tailwind build tools (downloaded by install.sh, not committed) ──
+tools/
+static/fonts/
+
 # ── Editor / OS ───────────────────────────────────────────────────
 .DS_Store
 .DS_Store?

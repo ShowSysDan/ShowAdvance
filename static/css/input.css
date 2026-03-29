@@ -1,0 +1,7 @@
+/* Tailwind CSS v3 entry point
+   Processed by: ./tools/tailwindcss -i static/css/input.css -o static/css/tw-utilities.css
+   Output is concatenated with DaisyUI CSS and theme overrides into tailwind.css by install.sh
+*/
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

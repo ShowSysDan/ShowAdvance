@@ -4,8 +4,6 @@
    Brand: Navy #194980 · Orange #F57F20 · Red-Orange #F04E23
 ================================================================ */
 
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-
 :root {
   --bg:          #141414;
   --bg-card:     #1e1e1e;
@@ -32,6 +30,30 @@
   --font-mono:  'JetBrains Mono', monospace;
   --radius:     6px;
   --radius-lg:  10px;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   DAISYUI BRIDGE — maps legacy CSS custom properties to DaisyUI v3
+   theme tokens so templates using var(--accent), var(--bg), etc.
+   continue to work during the Tailwind/DaisyUI migration.
+   REMOVE this block once all templates are fully migrated.
+═══════════════════════════════════════════════════════════════ */
+[data-theme] {
+  --accent:       hsl(var(--p));
+  --accent-dim:   hsl(var(--pf));
+  --accent-glow:  hsl(var(--p) / 0.14);
+  --brand-navy:   hsl(var(--s));
+  --brand-red:    hsl(var(--a));
+  --blue:         hsl(var(--in));
+  --green:        hsl(var(--su));
+  --red:          hsl(var(--er));
+  --yellow:       hsl(var(--wa));
+  --bg:           hsl(var(--b1));
+  --bg-card:      hsl(var(--b2));
+  --bg-surface:   hsl(var(--b3));
+  --text:         hsl(var(--bc));
+  /* --bg-hover, --text-dim, --text-muted, --border, --border-light
+     are defined per-theme in theme-dpc.css and inherited here */
 }
 
 * { box-sizing: border-box; }

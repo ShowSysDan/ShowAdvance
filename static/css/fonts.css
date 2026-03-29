@@ -1,0 +1,56 @@
+/* ================================================================
+   Self-hosted web fonts — 3·2·1→Theater
+   Font files are downloaded to static/fonts/ by install.sh.
+   If the font files are absent (e.g. pre-install clone), the
+   browser falls back gracefully to system sans-serif / monospace.
+================================================================ */
+
+/* ── Poppins — Body & UI text ───────────────────────────────── */
+@font-face {
+  font-family: 'Poppins';
+  src: url('../fonts/Poppins-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Poppins';
+  src: url('../fonts/Poppins-500.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Poppins';
+  src: url('../fonts/Poppins-600.woff2') format('woff2');
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Poppins';
+  src: url('../fonts/Poppins-700.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ── JetBrains Mono — Code & monospace text ─────────────────── */
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../fonts/JetBrainsMono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../fonts/JetBrainsMono-500.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}

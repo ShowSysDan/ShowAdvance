@@ -6,7 +6,7 @@
 
 ## Version Numbering
 
-**Current version: `2.5.1`**
+**Current version: `2.6.0`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -37,6 +37,7 @@ Version history:
 - `2.4.2` — Asset Manager sort and search: sort type tree by name, unit count, or rental cost (asc/desc); filter units in items modal by barcode with leading-zero tolerance (normBarcode)
 - `2.5.0` — Global site-wide search: persistent search box in sidebar (/ or Ctrl+K to focus) searches shows (access-controlled), contacts, asset types, and barcodes; grouped results panel with keyboard navigation (↑↓ Enter Escape); `<mark>` highlight on matching text; leading-zero barcode tolerance client- and server-side
 - `2.5.1` — Security patch: XSS fix in Retired Assets JS template literals (esc() helper); rate limiting on /api/search (60/min); max query length guard; log_date ISO format validation; syslog coverage for ADMIN_VIEW_AS, ADMIN_VIEW_AS_RESET, ASSET_LOG_ADD, ASSET_LOG_DELETE
+- `2.6.0` — Tailwind CSS + DaisyUI foundation: self-hosted Poppins and JetBrains Mono fonts (no Google Fonts CDN), DaisyUI v3 component CSS with DPC brand theme, Tailwind v3 utility classes; `install.sh` auto-downloads build tools and fonts; `static/css/tailwind.css` pre-built and committed; CSS variable bridge preserves all existing templates during phased migration
 
 ---
 
@@ -135,7 +136,49 @@ sudo systemctl restart 321theater
 
 ### Updating
 
-Re-run `./install.sh` (or `sudo ./install.sh`). It detects the existing database and runs migrations automatically — no data is lost.
+Re-run `./install.sh` (or `sudo ./install.sh`). It detects the existing database and runs migrations automatically — no data is lost. The installer also re-downloads DaisyUI and rebuilds `static/css/tailwind.css` automatically.
+
+### Rebuilding the CSS
+
+`static/css/tailwind.css` is a pre-built file committed to the repository. **You only need to rebuild it when you add new Tailwind utility classes to templates or JavaScript files.** Routine updates via `git pull` do not require a rebuild — the updated CSS is pulled down with the code.
+
+**When to rebuild:**
+- You added a new Tailwind utility class to a template (e.g. `flex`, `grid-cols-3`, `text-sm`)
+- You modified `tailwind.config.js` (safelist, theme extensions, content paths)
+- You modified `static/css/theme-dpc.css` (brand color changes)
+
+**How to rebuild** (requires server internet access):
+
+```bash
+# From the project root — tools/tailwindcss is downloaded by install.sh
+DAISYUI_VERSION=3
+
+# 1. Refresh DaisyUI component CSS
+curl -sL "https://cdn.jsdelivr.net/npm/daisyui@${DAISYUI_VERSION}/dist/styled.min.css" \
+    -o tools/daisyui.css
+
+# 2. Generate Tailwind utility classes from templates
+./tools/tailwindcss \
+    -i static/css/input.css \
+    -o tools/tw-utilities.css \
+    --config tailwind.config.js \
+    --minify
+
+# 3. Assemble the final file
+cat tools/daisyui.css \
+    static/css/theme-dpc.css \
+    tools/tw-utilities.css \
+    > static/css/tailwind.css && \
+rm tools/tw-utilities.css
+
+# 4. Commit the updated tailwind.css
+git add static/css/tailwind.css && git commit -m "rebuild tailwind.css"
+```
+
+If `tools/tailwindcss` is missing (fresh clone without running `install.sh`), run `install.sh` once to download it:
+```bash
+./install.sh   # or: sudo ./install.sh
+```
 
 ---
 

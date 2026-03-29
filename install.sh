@@ -75,6 +75,99 @@ step "Installing Python dependencies..."
 "$PIP" install -r "${APP_DIR}/requirements.txt" --quiet
 info "Dependencies installed."
 
+# ── Tailwind CSS + DaisyUI build ─────────────────────────────────────────────
+step "Building front-end CSS (Tailwind + DaisyUI)..."
+
+TOOLS_DIR="${APP_DIR}/tools"
+TAILWIND_BIN="${TOOLS_DIR}/tailwindcss"
+TAILWIND_VERSION="v3.4.17"
+DAISYUI_VERSION="3"
+STATIC_CSS="${APP_DIR}/static/css"
+FONTS_DIR="${APP_DIR}/static/fonts"
+
+mkdir -p "$TOOLS_DIR" "$FONTS_DIR"
+
+# ── Tailwind CLI standalone binary ──
+if [ ! -f "$TAILWIND_BIN" ]; then
+    info "Downloading Tailwind CSS CLI ${TAILWIND_VERSION} (standalone, no Node.js required)..."
+    TW_URL="https://github.com/tailwindlabs/tailwindcss/releases/download/${TAILWIND_VERSION}/tailwindcss-linux-x64"
+    if curl -sL --max-time 120 --fail "$TW_URL" -o "$TAILWIND_BIN"; then
+        chmod +x "$TAILWIND_BIN"
+        info "Tailwind CLI ready."
+    else
+        warn "Could not download Tailwind CLI — will use committed tailwind.css as-is."
+        TAILWIND_BIN=""
+    fi
+else
+    info "Tailwind CLI already present at tools/tailwindcss."
+fi
+
+# ── DaisyUI pre-built CSS ──
+DAISYUI_CSS="${TOOLS_DIR}/daisyui.css"
+info "Downloading DaisyUI v${DAISYUI_VERSION} component CSS..."
+DAISYUI_URL="https://cdn.jsdelivr.net/npm/daisyui@${DAISYUI_VERSION}/dist/styled.min.css"
+if curl -sL --max-time 60 --fail "$DAISYUI_URL" -o "$DAISYUI_CSS"; then
+    info "DaisyUI CSS downloaded."
+else
+    warn "Could not download DaisyUI CSS — will use committed tailwind.css as-is."
+    DAISYUI_CSS=""
+fi
+
+# ── Web fonts (offline serving) ──
+step "Downloading web fonts for offline serving..."
+
+_dl_font() {
+    local dest="$1" url="$2"
+    if [ -f "$dest" ]; then
+        info "Font already present: $(basename "$dest")"
+    elif curl -sL --max-time 30 --fail "$url" -o "$dest" 2>/dev/null; then
+        info "Downloaded: $(basename "$dest")"
+    else
+        warn "Font download failed: $(basename "$dest") — browser will use system fallback"
+    fi
+}
+
+# Poppins (via @fontsource on jsDelivr — latin subset)
+_dl_font "${FONTS_DIR}/Poppins-400.woff2" \
+    "https://cdn.jsdelivr.net/npm/@fontsource/poppins@5/files/poppins-latin-400-normal.woff2"
+_dl_font "${FONTS_DIR}/Poppins-500.woff2" \
+    "https://cdn.jsdelivr.net/npm/@fontsource/poppins@5/files/poppins-latin-500-normal.woff2"
+_dl_font "${FONTS_DIR}/Poppins-600.woff2" \
+    "https://cdn.jsdelivr.net/npm/@fontsource/poppins@5/files/poppins-latin-600-normal.woff2"
+_dl_font "${FONTS_DIR}/Poppins-700.woff2" \
+    "https://cdn.jsdelivr.net/npm/@fontsource/poppins@5/files/poppins-latin-700-normal.woff2"
+
+# JetBrains Mono (via @fontsource on jsDelivr — latin subset)
+_dl_font "${FONTS_DIR}/JetBrainsMono-400.woff2" \
+    "https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/files/jetbrains-mono-latin-400-normal.woff2"
+_dl_font "${FONTS_DIR}/JetBrainsMono-500.woff2" \
+    "https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5/files/jetbrains-mono-latin-500-normal.woff2"
+
+# ── Run CSS build ──
+if [ -n "$TAILWIND_BIN" ] && [ -n "$DAISYUI_CSS" ]; then
+    step "Compiling tailwind.css..."
+    TW_UTILS="${TOOLS_DIR}/tw-utilities.css"
+    if "${TAILWIND_BIN}" \
+           -i "${STATIC_CSS}/input.css" \
+           -o "$TW_UTILS" \
+           --config "${APP_DIR}/tailwind.config.js" \
+           --minify 2>/dev/null; then
+        # Combine: DaisyUI components → DPC theme overrides → Tailwind utilities
+        cat "$DAISYUI_CSS" \
+            "${STATIC_CSS}/theme-dpc.css" \
+            "$TW_UTILS" \
+            > "${STATIC_CSS}/tailwind.css"
+        rm -f "$TW_UTILS"
+        info "tailwind.css rebuilt successfully."
+    else
+        warn "Tailwind build failed — committed tailwind.css will be used."
+    fi
+elif [ -f "${STATIC_CSS}/tailwind.css" ]; then
+    info "CSS build tools unavailable — using committed tailwind.css."
+else
+    warn "No tailwind.css found and build tools unavailable. UI may not render correctly."
+fi
+
 # ── Backup directories ────────────────────────────────────────────────────────
 step "Creating backup directories..."
 mkdir -p "${APP_DIR}/backups/hourly"

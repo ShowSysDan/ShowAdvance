@@ -1,0 +1,110 @@
+/* ================================================================
+   DPC Brand Theme — DaisyUI v3 overrides
+   Replaces DaisyUI's built-in "dark" and "light" themes with
+   Dr. Phillips Center brand colors.
+
+   DaisyUI v3 color format: H S% L%  (passed into hsl() by components)
+
+   Brand reference:
+     DPC Orange:  #F57F20  → hsl(30 91% 54%)
+     DPC Navy:    #194980  → hsl(213 67% 30%)
+     DPC Red:     #F04E23  → hsl(13 87% 54%)
+================================================================ */
+
+/* ── Dark Theme ──────────────────────────────────────────────── */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Primary = DPC orange */
+  --p:   30 91% 54%;    /* #F57F20 */
+  --pf:  26 76% 43%;    /* #C0611A */
+  --pc:  0 0% 0%;
+
+  /* Secondary = DPC navy */
+  --s:   213 67% 30%;   /* #194980 */
+  --sf:  213 67% 22%;
+  --sc:  0 0% 100%;
+
+  /* Accent = DPC red-orange */
+  --a:   13 87% 54%;    /* #F04E23 */
+  --af:  13 87% 44%;
+  --ac:  0 0% 100%;
+
+  /* Neutral */
+  --n:   0 0% 15%;      /* #252525 */
+  --nf:  0 0% 10%;
+  --nc:  0 0% 85%;
+
+  /* Base backgrounds */
+  --b1:  0 0% 8%;       /* #141414 */
+  --b2:  0 0% 12%;      /* #1e1e1e */
+  --b3:  0 0% 15%;      /* #252525 */
+  --bc:  0 0% 85%;      /* #d8d8d9 */
+
+  /* Semantic */
+  --in:  214 100% 65%;  /* #4A9EFF */
+  --inc: 0 0% 0%;
+  --su:  142 69% 45%;   /* #22C55E */
+  --suc: 0 0% 0%;
+  --wa:  45 93% 47%;    /* #EAB308 */
+  --wac: 0 0% 0%;
+  --er:  0 84% 60%;     /* #EF4444 */
+  --erc: 0 0% 100%;
+
+  /* DPC-specific extras (not DaisyUI standard — kept for transition bridge) */
+  --bg-hover:     #2d2d2d;
+  --text-dim:     #909090;
+  --text-muted:   #606060;
+  --border:       #2e2e2e;
+  --border-light: #3a3a3a;
+  --sidebar-w:    256px;
+}
+
+/* ── Light Theme ─────────────────────────────────────────────── */
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* Primary = DPC orange (darker for readability on light bg) */
+  --p:   26 73% 44%;    /* #D06810 */
+  --pf:  26 73% 36%;
+  --pc:  0 0% 100%;
+
+  /* Secondary = DPC navy */
+  --s:   213 67% 30%;   /* #194980 */
+  --sf:  213 67% 22%;
+  --sc:  0 0% 100%;
+
+  /* Accent = DPC red-orange */
+  --a:   13 87% 54%;    /* #F04E23 */
+  --af:  13 87% 44%;
+  --ac:  0 0% 100%;
+
+  /* Neutral */
+  --n:   0 0% 88%;      /* #e0e0e0 */
+  --nf:  0 0% 80%;
+  --nc:  0 0% 27%;
+
+  /* Base backgrounds */
+  --b1:  0 0% 85%;      /* #d8d8d9 */
+  --b2:  0 0% 94%;      /* #f0f0f0 */
+  --b3:  0 0% 91%;      /* #e8e8e8 */
+  --bc:  0 0% 27%;      /* #444444 */
+
+  /* Semantic */
+  --in:  217 91% 60%;
+  --inc: 0 0% 100%;
+  --su:  142 71% 45%;
+  --suc: 0 0% 100%;
+  --wa:  45 93% 47%;
+  --wac: 0 0% 0%;
+  --er:  0 72% 51%;
+  --erc: 0 0% 100%;
+
+  /* DPC-specific extras */
+  --bg-hover:     #e0e0e0;
+  --text-dim:     #666666;
+  --text-muted:   #888888;
+  --border:       #cccccc;
+  --border-light: #d0d0d0;
+  --sidebar-w:    256px;
+}
