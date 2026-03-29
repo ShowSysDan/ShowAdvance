@@ -327,9 +327,12 @@ function _gsOnInput() {
 }
 
 async function _gsFetch(q) {
-  const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-  const data = await r.json();
-  _gsRender(data, q);
+  try {
+    const r = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
+    if (!r.ok) return;
+    const data = await r.json();
+    if (Array.isArray(data)) _gsRender(data, q);
+  } catch (_) { /* network error — fail silently */ }
 }
 
 function _gsRender(results, q) {
@@ -338,7 +341,7 @@ function _gsRender(results, q) {
   _gsActiveIdx = -1;
   _gsItems = [];
 
-  if (results.length === 0) {
+  if (!results.length) {
     container.innerHTML = `<div class="gs-empty">No results for "<strong>${_gsEsc(q)}</strong>"</div>`;
     panel.style.display = '';
     return;
