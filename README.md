@@ -6,7 +6,7 @@
 
 ## Version Numbering
 
-**Current version: `2.5.1`**
+**Current version: `2.6.0`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -37,6 +37,7 @@ Version history:
 - `2.4.2` — Asset Manager sort and search: sort type tree by name, unit count, or rental cost (asc/desc); filter units in items modal by barcode with leading-zero tolerance (normBarcode)
 - `2.5.0` — Global site-wide search: persistent search box in sidebar (/ or Ctrl+K to focus) searches shows (access-controlled), contacts, asset types, and barcodes; grouped results panel with keyboard navigation (↑↓ Enter Escape); `<mark>` highlight on matching text; leading-zero barcode tolerance client- and server-side
 - `2.5.1` — Security patch: XSS fix in Retired Assets JS template literals (esc() helper); rate limiting on /api/search (60/min); max query length guard; log_date ISO format validation; syslog coverage for ADMIN_VIEW_AS, ADMIN_VIEW_AS_RESET, ASSET_LOG_ADD, ASSET_LOG_DELETE
+- `2.6.0` — RentalWorks bulk import script (`import_assets.py`): one-time migration from RentalWorks exports into Asset Manager with full 3-tier hierarchy, container/kit linking, daily+weekly rates, depreciation dates, and replacement costs. Kit/container feature: items can be flagged as containers and linked to their contents. Load-in/load-out dates on shows for smart asset rental pricing (weekly rate applies when load period ≥ 7 days; daily × days otherwise). Sidebar redesign: gradient background, scaled-up nav items, pill-style active state.
 
 ---
 
@@ -60,6 +61,7 @@ Version history:
    - [Public Show Page](#public-show-page)
 5. [Admin & Settings Guide](#admin--settings-guide)
    - [Asset Manager](#asset-manager)
+   - [Importing from RentalWorks](#importing-from-rentalworks)
    - [Asset Financial Tracking](#asset-financial-tracking)
    - [Asset Maintenance Log](#asset-maintenance-log)
    - [Retired Assets](#retired-assets)
@@ -279,6 +281,74 @@ Category (e.g. Video)
 **Availability:** When a unit is added to a show, the system checks real-time availability for the rental period, accounting for maintenance units, reserved spares, and other shows requesting the same item type. Negative availability is displayed — it does not prevent allocation, but makes the over-allocation visible.
 
 **Rental pricing:** Each item type has a base rental cost. When added to a show the price is **locked** immediately — if the database price is updated later, existing show reservations keep the original price. New reservations use the current price.
+
+### Importing from RentalWorks
+
+If your organisation previously used **RentalWorks** (rental management software by Wynne Systems / HelixIntel), you can bulk-import your entire inventory into the Asset Manager using the included migration script `import_assets.py`.
+
+#### What you need
+
+Two Excel exports from RentalWorks (exported via its reporting module):
+
+| Export | File naming pattern | Contents |
+|--------|--------------------|-|
+| Rental Inventory | `RentalInventory_<date>.xlsx` | Item types: name, category, manufacturer, part number, daily/weekly rates, active/inactive |
+| Items | `Item_<date>.xlsx` or `Items_<date>.xlsx` | Individual physical units: barcode, serial number, status, purchase date, replacement cost, depreciation date |
+
+#### What gets imported
+
+| Source | Destination | Notes |
+|--------|------------|-------|
+| `InventoryType` | `asset_categories.name` | Top-level groupings (e.g. Audio, Video, Lighting) |
+| `Category` | `asset_types` (parent tier) | Mid-level categories within each type |
+| `Description` | `asset_types` (leaf tier) | Specific make/model names |
+| `Manufacturer` | `asset_types.manufacturer` | |
+| `ManufacturerPartNumber` / `SubCategory` | `asset_types.model` | Part number preferred; SubCategory used as fallback |
+| `DailyRate` | `asset_types.rental_cost` | Per-day rental price |
+| `WeeklyRate` | `asset_types.weekly_rate` | Per-week rental price (enables smart rate calc on shows) |
+| `Inactive` | `asset_types.is_retired` | Retired types are hidden from active inventory |
+| `BarCode` / `SerialNumber` | `asset_items.barcode` | Uses barcode if tracked by barcode; serial number otherwise |
+| `InventoryStatus` | `asset_items.status` | IN / IN CONTAINER / STAGED → `available`; IN REPAIR → `maintenance` |
+| `PurchaseDate` | `asset_items.year_purchased` | Year extracted from date |
+| `DepreciationStartDate` | `asset_items.depreciation_start_date` | |
+| `ReplacementCost` | `asset_items.replacement_cost` | |
+| Container assignments | `asset_items.container_item_id` | Physical cases/racks linked to their contents via `ContainerBarCode` |
+
+#### Running the import
+
+```bash
+# From the ShowAdvance directory:
+python3 import_assets.py \
+  --inventory /path/to/RentalInventory_2026-03-30.xlsx \
+  --items     /path/to/Items_2026-03-30.xlsx
+
+# Options:
+#   --inventory PATH   Path to RentalInventory export (required)
+#   --items PATH       Path to Items export (required)
+#   --db PATH          Path to database file (default: advance.db)
+#   --force            Skip duplicate-data guard (use if re-running)
+#   --dry-run          Print what would be imported without writing anything
+```
+
+Expected output (numbers will vary):
+```
+[1/4] Categories:   9 created
+[2/4] Parent types: 46 created
+[3/4] Leaf types:   334 created
+[4/4] Items:        1503 created  (0 warnings)
+      Containers:   99 assigned
+Done. Import complete.
+```
+
+#### Notes
+
+- The script creates a backup of your database (`advance.db.bak`) before writing anything.
+- Run `python3 import_assets.py --dry-run` first to preview the import without modifying the database.
+- If the Asset Manager already has data, the script will abort unless you pass `--force`.
+- Re-running with `--force` will skip rows that would create duplicate category or type names — existing records are left unchanged.
+- The three-tier hierarchy (`InventoryType → Category → Description`) maps cleanly to the existing Asset Manager structure using `parent_type_id` — no schema changes needed for the organisational hierarchy itself.
+
+---
 
 ### Asset Financial Tracking
 

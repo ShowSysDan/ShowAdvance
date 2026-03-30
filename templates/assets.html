@@ -104,8 +104,12 @@
           </select>
         </div>
         <div class="field-group">
-          <label class="field-label">RENTAL COST ($/show)</label>
+          <label class="field-label">DAILY RATE ($/day)</label>
           <input type="number" id="type-cost" class="field-input" value="0" min="0" step="0.01">
+        </div>
+        <div class="field-group">
+          <label class="field-label">WEEKLY RATE ($/week)</label>
+          <input type="number" id="type-weekly-cost" class="field-input" value="0" min="0" step="0.01">
         </div>
         <div class="field-group">
           <label class="field-label">RESERVE COUNT (spares)</label>
@@ -216,6 +220,30 @@
               <div class="field-group">
                 <label class="field-label">WARRANTY EXPIRES</label>
                 <input type="date" id="detail-warranty" class="field-input">
+              </div>
+              <div class="field-group">
+                <label class="field-label">DEPRECIATION START DATE</label>
+                <input type="date" id="detail-dep-start" class="field-input">
+              </div>
+              <div class="field-group">
+                <label class="field-label">REPLACEMENT COST ($)</label>
+                <input type="number" id="detail-replacement-cost" class="field-input" placeholder="0.00" min="0" step="0.01">
+              </div>
+              <div class="field-group" style="grid-column:span 2">
+                <label class="checkbox-label">
+                  <input type="checkbox" id="detail-is-container">
+                  This item is a container (holds other items)
+                </label>
+              </div>
+              <div id="detail-container-contents-wrap" style="grid-column:span 2;display:none">
+                <label class="field-label">CONTENTS</label>
+                <div id="detail-container-contents" style="font-size:12px;color:var(--text-dim)"></div>
+              </div>
+              <div class="field-group" style="grid-column:span 2">
+                <label class="field-label">ASSIGN TO CONTAINER</label>
+                <select id="detail-container-sel" class="field-input">
+                  <option value="">— None —</option>
+                </select>
               </div>
             </div>
             <div id="detail-depreciation-calc" style="margin-top:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;display:none">
@@ -441,7 +469,7 @@ function renderTypeRow(t) {
         </div>
         ${t.manufacturer ? `<div class="asset-type-meta">${esc(t.name)}</div>` : ''}
         <div class="asset-type-meta">
-          ${t.item_count} units · ${t.reserve_count} reserved · $${Number(t.rental_cost||0).toFixed(2)}/show
+          ${t.item_count} units · ${t.reserve_count} reserved · $${Number(t.rental_cost||0).toFixed(2)}/day${t.weekly_rate ? ' · $'+Number(t.weekly_rate).toFixed(2)+'/wk' : ''}
           ${t.storage_location ? ' · ' + esc(t.storage_location) : ''}
           ${t.is_consumable ? ' · <em>consumable</em>' : ''}
           ${isRetired && t.retired_at ? ' · retired ' + t.retired_at.slice(0,10) : ''}
@@ -519,6 +547,7 @@ window.openTypeModal = async function(id, defaultCatId) {
       document.getElementById('type-model').value = t.model || '';
       locSel.value = t.storage_location || '';
       document.getElementById('type-cost').value = Number(t.rental_cost||0).toFixed(2);
+      document.getElementById('type-weekly-cost').value = Number(t.weekly_rate||0).toFixed(2);
       document.getElementById('type-reserve').value = t.reserve_count || 0;
       document.getElementById('type-consumable').checked = !!t.is_consumable;
       document.getElementById('type-track-qty').checked = t.track_quantity !== 0;
@@ -535,6 +564,7 @@ window.openTypeModal = async function(id, defaultCatId) {
     document.getElementById('type-model').value = '';
     locSel.value = '';
     document.getElementById('type-cost').value = '0';
+    document.getElementById('type-weekly-cost').value = '0';
     document.getElementById('type-reserve').value = '0';
     document.getElementById('type-consumable').checked = false;
     document.getElementById('type-track-qty').checked = true;
@@ -556,6 +586,7 @@ window.saveType = async function() {
     model: document.getElementById('type-model').value.trim(),
     storage_location: document.getElementById('type-location').value,
     rental_cost: parseFloat(document.getElementById('type-cost').value) || 0,
+    weekly_rate: parseFloat(document.getElementById('type-weekly-cost').value) || 0,
     reserve_count: parseInt(document.getElementById('type-reserve').value) || 0,
     is_consumable: document.getElementById('type-consumable').checked,
     track_quantity: document.getElementById('type-track-qty').checked,
@@ -700,7 +731,29 @@ window.selectItem = async function(itemId) {
   document.getElementById('detail-purchase-value').value = item.purchase_value != null ? item.purchase_value : '';
   document.getElementById('detail-depreciation-years').value = item.depreciation_years || '';
   document.getElementById('detail-warranty').value = item.warranty_expires || '';
+  document.getElementById('detail-dep-start').value = item.depreciation_start_date || '';
+  document.getElementById('detail-replacement-cost').value = item.replacement_cost != null ? item.replacement_cost : '';
+  document.getElementById('detail-is-container').checked = !!item.is_container;
   updateDepreciationCalc();
+  // Container contents
+  const contentsWrap = document.getElementById('detail-container-contents-wrap');
+  if (item.is_container) {
+    contentsWrap.style.display = '';
+    fetch(`/settings/asset-items/${item.id}/contents`, {headers:{'X-Requested-With':'XMLHttpRequest'}})
+      .then(r => r.json()).then(items => {
+        const el = document.getElementById('detail-container-contents');
+        el.innerHTML = items.length
+          ? items.map(i => `<div style="padding:2px 0">${esc(i.type_name)}${i.barcode ? ' · '+esc(i.barcode) : ''}</div>`).join('')
+          : '<em>No items assigned</em>';
+      });
+  } else {
+    contentsWrap.style.display = 'none';
+  }
+  // Container selector — populate with all container items
+  const contSel = document.getElementById('detail-container-sel');
+  const containers = _currentItems.filter(i => i.is_container && i.id !== item.id);
+  contSel.innerHTML = '<option value="">— None —</option>' +
+    containers.map(c => `<option value="${c.id}"${c.id === item.container_item_id ? ' selected' : ''}>${esc(c.barcode || '#'+c.id)}</option>`).join('');
   // Show/hide retire button based on status
   const retireBtn = document.getElementById('detail-retire-btn');
   if (retireBtn) retireBtn.style.display = item.status === 'retired' ? 'none' : '';
@@ -755,7 +808,18 @@ window.saveItemDetail = async function() {
     purchase_value: document.getElementById('detail-purchase-value').value || null,
     depreciation_years: document.getElementById('detail-depreciation-years').value || null,
     warranty_expires: document.getElementById('detail-warranty').value || null,
+    depreciation_start_date: document.getElementById('detail-dep-start').value || null,
+    replacement_cost: document.getElementById('detail-replacement-cost').value || null,
+    is_container: document.getElementById('detail-is-container').checked,
   };
+  // Update container assignment separately if changed
+  const contSel = document.getElementById('detail-container-sel');
+  if (contSel) {
+    await fetch(`/settings/asset-items/${id}/set-container`, {
+      method:'POST', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+      body: JSON.stringify({container_item_id: contSel.value || null})
+    });
+  }
   const r = await fetch(`/settings/asset-items/${id}`, {
     method:'PUT', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
     body: JSON.stringify(payload)

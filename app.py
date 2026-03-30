@@ -5,6 +5,7 @@ Run: python app.py  (after running init_db.py first)
 import os
 import sqlite3
 import json
+import math
 import shutil
 import logging
 import logging.handlers
@@ -188,7 +189,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.5.1'
+APP_VERSION = '2.6.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -1548,6 +1549,18 @@ def save_advance(show_id):
     if 'venue' in data:
         db.execute('UPDATE shows SET venue=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
                    (data['venue'], show_id))
+    if 'load_in_date' in data:
+        db.execute('UPDATE shows SET load_in_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                   (data['load_in_date'] or None, show_id))
+    if 'load_in_time' in data:
+        db.execute('UPDATE shows SET load_in_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                   (data['load_in_time'], show_id))
+    if 'load_out_date' in data:
+        db.execute('UPDATE shows SET load_out_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                   (data['load_out_date'] or None, show_id))
+    if 'load_out_time' in data:
+        db.execute('UPDATE shows SET load_out_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                   (data['load_out_time'], show_id))
 
     # Track last saved
     db.execute("""
@@ -5352,9 +5365,9 @@ def asset_type_add():
     db.execute("""
         INSERT INTO asset_types
           (category_id, parent_type_id, name, manufacturer, model,
-           storage_location, rental_cost, reserve_count, is_consumable, track_quantity,
+           storage_location, rental_cost, weekly_rate, reserve_count, is_consumable, track_quantity,
            supplier_name, supplier_contact, sort_order)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         category_id,
         data.get('parent_type_id') or None,
@@ -5363,6 +5376,7 @@ def asset_type_add():
         (data.get('model') or '').strip(),
         (data.get('storage_location') or '').strip(),
         float(data.get('rental_cost') or 0),
+        float(data.get('weekly_rate') or 0),
         int(data.get('reserve_count') or 0),
         1 if data.get('is_consumable') else 0,
         1 if data.get('track_quantity', True) else 0,
@@ -5392,7 +5406,7 @@ def asset_type_edit(type_id):
     db.execute("""
         UPDATE asset_types SET
           name=?, manufacturer=?, model=?, storage_location=?,
-          rental_cost=?, reserve_count=?, is_consumable=?, track_quantity=?,
+          rental_cost=?, weekly_rate=?, reserve_count=?, is_consumable=?, track_quantity=?,
           supplier_name=?, supplier_contact=?,
           category_id=?, parent_type_id=?
         WHERE id=?
@@ -5402,6 +5416,7 @@ def asset_type_edit(type_id):
         (data.get('model') or '').strip(),
         (data.get('storage_location') or '').strip(),
         float(data.get('rental_cost') or 0),
+        float(data.get('weekly_rate') or 0),
         int(data.get('reserve_count') or 0),
         1 if data.get('is_consumable') else 0,
         1 if data.get('track_quantity', True) else 0,
@@ -5546,7 +5561,8 @@ def asset_item_edit(item_id):
     db.execute("""
         UPDATE asset_items SET
           barcode=?, condition=?, year_purchased=?, purchase_value=?,
-          depreciation_years=?, warranty_expires=?
+          depreciation_years=?, warranty_expires=?,
+          depreciation_start_date=?, replacement_cost=?, is_container=?
         WHERE id=?
     """, (
         (data.get('barcode') or '').strip(),
@@ -5555,10 +5571,49 @@ def asset_item_edit(item_id):
         _float_or_none(data.get('purchase_value')),
         _int_or_none(data.get('depreciation_years')),
         (data.get('warranty_expires') or '').strip() or None,
+        (data.get('depreciation_start_date') or '').strip() or None,
+        _float_or_none(data.get('replacement_cost')),
+        1 if data.get('is_container') else 0,
         item_id,
     ))
     db.commit()
     log_audit(db, 'ASSET_ITEM_EDIT', 'asset_item', item_id)
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/asset-items/<int:item_id>/contents', methods=['GET'])
+@admin_required
+def asset_item_contents(item_id):
+    """List items contained within a container item."""
+    db = get_db()
+    rows = db.execute("""
+        SELECT ai.*, at.name as type_name
+        FROM asset_items ai
+        JOIN asset_types at ON at.id = ai.asset_type_id
+        WHERE ai.container_item_id = ?
+        ORDER BY at.name, ai.barcode
+    """, (item_id,)).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/settings/asset-items/<int:item_id>/set-container', methods=['POST'])
+@admin_required
+def asset_item_set_container(item_id):
+    """Assign an item to a container (or clear its container)."""
+    data = request.get_json() or {}
+    container_item_id = data.get('container_item_id') or None
+    db = get_db()
+    # Prevent an item from being its own container
+    if container_item_id and int(container_item_id) == item_id:
+        db.close()
+        return jsonify({'error': 'An item cannot contain itself'}), 400
+    db.execute('UPDATE asset_items SET container_item_id=? WHERE id=?', (container_item_id, item_id))
+    db.commit()
+    log_audit(db, 'ASSET_ITEM_CONTAINER', 'asset_item', item_id,
+              detail=f'container_item_id={container_item_id}')
     db.commit()
     db.close()
     return jsonify({'success': True})
@@ -5872,13 +5927,31 @@ def show_asset_add(show_id):
     perfs = db.execute(
         'SELECT perf_date FROM show_performances WHERE show_id=? ORDER BY perf_date', (show_id,)
     ).fetchall()
-    rental_start = data.get('rental_start') or (perfs[0]['perf_date'] if perfs else show['show_date'])
-    rental_end = data.get('rental_end') or (perfs[-1]['perf_date'] if perfs else show['show_date'])
+    # Prefer load-in/out dates over first/last performance dates
+    default_start = show['load_in_date'] or (perfs[0]['perf_date'] if perfs else show['show_date'])
+    default_end   = show['load_out_date'] or (perfs[-1]['perf_date'] if perfs else show['show_date'])
+    rental_start = data.get('rental_start') or default_start
+    rental_end   = data.get('rental_end')   or default_end
 
-    # Lock current price
-    type_row = db.execute('SELECT rental_cost FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
-    locked_price = float(data.get('locked_price') if data.get('locked_price') is not None
-                         else (type_row['rental_cost'] if type_row else 0))
+    # Smart rate: weekly if weekly_rate set and rental >= 7 days, else daily × days
+    type_row = db.execute('SELECT rental_cost, weekly_rate FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
+    if data.get('locked_price') is not None:
+        locked_price = float(data['locked_price'])
+    elif type_row:
+        daily_rate  = float(type_row['rental_cost'] or 0)
+        weekly_rate = float(type_row['weekly_rate'] or 0)
+        try:
+            d_start = date.fromisoformat(str(rental_start)) if rental_start else None
+            d_end   = date.fromisoformat(str(rental_end))   if rental_end   else None
+            days = max(1, (d_end - d_start).days + 1) if d_start and d_end else 1
+        except (ValueError, TypeError):
+            days = 1
+        if weekly_rate > 0 and days >= 7:
+            locked_price = weekly_rate * math.ceil(days / 7)
+        else:
+            locked_price = daily_rate * days
+    else:
+        locked_price = 0.0
 
     is_hidden = 1 if data.get('is_hidden') else 0
 

@@ -264,6 +264,46 @@
     </div>
   </div>
 
+  {# ── Load-In / Load-Out ──────────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> LOAD-IN / LOAD-OUT
+    </div>
+    <div class="form-section-body">
+      <div class="form-row cols-4">
+        <div class="field-group">
+          <label class="field-label">LOAD-IN DATE</label>
+          <input type="date" class="field-input adv-field" data-key="load_in_date"
+                 id="load-in-date" value="{{ show.load_in_date or '' }}"
+                 {% if restricted %}disabled{% endif %}>
+        </div>
+        <div class="field-group">
+          <label class="field-label">LOAD-IN TIME</label>
+          <input type="text" class="field-input adv-field" data-key="load_in_time"
+                 id="load-in-time" value="{{ show.load_in_time or '' }}"
+                 placeholder="e.g. 8:00 AM"
+                 {% if restricted %}disabled{% endif %}>
+        </div>
+        <div class="field-group">
+          <label class="field-label">LOAD-OUT DATE</label>
+          <input type="date" class="field-input adv-field" data-key="load_out_date"
+                 id="load-out-date" value="{{ show.load_out_date or '' }}"
+                 {% if restricted %}disabled{% endif %}>
+        </div>
+        <div class="field-group">
+          <label class="field-label">LOAD-OUT TIME</label>
+          <input type="text" class="field-input adv-field" data-key="load_out_time"
+                 id="load-out-time" value="{{ show.load_out_time or '' }}"
+                 placeholder="e.g. 11:00 PM"
+                 {% if restricted %}disabled{% endif %}>
+        </div>
+      </div>
+      <p class="field-note" style="margin:6px 0 0;font-size:11px;color:var(--text-muted)">
+        Used to calculate asset rental costs — weekly rate applies when load period is 7+ days.
+      </p>
+    </div>
+  </div>
+
   {% for section in form_sections %}
   <div class="form-section{% if section.collapsible and section.default_open == 0 %} collapsed{% endif %}"
        data-key="{{ section.section_key }}" data-default-open="{{ '0' if section.default_open == 0 else '1' }}">
@@ -985,10 +1025,13 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       items.forEach(t => {
         const label = [t.manufacturer, t.model].filter(Boolean).join(' ') || t.name;
         const sub = t.manufacturer ? t.name : '';
-        html += `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal" onclick="selectAssetType(${t.id}, '${esc(label).replace(/'/g,"\\'")}', ${t.rental_cost || 0})">
+        const rateLabel = t.weekly_rate > 0
+          ? `$${Number(t.rental_cost||0).toFixed(2)}/day · $${Number(t.weekly_rate||0).toFixed(2)}/wk`
+          : `$${Number(t.rental_cost||0).toFixed(2)}/day`;
+        html += `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal" onclick="selectAssetType(${t.id}, '${esc(label).replace(/'/g,"\\'")}', ${t.rental_cost || 0}, ${t.weekly_rate || 0})">
           <div style="font-weight:500">${esc(label)}</div>
           ${sub ? `<div style="font-size:10px;color:var(--text-dim)">${esc(sub)}</div>` : ''}
-          <div style="font-size:10px;color:var(--text-dim)">$${Number(t.rental_cost||0).toFixed(2)}/show${t.is_consumable ? ' · consumable' : ''}</div>
+          <div style="font-size:10px;color:var(--text-dim)">${rateLabel}${t.is_consumable ? ' · consumable' : ''}</div>
         </button>`;
       });
       html += '</div></div>';
@@ -998,22 +1041,40 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   }
 
   // ── Asset Add Detail ──────────────────────────────────────────────────────
-  window.selectAssetType = async function(typeId, label, price) {
+  window.selectAssetType = async function(typeId, label, price, weeklyRate) {
     _currentAssetTypeId = typeId;
     document.getElementById('asset-add-type-id').value = typeId;
     document.getElementById('asset-add-title').textContent = label;
-    document.getElementById('asset-add-price').value = Number(price).toFixed(2);
     document.getElementById('asset-add-qty').value = 1;
     document.getElementById('asset-add-notes').value = '';
     if (document.getElementById('asset-add-hidden'))
       document.getElementById('asset-add-hidden').checked = false;
 
-    // Default rental dates from show performances
+    // Default rental dates: prefer load-in/out dates, fall back to performances
+    const loadInDate  = document.getElementById('load-in-date')?.value  || '';
+    const loadOutDate = document.getElementById('load-out-date')?.value || '';
     const perfs = {{ performances | tojson }};
-    if (perfs.length > 0) {
-      document.getElementById('asset-add-start').value = perfs[0].perf_date || '';
-      document.getElementById('asset-add-end').value = perfs[perfs.length-1].perf_date || '';
+    const defaultStart = loadInDate  || (perfs.length > 0 ? perfs[0].perf_date          : '') || '';
+    const defaultEnd   = loadOutDate || (perfs.length > 0 ? perfs[perfs.length-1].perf_date : '') || '';
+    document.getElementById('asset-add-start').value = defaultStart;
+    document.getElementById('asset-add-end').value   = defaultEnd;
+
+    // Smart price: weekly rate if ≥7 days, else daily × days
+    const dailyRate  = Number(price)      || 0;
+    const wkRate     = Number(weeklyRate) || 0;
+    let calcPrice = dailyRate;
+    if (defaultStart && defaultEnd) {
+      try {
+        const d1 = new Date(defaultStart), d2 = new Date(defaultEnd);
+        const days = Math.max(1, Math.round((d2 - d1) / 86400000) + 1);
+        if (wkRate > 0 && days >= 7) {
+          calcPrice = wkRate * Math.ceil(days / 7);
+        } else {
+          calcPrice = dailyRate * days;
+        }
+      } catch(e) { calcPrice = dailyRate; }
     }
+    document.getElementById('asset-add-price').value = calcPrice.toFixed(2);
 
     closeAssetSearch();
     document.getElementById('asset-add-modal').style.display = 'flex';
