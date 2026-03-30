@@ -5,6 +5,7 @@ Run: python app.py  (after running init_db.py first)
 import os
 import sqlite3
 import json
+import math
 import shutil
 import logging
 import logging.handlers
@@ -188,7 +189,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.5.1'
+APP_VERSION = '2.6.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -1548,6 +1549,18 @@ def save_advance(show_id):
     if 'venue' in data:
         db.execute('UPDATE shows SET venue=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
                    (data['venue'], show_id))
+    if 'load_in_date' in data:
+        db.execute('UPDATE shows SET load_in_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                   (data['load_in_date'] or None, show_id))
+    if 'load_in_time' in data:
+        db.execute('UPDATE shows SET load_in_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                   (data['load_in_time'], show_id))
+    if 'load_out_date' in data:
+        db.execute('UPDATE shows SET load_out_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                   (data['load_out_date'] or None, show_id))
+    if 'load_out_time' in data:
+        db.execute('UPDATE shows SET load_out_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
+                   (data['load_out_time'], show_id))
 
     # Track last saved
     db.execute("""
@@ -5914,13 +5927,31 @@ def show_asset_add(show_id):
     perfs = db.execute(
         'SELECT perf_date FROM show_performances WHERE show_id=? ORDER BY perf_date', (show_id,)
     ).fetchall()
-    rental_start = data.get('rental_start') or (perfs[0]['perf_date'] if perfs else show['show_date'])
-    rental_end = data.get('rental_end') or (perfs[-1]['perf_date'] if perfs else show['show_date'])
+    # Prefer load-in/out dates over first/last performance dates
+    default_start = show['load_in_date'] or (perfs[0]['perf_date'] if perfs else show['show_date'])
+    default_end   = show['load_out_date'] or (perfs[-1]['perf_date'] if perfs else show['show_date'])
+    rental_start = data.get('rental_start') or default_start
+    rental_end   = data.get('rental_end')   or default_end
 
-    # Lock current price
-    type_row = db.execute('SELECT rental_cost FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
-    locked_price = float(data.get('locked_price') if data.get('locked_price') is not None
-                         else (type_row['rental_cost'] if type_row else 0))
+    # Smart rate: weekly if weekly_rate set and rental >= 7 days, else daily × days
+    type_row = db.execute('SELECT rental_cost, weekly_rate FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
+    if data.get('locked_price') is not None:
+        locked_price = float(data['locked_price'])
+    elif type_row:
+        daily_rate  = float(type_row['rental_cost'] or 0)
+        weekly_rate = float(type_row['weekly_rate'] or 0)
+        try:
+            d_start = date.fromisoformat(str(rental_start)) if rental_start else None
+            d_end   = date.fromisoformat(str(rental_end))   if rental_end   else None
+            days = max(1, (d_end - d_start).days + 1) if d_start and d_end else 1
+        except (ValueError, TypeError):
+            days = 1
+        if weekly_rate > 0 and days >= 7:
+            locked_price = weekly_rate * math.ceil(days / 7)
+        else:
+            locked_price = daily_rate * days
+    else:
+        locked_price = 0.0
 
     is_hidden = 1 if data.get('is_hidden') else 0
 
