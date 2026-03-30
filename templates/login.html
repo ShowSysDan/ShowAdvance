@@ -2,59 +2,77 @@
 {% block title %}Login — 3·2·1→Theater{% endblock %}
 
 {% block auth_content %}
-<div class="login-page">
-  <div class="login-card">
-    <div class="login-brand">
-      <svg class="brand-icon lg" width="60" height="73" viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <!-- hang pipe -->
-        <rect x="16.5" y="0" width="3" height="6" rx="1.5" fill="rgba(245,127,32,0.55)"/>
-        <!-- fixture body -->
-        <rect x="10" y="5" width="16" height="12" rx="2.5" fill="#F57F20"/>
-        <!-- lens recess -->
-        <rect x="11.5" y="6.5" width="13" height="9" rx="1.5" fill="rgba(0,0,0,0.18)"/>
-        <!-- lens highlight -->
-        <ellipse cx="18" cy="11" rx="4.5" ry="3.2" fill="rgba(255,255,255,0.1)"/>
-        <ellipse cx="14.5" cy="8.2" rx="2.5" ry="1.5" fill="rgba(255,255,255,0.3)"/>
-        <!-- beam -->
-        <path d="M12,17 L24,17 L30,40 L6,40 Z" fill="rgba(245,127,32,0.14)"/>
-        <line x1="12" y1="17" x2="6" y2="40" stroke="rgba(245,127,32,0.3)" stroke-width="0.8"/>
-        <line x1="24" y1="17" x2="30" y2="40" stroke="rgba(245,127,32,0.3)" stroke-width="0.8"/>
-        <!-- stage floor -->
-        <rect x="4" y="40" width="28" height="2" rx="1" fill="rgba(245,127,32,0.4)"/>
-        <!-- floor glow -->
-        <ellipse cx="18" cy="41.5" rx="9" ry="2.5" fill="rgba(245,127,32,0.2)"/>
-      </svg>
-      <h1>3·2·1→THEATER</h1>
-      <p>Advance to stage in 3-2-1</p>
-    </div>
+<div class="min-h-screen flex items-center justify-center bg-base-100"
+     style="background-image:radial-gradient(ellipse at 60% 30%,hsl(var(--p)/0.06) 0%,transparent 60%)">
+  <div class="card bg-base-200 border border-base-300 w-[360px]">
+    <div class="card-body p-10 gap-0">
 
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-        {% for cat, msg in messages %}
-          <div class="flash flash-{{ cat }}">{{ msg }}</div>
-        {% endfor %}
-      {% endif %}
-    {% endwith %}
-
-    <form method="post" class="login-form">
-      <input type="hidden" name="next" value="{{ next }}">
-      <div class="field-group">
-        <label class="field-label">USERNAME</label>
-        <input type="text" name="username" class="field-input" autofocus autocomplete="username" required>
+      <!-- Brand -->
+      <div class="text-center mb-7">
+        <svg class="brand-icon lg mx-auto mb-1.5" width="60" height="73" viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <!-- hang pipe -->
+          <rect x="16.5" y="0" width="3" height="6" rx="1.5" fill="rgba(245,127,32,0.55)"/>
+          <!-- fixture body -->
+          <rect x="10" y="5" width="16" height="12" rx="2.5" fill="#F57F20"/>
+          <!-- lens recess -->
+          <rect x="11.5" y="6.5" width="13" height="9" rx="1.5" fill="rgba(0,0,0,0.18)"/>
+          <!-- lens highlight -->
+          <ellipse cx="18" cy="11" rx="4.5" ry="3.2" fill="rgba(255,255,255,0.1)"/>
+          <ellipse cx="14.5" cy="8.2" rx="2.5" ry="1.5" fill="rgba(255,255,255,0.3)"/>
+          <!-- beam -->
+          <path d="M12,17 L24,17 L30,40 L6,40 Z" fill="rgba(245,127,32,0.14)"/>
+          <line x1="12" y1="17" x2="6" y2="40" stroke="rgba(245,127,32,0.3)" stroke-width="0.8"/>
+          <line x1="24" y1="17" x2="30" y2="40" stroke="rgba(245,127,32,0.3)" stroke-width="0.8"/>
+          <!-- stage floor -->
+          <rect x="4" y="40" width="28" height="2" rx="1" fill="rgba(245,127,32,0.4)"/>
+          <!-- floor glow -->
+          <ellipse cx="18" cy="41.5" rx="9" ry="2.5" fill="rgba(245,127,32,0.2)"/>
+        </svg>
+        <h1 class="text-xl font-bold tracking-widest mt-2.5 mb-1">3·2·1→THEATER</h1>
+        <p class="text-xs text-base-content/50 tracking-widest uppercase">Advance to stage in 3-2-1</p>
       </div>
-      <div class="field-group">
-        <label class="field-label">PASSWORD</label>
-        <input type="password" name="password" class="field-input" autocomplete="current-password" required>
+
+      <!-- Flash messages -->
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="flex flex-col gap-2 mb-4">
+            {% for cat, msg in messages %}
+              <div role="alert" class="alert {% if cat == 'success' %}alert-success{% elif cat == 'error' %}alert-error{% elif cat == 'warning' %}alert-warning{% else %}alert-info{% endif %} py-2 text-sm">
+                <span>{{ msg }}</span>
+              </div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      <!-- Login form -->
+      <form method="post" class="flex flex-col gap-3.5">
+        <input type="hidden" name="next" value="{{ next }}">
+
+        <div class="form-control gap-1">
+          <label class="text-xs font-bold uppercase tracking-widest text-base-content/50">Username</label>
+          <input type="text" name="username" class="input input-bordered w-full"
+                 autofocus autocomplete="username" required>
+        </div>
+
+        <div class="form-control gap-1">
+          <label class="text-xs font-bold uppercase tracking-widest text-base-content/50">Password</label>
+          <input type="password" name="password" class="input input-bordered w-full"
+                 autocomplete="current-password" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary w-full mt-1">Sign In</button>
+      </form>
+
+      <!-- Links -->
+      <div class="flex justify-between mt-3.5">
+        <a href="{{ url_for('register') }}" class="text-xs text-primary hover:underline">Request an Account</a>
+        <a href="{{ url_for('forgot_password') }}" class="text-xs text-base-content/50 hover:underline">Forgot password?</a>
       </div>
-      <button type="submit" class="btn btn-primary btn-full">Sign In</button>
-    </form>
 
-    <div style="display:flex;justify-content:space-between;margin-top:14px">
-      <a href="{{ url_for('register') }}" style="font-size:12px;color:var(--accent)">Request an Account</a>
-      <a href="{{ url_for('forgot_password') }}" style="font-size:12px;color:var(--text-muted)">Forgot password?</a>
+      <p class="text-center text-[11px] text-base-content/40 mt-5">Dr. Phillips Center for the Performing Arts</p>
+
     </div>
-
-    <p class="login-footer" style="margin-top:10px">Dr. Phillips Center for the Performing Arts</p>
   </div>
 </div>
 {% endblock %}

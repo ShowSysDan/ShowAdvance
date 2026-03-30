@@ -12,33 +12,28 @@
 <body>
 
 {% if user %}
-<div class="app-layout">
+<div class="flex min-h-screen">
 
   <!-- Sidebar -->
-  <aside class="sidebar">
-    <div class="sidebar-brand">
-      <svg class="brand-icon" width="28" height="34" viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-        <!-- hang pipe -->
+  <aside class="w-64 shrink-0 bg-base-200 border-r border-base-300 flex flex-col sticky top-0 h-screen overflow-y-auto">
+
+    <!-- Brand -->
+    <div class="flex items-center gap-3 px-4 py-4 border-b border-base-300">
+      <svg class="shrink-0" width="28" height="34" viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
         <rect x="16.5" y="0" width="3" height="6" rx="1.5" fill="rgba(245,127,32,0.55)"/>
-        <!-- fixture body -->
         <rect x="10" y="5" width="16" height="12" rx="2.5" fill="#F57F20"/>
-        <!-- lens recess -->
         <rect x="11.5" y="6.5" width="13" height="9" rx="1.5" fill="rgba(0,0,0,0.18)"/>
-        <!-- lens highlight -->
         <ellipse cx="18" cy="11" rx="4.5" ry="3.2" fill="rgba(255,255,255,0.1)"/>
         <ellipse cx="14.5" cy="8.2" rx="2.5" ry="1.5" fill="rgba(255,255,255,0.3)"/>
-        <!-- beam -->
         <path d="M12,17 L24,17 L30,40 L6,40 Z" fill="rgba(245,127,32,0.13)"/>
         <line x1="12" y1="17" x2="6" y2="40" stroke="rgba(245,127,32,0.3)" stroke-width="0.8"/>
         <line x1="24" y1="17" x2="30" y2="40" stroke="rgba(245,127,32,0.3)" stroke-width="0.8"/>
-        <!-- stage floor -->
         <rect x="4" y="40" width="28" height="2" rx="1" fill="rgba(245,127,32,0.4)"/>
-        <!-- floor glow -->
         <ellipse cx="18" cy="41.5" rx="9" ry="2.5" fill="rgba(245,127,32,0.18)"/>
       </svg>
       <div>
-        <div class="brand-name">3·2·1→THEATER</div>
-        <div class="brand-sub">Advance to stage in 3-2-1</div>
+        <div class="text-sm font-bold tracking-widest leading-tight">3·2·1→THEATER</div>
+        <div class="text-[10px] text-base-content/40 tracking-widest uppercase leading-tight">Advance to stage in 3-2-1</div>
       </div>
     </div>
 
@@ -52,146 +47,183 @@
         <button id="gs-clear" class="gs-clear" style="display:none" onclick="_gsClear()" tabindex="-1">×</button>
       </div>
     </div>
-    <!-- Results panel (fixed, floats right of sidebar) -->
     <div id="gs-panel" class="gs-panel" style="display:none">
       <div id="gs-results"></div>
     </div>
 
-    <nav class="sidebar-nav">
-      <a href="{{ url_for('dashboard') }}" class="nav-item {% if request.endpoint == 'dashboard' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+    <!-- Navigation -->
+    <nav class="flex-1 overflow-y-auto py-2 flex flex-col">
+      <a href="{{ url_for('dashboard') }}"
+         class="flex items-center gap-2.5 px-4 py-2 text-sm no-underline transition-colors
+                {% if request.endpoint == 'dashboard' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/70 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
         Dashboard
       </a>
 
       {% if request.endpoint in ['show_page'] %}
-      <div class="nav-section-label">CURRENT SHOW</div>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='advance') }}" class="nav-item sub {% if tab == 'advance' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
+      <div class="text-[9px] font-bold uppercase tracking-widest text-base-content/40 px-4 pt-3 pb-1">CURRENT SHOW</div>
+      <a href="{{ url_for('show_page', show_id=show.id, tab='advance') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if tab == 'advance' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
         Advance Sheet
       </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='schedule') }}" class="nav-item sub {% if tab == 'schedule' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      <a href="{{ url_for('show_page', show_id=show.id, tab='schedule') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if tab == 'schedule' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
         Production Schedule
       </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='staffing') }}" class="nav-item sub {% if tab == 'staffing' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+      <a href="{{ url_for('show_page', show_id=show.id, tab='staffing') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if tab == 'staffing' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         Labor Requests
       </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='assets') }}" class="nav-item sub {% if tab == 'assets' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
+      <a href="{{ url_for('show_page', show_id=show.id, tab='assets') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if tab == 'assets' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/></svg>
         Assets
       </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='postnotes') }}" class="nav-item sub {% if tab == 'postnotes' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+      <a href="{{ url_for('show_page', show_id=show.id, tab='postnotes') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if tab == 'postnotes' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
         Post-Show Notes
       </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='comments') }}" class="nav-item sub {% if tab == 'comments' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      <a href="{{ url_for('show_page', show_id=show.id, tab='comments') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if tab == 'comments' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
         Comments
       </a>
-      <a href="{{ url_for('show_page', show_id=show.id, tab='export') }}" class="nav-item sub {% if tab == 'export' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      <a href="{{ url_for('show_page', show_id=show.id, tab='export') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if tab == 'export' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
         Export & Files
       </a>
       {% endif %}
 
-      <div class="nav-section-label">SYSTEM</div>
-      <a href="{{ url_for('dashboards_list') }}" class="nav-item {% if request.endpoint in ['dashboards_list','dashboard_view'] %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+      <div class="text-[9px] font-bold uppercase tracking-widest text-base-content/40 px-4 pt-3 pb-1">SYSTEM</div>
+      <a href="{{ url_for('dashboards_list') }}"
+         class="flex items-center gap-2.5 px-4 py-2 text-sm no-underline transition-colors
+                {% if request.endpoint in ['dashboards_list','dashboard_view'] %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/70 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
         Dashboards
       </a>
-      <a href="{{ url_for('crew_tracker') }}" class="nav-item {% if request.endpoint == 'crew_tracker' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
+      <a href="{{ url_for('crew_tracker') }}"
+         class="flex items-center gap-2.5 px-4 py-2 text-sm no-underline transition-colors
+                {% if request.endpoint == 'crew_tracker' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/70 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/></svg>
         Skill Tracker
       </a>
       {% if user.role == 'admin' %}
-      <a href="{{ url_for('assets_admin') }}" class="nav-item {% if request.endpoint in ['assets_admin','assets_retired','asset_reports'] %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
+      <a href="{{ url_for('assets_admin') }}"
+         class="flex items-center gap-2.5 px-4 py-2 text-sm no-underline transition-colors
+                {% if request.endpoint in ['assets_admin','assets_retired','asset_reports'] %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/70 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
         Asset Manager
       </a>
-      <a href="{{ url_for('asset_reports') }}" class="nav-item sub {% if request.endpoint == 'asset_reports' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      <a href="{{ url_for('asset_reports') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if request.endpoint == 'asset_reports' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
         Reports
       </a>
-      <a href="{{ url_for('assets_retired') }}" class="nav-item sub {% if request.endpoint == 'assets_retired' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
+      <a href="{{ url_for('assets_retired') }}"
+         class="flex items-center gap-2.5 pl-8 pr-4 py-1.5 text-sm no-underline transition-colors
+                {% if request.endpoint == 'assets_retired' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/60 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><line x1="9" y1="9" x2="15" y2="15"/><line x1="15" y1="9" x2="9" y2="15"/></svg>
         Retired Archive
       </a>
       {% endif %}
-      <a href="{{ url_for('settings') }}" class="nav-item {% if request.endpoint == 'settings' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      <a href="{{ url_for('settings') }}"
+         class="flex items-center gap-2.5 px-4 py-2 text-sm no-underline transition-colors
+                {% if request.endpoint == 'settings' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/70 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         Settings
       </a>
       {% if user.role == 'admin' %}
-      <a href="{{ url_for('audit_log_view') }}" class="nav-item {% if request.endpoint == 'audit_log_view' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
+      <a href="{{ url_for('audit_log_view') }}"
+         class="flex items-center gap-2.5 px-4 py-2 text-sm no-underline transition-colors
+                {% if request.endpoint == 'audit_log_view' %}bg-primary/10 text-primary font-semibold{% else %}text-base-content/70 hover:bg-base-300 hover:text-base-content{% endif %}">
+        <svg class="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
         Audit Log
       </a>
       {% endif %}
     </nav>
 
-    <div class="sidebar-footer">
+    <!-- Footer -->
+    <div class="border-t border-base-300 p-3 flex flex-col gap-2">
       {% if session.get('_real_role') == 'admin' or user.role == 'admin' %}
       <div>
         {% if session.get('_view_as') %}
-        <button onclick="resetViewAs()" style="width:100%;font-size:10px;padding:5px 8px;background:rgba(246,173,85,.15);border:1px solid rgba(246,173,85,.4);color:#F6AD55;border-radius:4px;cursor:pointer;letter-spacing:.04em;font-weight:600">
-          ↩ RETURN TO ADMIN
-        </button>
+        <button onclick="resetViewAs()" class="btn btn-warning btn-xs w-full font-bold tracking-widest">↩ RETURN TO ADMIN</button>
         {% else %}
-        <div style="font-size:9px;color:var(--text-dim);margin-bottom:4px;letter-spacing:.06em;text-align:center">VIEW SITE AS</div>
-        <div style="display:flex;gap:4px">
-          <button onclick="setViewAs('content_admin')" class="view-as-btn" title="Content Admin">C.Admin</button>
-          <button onclick="setViewAs('user')" class="view-as-btn" title="Regular User">User</button>
-          <button onclick="setViewAs('readonly')" class="view-as-btn" title="Read-only">R/O</button>
+        <div class="text-[9px] text-base-content/30 mb-1 tracking-widest uppercase text-center">VIEW SITE AS</div>
+        <div class="flex gap-1">
+          <button onclick="setViewAs('content_admin')"
+                  class="flex-1 btn btn-ghost btn-xs text-[10px] font-semibold tracking-widest border border-base-300 hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                  title="Content Admin">C.Admin</button>
+          <button onclick="setViewAs('user')"
+                  class="flex-1 btn btn-ghost btn-xs text-[10px] font-semibold tracking-widest border border-base-300 hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                  title="Regular User">User</button>
+          <button onclick="setViewAs('readonly')"
+                  class="flex-1 btn btn-ghost btn-xs text-[10px] font-semibold tracking-widest border border-base-300 hover:border-primary/40 hover:bg-primary/10 hover:text-primary"
+                  title="Read-only">R/O</button>
         </div>
         {% endif %}
       </div>
       {% endif %}
-      <div class="sidebar-footer-row">
-        <div class="sidebar-user">
-          <div class="user-avatar">{{ user.display_name[0].upper() }}</div>
-          <div class="user-info">
-            <div class="user-name">{{ user.display_name }}</div>
-            <div class="user-role">
+      <div class="flex items-center gap-1">
+        <div class="flex items-center gap-2 flex-1 min-w-0">
+          <div class="w-7 h-7 rounded-full bg-primary text-primary-content flex items-center justify-center text-xs font-bold shrink-0">{{ user.display_name[0].upper() }}</div>
+          <div class="flex-1 min-w-0">
+            <div class="text-xs font-semibold truncate leading-tight">{{ user.display_name }}</div>
+            <div class="text-[10px] text-base-content/50 truncate capitalize leading-tight">
               {% if session.get('_view_as') %}
-              <span style="color:#F6AD55">viewing as {{ session['_view_as'] }}</span>
+              <span class="text-warning">viewing as {{ session['_view_as'] }}</span>
               {% else %}
               {{ user.role }}
               {% endif %}
             </div>
           </div>
         </div>
-        <button class="theme-toggle-btn" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light / dark mode">
+        <button class="btn btn-ghost btn-xs btn-square shrink-0" id="theme-toggle-btn" onclick="toggleTheme()" title="Toggle light / dark mode">
           {% if user.theme == 'light' %}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.79A9 9 0 1111.21 3a7 7 0 009.79 9.79z"/></svg>
           {% else %}
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
           {% endif %}
         </button>
-        <a href="{{ url_for('logout') }}" class="logout-btn" title="Logout">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+        <a href="{{ url_for('logout') }}" class="btn btn-ghost btn-xs btn-square shrink-0" title="Logout">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </a>
       </div>
-      <div class="app-version" style="font-size:10px;color:var(--text-dim);text-align:center;letter-spacing:.04em">v{{ app_version }}</div>
+      <div class="text-center text-[10px] text-base-content/30 tracking-widest">v{{ app_version }}</div>
     </div>
   </aside>
 
-  <!-- Main -->
-  <main class="main-content">
+  <!-- Main content -->
+  <main class="flex-1 min-w-0 overflow-x-hidden">
     {% if session.get('_view_as') %}
-    <div style="background:rgba(246,173,85,.15);border-bottom:1px solid rgba(246,173,85,.35);padding:7px 20px;display:flex;align-items:center;gap:10px;font-size:12px;position:sticky;top:0;z-index:50">
-      <span style="color:#F6AD55;font-weight:700;letter-spacing:.05em">PREVIEW MODE</span>
-      <span style="color:var(--text-dim)">You are viewing the site as a <strong style="color:#F6AD55">{{ session['_view_as'].replace('_',' ') }}</strong> — changes you make will take effect as if you had that role.</span>
-      <button onclick="resetViewAs()" style="margin-left:auto;font-size:11px;padding:3px 10px;background:rgba(246,173,85,.2);border:1px solid rgba(246,173,85,.5);color:#F6AD55;border-radius:4px;cursor:pointer;font-weight:600">Exit Preview</button>
+    <div class="px-5 py-1.5 flex items-center gap-2.5 text-xs sticky top-0 z-50"
+         style="background:rgba(246,173,85,.15);border-bottom:1px solid rgba(246,173,85,.35)">
+      <span class="font-bold tracking-widest" style="color:#F6AD55">PREVIEW MODE</span>
+      <span class="text-base-content/60">You are viewing the site as a <strong style="color:#F6AD55">{{ session['_view_as'].replace('_',' ') }}</strong> — changes you make will take effect as if you had that role.</span>
+      <button onclick="resetViewAs()" class="btn btn-xs btn-outline ml-auto" style="color:#F6AD55;border-color:rgba(246,173,85,.5)">Exit Preview</button>
     </div>
     {% endif %}
+
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <div class="flash-container">
+        <div class="flex flex-col gap-2 px-6 pt-4">
           {% for cat, msg in messages %}
-            <div class="flash flash-{{ cat }}">
-              {{ msg }}
-              <button onclick="this.parentElement.remove()">×</button>
+            <div role="alert" class="alert {% if cat == 'success' %}alert-success{% elif cat == 'error' %}alert-error{% elif cat == 'warning' %}alert-warning{% else %}alert-info{% endif %} py-2 text-sm">
+              <span>{{ msg }}</span>
+              <button onclick="this.closest('[role=alert]').remove()" class="btn btn-ghost btn-xs btn-circle ml-auto">×</button>
             </div>
           {% endfor %}
         </div>
@@ -213,7 +245,7 @@
 {% block scripts %}{% endblock %}
 <div id="save-toast" class="save-toast"></div>
 <style>
-/* ── Global search ───────────────────────────────────────────────── */
+/* ── Global search — class names referenced by inline JS, do not remove ── */
 .gs-wrap {
   margin: 4px 10px 8px;
   position: relative;
@@ -251,7 +283,7 @@
 .gs-panel {
   position: fixed;
   left: calc(var(--sidebar-w, 256px) + 10px);
-  top: 60px; /* overridden dynamically by _gsPositionPanel() */
+  top: 60px;
   width: 420px;
   max-height: 80vh;
   overflow-y: auto;
@@ -292,12 +324,6 @@
 .gs-retired .gs-item-label { text-decoration: line-through; opacity: .6 }
 .gs-empty { padding: 20px 14px; font-size: 12px; color: var(--text-dim); text-align: center }
 .gs-separator { border: none; border-top: 1px solid var(--border); margin: 4px 0 }
-.view-as-btn {
-  flex:1;font-size:10px;padding:4px 6px;background:var(--surface);
-  border:1px solid var(--border);color:var(--text-dim);border-radius:4px;
-  cursor:pointer;font-weight:600;letter-spacing:.04em;transition:background .15s,color .15s;
-}
-.view-as-btn:hover { background:rgba(245,127,32,.12);color:#F57F20;border-color:rgba(245,127,32,.4) }
 </style>
 <script>
 async function setViewAs(role) {
@@ -354,7 +380,6 @@ function _gsRender(results, q) {
     return;
   }
 
-  // Group by type
   const groups = {};
   const order = ['show','contact','asset_type','asset_item'];
   const groupLabels = {show:'Shows', contact:'Contacts', asset_type:'Asset Types', asset_item:'Units / Barcodes'};
@@ -443,7 +468,6 @@ function _gsHighlight(text, q) {
   return safe.replace(re, '<mark style="background:rgba(245,127,32,.3);border-radius:2px;padding:0 1px">$1</mark>');
 }
 
-// Close panel when clicking outside
 document.addEventListener('mousedown', e => {
   const panel = document.getElementById('gs-panel');
   const wrap  = document.getElementById('gs-wrap');
@@ -452,7 +476,6 @@ document.addEventListener('mousedown', e => {
   }
 });
 
-// Keyboard shortcut: / or Ctrl+K focuses search
 document.addEventListener('keydown', e => {
   if ((e.key === '/' || (e.ctrlKey && e.key === 'k')) && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
     e.preventDefault();
@@ -467,14 +490,15 @@ document.addEventListener('keydown', e => {
   fetch('/api/messages').then(r => r.json()).then(msgs => {
     const container = document.getElementById('site-msg-container');
     if (!container || !msgs.length) return;
+    const alertMap = { motd:'alert-info', maintenance:'alert-warning', alert:'alert-error' };
     container.innerHTML = msgs.map(m => {
-      const typeMap = { motd:'info', maintenance:'warning', alert:'error' };
-      const cls = typeMap[m.msg_type] || 'info';
-      const dismissBtn = m.dismissible_by === 'user' || {{ 'true' if user.role == 'admin' else 'false' }}
-        ? `<button onclick="dismissMsg(${m.id},this)" style="background:none;border:none;font-size:18px;cursor:pointer;color:inherit;opacity:.6;margin-left:auto">×</button>`
+      const alertCls = alertMap[m.msg_type] || 'alert-info';
+      const canDismiss = m.dismissible_by === 'user' || {{ 'true' if user.role == 'admin' else 'false' }};
+      const dismissBtn = canDismiss
+        ? `<button onclick="dismissMsg(${m.id},this)" class="btn btn-ghost btn-xs btn-circle ml-auto">×</button>`
         : '';
-      return `<div class="flash flash-${cls}" id="site-msg-${m.id}" style="display:flex;align-items:flex-start;gap:8px">
-        <div style="flex:1"><strong>${m.title}</strong>${m.body_html ? '<br><div style="margin-top:4px;font-size:12px">'+m.body_html+'</div>' : ''}</div>
+      return `<div role="alert" class="alert ${alertCls} py-2 text-sm mx-6 mt-2" id="site-msg-${m.id}">
+        <div class="flex-1"><strong>${m.title}</strong>${m.body_html ? '<br><span class="text-xs mt-1 block">'+m.body_html+'</span>' : ''}</div>
         ${dismissBtn}
       </div>`;
     }).join('');

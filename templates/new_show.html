@@ -2,22 +2,22 @@
 {% block title %}New Show — 3·2·1→Theater{% endblock %}
 
 {% block content %}
-<div class="page-header">
+<div class="flex justify-between items-start mb-6">
   <div>
-    <a href="{{ url_for('dashboard') }}" class="back-link">← Dashboard</a>
-    <h1 class="page-title">New Show</h1>
+    <a href="{{ url_for('dashboard') }}" class="text-xs text-base-content/50 hover:text-base-content transition-colors">← Dashboard</a>
+    <h1 class="text-2xl font-bold tracking-wide">New Show</h1>
   </div>
 </div>
 
-<div class="form-page-card">
+<div class="card bg-base-200 border border-base-300 p-6 max-w-2xl">
   <form method="post" class="form-grid">
     <div class="form-row">
       <div class="field-group required">
         <label class="field-label">SHOW NAME *</label>
-        <input type="text" name="name" class="field-input" placeholder="e.g. Judy Carmichael" autofocus required>
+        <input type="text" name="name" class="input input-bordered w-full" placeholder="e.g. Judy Carmichael" autofocus required>
       </div>
     </div>
-    <div class="form-actions">
+    <div class="flex gap-2.5 justify-end mt-2">
       <a href="{{ url_for('dashboard') }}" class="btn btn-ghost">Cancel</a>
       <button type="submit" class="btn btn-primary">Create Show →</button>
     </div>

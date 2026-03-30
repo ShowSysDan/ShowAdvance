@@ -2,10 +2,10 @@
 {% block title %}Dashboard — 3·2·1→Theater{% endblock %}
 
 {% block content %}
-<div class="page-header">
+<div class="flex justify-between items-start mb-6">
   <div>
-    <h1 class="page-title">Shows</h1>
-    <p class="page-sub">{{ active_shows|length }} active · {{ archived_shows|length }} archived</p>
+    <h1 class="text-2xl font-bold tracking-wide">Shows</h1>
+    <p class="text-sm text-base-content/60 mt-1">{{ active_shows|length }} active · {{ archived_shows|length }} archived</p>
   </div>
   {% if not restricted %}
   <a href="{{ url_for('new_show') }}" class="btn btn-primary">
@@ -16,17 +16,16 @@
 </div>
 
 {% if motd_messages %}
-<div style="margin-bottom:20px;display:flex;flex-direction:column;gap:10px">
+<div class="flex flex-col gap-2.5 mb-5">
   {% for m in motd_messages %}
-  {% set _type_cls = {'motd':'info','maintenance':'warning','alert':'error'} %}
-  <div class="flash flash-{{ _type_cls.get(m.msg_type,'info') }}" id="motd-{{ m.id }}"
-       style="display:flex;align-items:flex-start;gap:10px">
-    <div style="flex:1">
-      <strong style="font-size:13px">{{ m.title }}</strong>
-      {% if m.body_html %}<div style="margin-top:5px;font-size:12px;opacity:.9">{{ m.body_html | safe }}</div>{% endif %}
+  {% set _type_cls = {'motd':'alert-info','maintenance':'alert-warning','alert':'alert-error'} %}
+  <div role="alert" class="alert {{ _type_cls.get(m.msg_type,'alert-info') }} flex items-start gap-2.5" id="motd-{{ m.id }}">
+    <div class="flex-1">
+      <strong class="text-[13px]">{{ m.title }}</strong>
+      {% if m.body_html %}<div class="mt-1 text-[12px] opacity-90">{{ m.body_html | safe }}</div>{% endif %}
     </div>
     {% if m.dismissible_by == 'user' %}
-    <button onclick="dismissMotd({{ m.id }})" style="background:none;border:none;font-size:18px;cursor:pointer;color:inherit;opacity:.6;flex-shrink:0;padding:0" title="Dismiss">×</button>
+    <button onclick="dismissMotd({{ m.id }})" class="btn btn-ghost btn-xs opacity-60 flex-shrink-0 p-0 text-lg leading-none" title="Dismiss">×</button>
     {% endif %}
   </div>
   {% endfor %}
@@ -36,53 +35,53 @@
 {% if venue_groups %}
 
 {# ── Toolbar ──────────────────────────────────────────────────────────────── #}
-<div class="dash-toolbar">
-  <div class="dash-search-wrap">
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" class="dash-search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input type="text" id="dash-search" class="dash-search-input" placeholder="Search shows…" oninput="filterDash(this.value)" autocomplete="off">
-    <button id="dash-clear-btn" class="dash-clear-btn" onclick="clearSearch()" style="display:none" title="Clear">×</button>
-  </div>
-  <div class="dash-venue-pills" id="dash-venue-pills">
+<div class="flex flex-wrap items-center gap-3 mb-5">
+  <label class="input input-bordered input-sm flex items-center gap-2 flex-1 min-w-[200px]">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    <input type="text" id="dash-search" placeholder="Search shows…" class="grow" oninput="filterDash(this.value)" autocomplete="off">
+    <button id="dash-clear-btn" onclick="clearSearch()" style="display:none" title="Clear" class="btn btn-ghost btn-xs">×</button>
+  </label>
+  <div class="flex flex-wrap gap-1.5" id="dash-venue-pills">
     {% for venue, _ in venue_groups %}
-    <button class="venue-pill active" data-venue="{{ venue }}" onclick="toggleVenue(this)">{{ venue }}</button>
+    <button class="venue-pill active btn btn-xs" data-venue="{{ venue }}" onclick="toggleVenue(this)">{{ venue }}</button>
     {% endfor %}
   </div>
 </div>
 
 {# ── Venue Columns ────────────────────────────────────────────────────────── #}
-<div class="venue-columns" id="venue-columns">
+<div class="flex gap-4 overflow-x-auto pb-4" id="venue-columns">
   {% for venue, shows in venue_groups %}
-  <div class="venue-col" data-venue="{{ venue }}">
-    <div class="venue-col-header">
-      <span class="venue-col-name">{{ venue }}</span>
-      <span class="venue-col-count">{{ shows|length }}</span>
+  <div class="venue-col min-w-[280px] flex-shrink-0 flex flex-col gap-2" data-venue="{{ venue }}">
+    <div class="flex items-center justify-between px-1 mb-1">
+      <span class="venue-col-name text-xs font-bold uppercase tracking-widest text-base-content/50">{{ venue }}</span>
+      <span class="venue-col-count badge badge-ghost badge-sm">{{ shows|length }}</span>
     </div>
-    <div class="venue-col-body">
+    <div class="venue-col-body flex flex-col gap-2">
       {% for s in shows %}
-      <div class="show-card" data-search="{{ s.name|lower }}">
-        <div class="show-card-top">
-          <div class="show-date-badge">
+      <div class="show-card card bg-base-200 border border-base-300 hover:border-base-content/20 transition-all" data-search="{{ s.name|lower }}">
+        <div class="flex items-center gap-3 px-4 pt-3 pb-2">
+          <div class="show-date-badge text-center min-w-[36px] bg-base-300 rounded px-1.5 py-1">
             {% if s.show_date %}
               {% set _mo = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] %}
-              <span class="show-month">{{ _mo[s.show_date[5:7]|int - 1] }}</span>
-              <span class="show-day">{{ s.show_date[8:10] }}</span>
+              <div class="text-[9px] font-bold uppercase text-base-content/50 leading-none">{{ _mo[s.show_date[5:7]|int - 1] }}</div>
+              <div class="text-lg font-black leading-none text-base-content">{{ s.show_date[8:10] }}</div>
             {% else %}
-              <span class="show-month">NO</span>
-              <span class="show-day">DATE</span>
+              <div class="text-[9px] font-bold uppercase text-base-content/50 leading-none">NO</div>
+              <div class="text-lg font-black leading-none text-base-content">DATE</div>
             {% endif %}
           </div>
-          <div class="show-info">
-            <div class="show-name">{{ s.name }}{% if s.perf_count > 1 %}<span class="multi-date-badge">{{ s.perf_count }} DATES</span>{% endif %}</div>
-            <div class="show-meta">{% if s.show_time %}{{ s.show_time }}{% else %}—{% endif %}</div>
+          <div class="min-w-0 flex-1">
+            <div class="text-sm font-semibold truncate">{{ s.name }}{% if s.perf_count > 1 %}<span class="badge badge-ghost badge-xs ml-1">{{ s.perf_count }} dates</span>{% endif %}</div>
+            <div class="text-xs text-base-content/50 mt-0.5">{{ s.show_time or '—' }}</div>
           </div>
         </div>
-        <div class="show-card-actions">
+        <div class="flex gap-1.5 px-4 pb-3 flex-wrap border-t border-base-300 pt-2 mt-1">
           <a href="{{ url_for('show_page', show_id=s.id, tab='advance') }}" class="btn btn-sm btn-ghost">Advance</a>
           <a href="{{ url_for('show_page', show_id=s.id, tab='schedule') }}" class="btn btn-sm btn-ghost">Schedule</a>
           <a href="{{ url_for('show_page', show_id=s.id, tab='export') }}" class="btn btn-sm btn-accent">Export</a>
           {% if not restricted %}
           <form method="post" action="{{ url_for('archive_show', show_id=s.id) }}" style="display:inline" onsubmit="return confirm('Archive this show?')">
-            <button type="submit" class="btn btn-sm btn-danger-ghost" title="Archive">
+            <button type="submit" class="btn btn-sm btn-error btn-ghost btn-square" title="Archive">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
             </button>
           </form>
@@ -91,15 +90,15 @@
       </div>
       {% endfor %}
     </div>
-    <p class="venue-col-empty" style="display:none">No matching shows</p>
+    <p class="venue-col-empty text-xs text-base-content/50 text-center py-4" style="display:none">No matching shows</p>
   </div>
   {% endfor %}
 </div>
 
-<p id="dash-no-results" class="text-dim" style="display:none;font-size:13px;padding:24px 0">No shows match your search.</p>
+<p id="dash-no-results" class="text-base-content/50" style="display:none;font-size:13px;padding:24px 0">No shows match your search.</p>
 
 {% else %}
-<div class="empty-state">
+<div class="flex flex-col items-center justify-center py-16 gap-3 text-base-content/30">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="48" height="48"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
   <p>No active shows. <a href="{{ url_for('new_show') }}">Create one →</a></p>
 </div>
@@ -108,36 +107,37 @@
 {# ── Archived ─────────────────────────────────────────────────────────────── #}
 {% if archived_shows %}
 <section class="section" style="margin-top:32px">
-  <button class="section-label toggle-archived" onclick="document.getElementById('archived-list').classList.toggle('hidden')">
+  <button class="toggle-archived text-[11px] font-bold uppercase tracking-widest text-base-content/40 flex items-center gap-2 cursor-pointer hover:text-base-content/60 transition-colors bg-none border-none p-0" onclick="document.getElementById('archived-list').classList.toggle('hidden')">
     ARCHIVED ({{ archived_shows|length }})
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="6 9 12 15 18 9"/></svg>
   </button>
-  <div id="archived-list" class="show-grid archived hidden" style="margin-top:12px">
+  <div id="archived-list" class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 hidden" style="margin-top:12px">
     {% for s in archived_shows %}
-    <div class="show-card archived">
-      <div class="show-card-top">
-        <div class="show-date-badge dim">
+    <div class="show-card card bg-base-200 border border-base-300 hover:border-base-content/20 transition-all opacity-65">
+      <div class="flex items-center gap-3 px-4 pt-3 pb-2">
+        <div class="show-date-badge text-center min-w-[36px] bg-base-300 rounded px-1.5 py-1">
           {% if s.show_date %}
             {% set _mo = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] %}
-            <span class="show-month">{{ _mo[s.show_date[5:7]|int - 1] }}</span>
-            <span class="show-day">{{ s.show_date[8:10] }}</span>
+            <div class="text-[9px] font-bold uppercase text-base-content/50 leading-none">{{ _mo[s.show_date[5:7]|int - 1] }}</div>
+            <div class="text-lg font-black leading-none text-base-content">{{ s.show_date[8:10] }}</div>
           {% else %}
-            <span class="show-month">—</span><span class="show-day">—</span>
+            <div class="text-[9px] font-bold uppercase text-base-content/50 leading-none">—</div>
+            <div class="text-lg font-black leading-none text-base-content">—</div>
           {% endif %}
         </div>
-        <div class="show-info">
-          <div class="show-name">{{ s.name }}</div>
-          <div class="show-meta">{{ s.venue or '—' }}</div>
+        <div class="min-w-0 flex-1">
+          <div class="text-sm font-semibold truncate">{{ s.name }}</div>
+          <div class="text-xs text-base-content/50 mt-0.5">{{ s.venue or '—' }}</div>
         </div>
       </div>
-      <div class="show-card-actions">
+      <div class="flex gap-1.5 px-4 pb-3 flex-wrap border-t border-base-300 pt-2 mt-1">
         <a href="{{ url_for('show_page', show_id=s.id, tab='advance') }}" class="btn btn-sm btn-ghost">View</a>
         <form method="post" action="{{ url_for('restore_show', show_id=s.id) }}" style="display:inline">
           <button class="btn btn-sm btn-ghost">Restore</button>
         </form>
         {% if user.role == 'admin' %}
         <form method="post" action="{{ url_for('delete_show', show_id=s.id) }}" style="display:inline" onsubmit="return confirm('Permanently delete this show and all its data?')">
-          <button class="btn btn-sm btn-danger-ghost">Delete</button>
+          <button class="btn btn-sm btn-error btn-ghost">Delete</button>
         </form>
         {% endif %}
       </div>
