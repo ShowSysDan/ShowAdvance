@@ -18,6 +18,21 @@
   </div>
 </div>
 
+{# ── Tab Switcher ── #}
+<div style="display:flex;gap:0;border-bottom:2px solid var(--border);margin-bottom:16px">
+  <button id="tab-btn-assets" onclick="switchTab('assets')"
+          style="padding:9px 20px;background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;color:var(--fg);font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em">
+    Assets
+  </button>
+  <button id="tab-btn-systems" onclick="switchTab('systems')"
+          style="padding:9px 20px;background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--text-dim);font-size:13px;font-weight:600;cursor:pointer;letter-spacing:.02em">
+    Systems &amp; Packages
+  </button>
+</div>
+
+{# ── Assets Tab ── #}
+<div id="tab-assets-content">
+
 {# ── Search + Sort Bar ── #}
 <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
   <div style="flex:1;min-width:200px;position:relative">
@@ -80,6 +95,34 @@
   </div>
 
 </div>
+
+</div>{# /tab-assets-content #}
+
+{# ── Systems & Packages Tab ── #}
+<div id="tab-systems-content" style="display:none">
+  <div class="finder-browser">
+
+    {# Left: list of systems/packages #}
+    <div class="finder-col" style="width:300px;min-width:240px;flex-shrink:0">
+      <div class="finder-col-hdr">
+        <span style="flex:1">SYSTEMS &amp; PACKAGES</span>
+        <button class="btn btn-xs btn-ghost" style="padding:2px 7px;font-size:10px" onclick="openNewSystemModal()">+ New</button>
+      </div>
+      <div id="systems-list" class="finder-col-body">
+        <p class="finder-empty">Loading…</p>
+      </div>
+    </div>
+
+    {# Right: detail / components #}
+    <div class="finder-col" style="flex:1;min-width:340px">
+      <div class="finder-col-hdr" id="systems-detail-hdr">DETAILS</div>
+      <div id="systems-detail" class="finder-col-body" style="display:flex;flex-direction:column">
+        <p class="finder-empty" style="margin:auto;padding:40px 20px">Select a system or package</p>
+      </div>
+    </div>
+
+  </div>
+</div>{# /tab-systems-content #}
 
 {# ── Modals ── #}
 
@@ -372,11 +415,9 @@ let _currentItems = [];
 let _selectedItemId = null;
 let _showRetired = false;
 let _viewingComponentOf = null; // system type ID when navigated into a component from a system view
-let _allContainerItems = []; // all items with is_container=1, for Assign to Container dropdown
-
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
-  await Promise.all([loadTypes(), loadContainerItems()]);
+  await loadTypes();
   renderFinderCats();
 })();
 
@@ -386,12 +427,106 @@ async function loadTypes() {
   _allTypes = await r.json();
 }
 
-async function loadContainerItems() {
-  try {
-    const r = await fetch('/api/asset-items/containers', {headers:{'X-Requested-With':'XMLHttpRequest'}});
-    _allContainerItems = await r.json();
-  } catch(e) { _allContainerItems = []; }
+// ── Tab Management ────────────────────────────────────────────────────────────
+let _activeTab = 'assets';
+let _selectedSystemId = null;
+
+window.switchTab = function(tab) {
+  _activeTab = tab;
+  document.getElementById('tab-assets-content').style.display  = tab === 'assets'  ? '' : 'none';
+  document.getElementById('tab-systems-content').style.display = tab === 'systems' ? '' : 'none';
+  ['assets','systems'].forEach(t => {
+    const btn = document.getElementById(`tab-btn-${t}`);
+    if (!btn) return;
+    btn.style.borderBottomColor = t === tab ? 'var(--accent)' : 'transparent';
+    btn.style.color = t === tab ? 'var(--fg)' : 'var(--text-dim)';
+  });
+  if (tab === 'systems') renderSystemsList();
+};
+
+// ── Systems & Packages Tab ────────────────────────────────────────────────────
+function renderSystemsList() {
+  const el = document.getElementById('systems-list');
+  if (!el) return;
+  const active  = _allTypes.filter(t => (t.is_system || t.is_package) && !t.is_retired);
+  const retired = _allTypes.filter(t => (t.is_system || t.is_package) &&  t.is_retired);
+  if (!active.length && !retired.length) {
+    el.innerHTML = '<p class="finder-empty">No systems or packages yet.<br>Use + New to create one.</p>';
+    return;
+  }
+  const row = (t) => {
+    const badge = t.is_system
+      ? `<span style="font-size:9px;background:rgba(245,127,32,.18);color:var(--accent);border-radius:3px;padding:1px 4px;font-weight:700;margin-left:5px">SYSTEM</span>`
+      : `<span style="font-size:9px;background:rgba(72,187,120,.18);color:#48BB78;border-radius:3px;padding:1px 4px;font-weight:700;margin-left:5px">PACKAGE</span>`;
+    const sel = t.id === _selectedSystemId;
+    return `<div class="finder-type-row${sel?' active':''}" style="${t.is_retired?'opacity:.45':''}" onclick="showSystemDetail(${t.id})">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}${badge}</div>
+        <div style="font-size:10px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.category_name||'')}${t.manufacturer?' · '+esc(t.manufacturer):''}</div>
+      </div>
+      <span style="color:var(--text-dim);font-size:14px;flex-shrink:0">›</span>
+    </div>`;
+  };
+  let html = active.map(row).join('');
+  if (retired.length) {
+    html += `<div style="padding:6px 12px;font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--text-dim);border-top:1px solid var(--border);margin-top:4px">RETIRED</div>`;
+    html += retired.map(row).join('');
+  }
+  el.innerHTML = html;
 }
+
+window.showSystemDetail = async function(typeId) {
+  _selectedSystemId = typeId;
+  renderSystemsList();
+  const t = _allTypes.find(x => x.id === typeId);
+  if (!t) return;
+  const hdr = document.getElementById('systems-detail-hdr');
+  if (hdr) hdr.textContent = t.name;
+  const badge = t.is_system
+    ? `<span style="font-size:9px;background:rgba(245,127,32,.18);color:var(--accent);border-radius:3px;padding:2px 5px;font-weight:700;margin-left:6px">SYSTEM</span>`
+    : `<span style="font-size:9px;background:rgba(72,187,120,.18);color:#48BB78;border-radius:3px;padding:2px 5px;font-weight:700;margin-left:6px">PACKAGE</span>`;
+  const retiredBadge = t.is_retired ? `<span style="font-size:9px;color:#FC814A;font-weight:700;margin-left:6px">RETIRED</span>` : '';
+  const brandModel = [t.manufacturer, t.model].filter(Boolean).join(' · ');
+  const rateLabel = t.weekly_rate
+    ? `$${Number(t.rental_cost||0).toFixed(2)}/day · $${Number(t.weekly_rate).toFixed(2)}/wk`
+    : `$${Number(t.rental_cost||0).toFixed(2)}/day`;
+  const detail = document.getElementById('systems-detail');
+  detail.style.display = 'flex';
+  detail.style.flexDirection = 'column';
+  detail.innerHTML = `
+    <div style="padding:16px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <div style="font-size:15px;font-weight:600;line-height:1.3">${esc(t.name)}${badge}${retiredBadge}</div>
+      ${brandModel ? `<div style="font-size:12px;color:var(--text-dim);margin-top:3px">${esc(brandModel)}</div>` : ''}
+      <div style="font-size:12px;color:var(--accent);margin-top:4px;font-weight:500">${rateLabel}</div>
+      <div style="margin-top:10px">
+        <button class="btn btn-sm btn-ghost" onclick="openTypeModal(${t.id});_sysDetailTypeId=${t.id}">Edit</button>
+      </div>
+    </div>
+    <div style="flex-shrink:0">
+      <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+        <span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--text-dim);flex:1">COMPONENTS</span>
+        <button class="btn btn-xs btn-primary" onclick="openAddComponentPicker(${t.id})">+ Add</button>
+      </div>
+    </div>
+    <div id="components-list" style="overflow-y:auto;flex:1"><p class="finder-empty">Loading…</p></div>
+  `;
+  await loadAndRenderComponents(typeId);
+};
+
+window.openNewSystemModal = function(asPackage) {
+  openTypeModal(null, null);
+  setTimeout(() => {
+    const sys = document.getElementById('type-is-system');
+    const pkg = document.getElementById('type-is-package');
+    if (asPackage && pkg) { pkg.checked = true; }
+    else if (sys) { sys.checked = true; }
+  }, 60);
+};
+
+window.goToSystem = function(sysId) {
+  switchTab('systems');
+  showSystemDetail(sysId);
+};
 
 function onTypeSearchInput() {
   const inp = document.getElementById('type-search');
@@ -525,9 +660,9 @@ function renderFinderTypes() {
 
   let types;
   if (isSearching) {
-    // Show all matching leaf types across all categories
+    // Show all matching leaf types across all categories — exclude systems/packages (they have their own tab)
     types = _allTypes.filter(t =>
-      t.parent_type_id && (
+      t.parent_type_id && !t.is_system && !t.is_package && (
         (t.name||'').toLowerCase().includes(query) ||
         (t.manufacturer||'').toLowerCase().includes(query) ||
         (t.model||'').toLowerCase().includes(query) ||
@@ -537,7 +672,7 @@ function renderFinderTypes() {
     );
     // Also include matching parent-level types that have no children
     const matchingParents = _allTypes.filter(t =>
-      !t.parent_type_id &&
+      !t.parent_type_id && !t.is_system && !t.is_package &&
       !_allTypes.some(c => c.parent_type_id === t.id) && (
         (t.name||'').toLowerCase().includes(query) ||
         (t.manufacturer||'').toLowerCase().includes(query) ||
@@ -548,7 +683,7 @@ function renderFinderTypes() {
     if (lbl) lbl.textContent = `RESULTS (${types.length})`;
     if (addBtn) addBtn.style.display = 'none';
   } else if (_selectedParentTypeId) {
-    types = _allTypes.filter(t => t.parent_type_id === _selectedParentTypeId);
+    types = _allTypes.filter(t => t.parent_type_id === _selectedParentTypeId && !t.is_system && !t.is_package);
     const parent = _allTypes.find(t => t.id === _selectedParentTypeId);
     if (lbl) lbl.textContent = parent ? parent.name.toUpperCase() : 'TYPES';
     if (addBtn) { addBtn.style.display = ''; addBtn.onclick = () => openTypeModal(null, _selectedCatId); }
@@ -672,6 +807,12 @@ window.selectType = async function(typeId, opts) {
   const calBtn = isSystem ? '' :
     `<button class="btn btn-sm btn-ghost" onclick="openAvailabilityCalendar(${t.id})" title="View availability calendar" style="margin-left:auto">📅 Calendar</button>`;
 
+  const partOfSection = isSystem ? '' :
+    `<div id="type-part-of" style="display:none;margin-top:10px;padding:8px 10px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px">
+      <div style="font-size:10px;font-weight:700;letter-spacing:.06em;color:var(--text-dim);margin-bottom:5px">PART OF</div>
+      <div id="type-part-of-list"></div>
+    </div>`;
+
   const unitsSection = isSystem ? `
     <div style="flex-shrink:0">
       <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
@@ -733,6 +874,7 @@ window.selectType = async function(typeId, opts) {
         ${calBtn}
         ${t.supplier_name ? `<span style="font-size:11px;color:var(--text-dim)">Supplier: ${esc(t.supplier_name)}</span>` : ''}
       </div>
+      ${partOfSection}
     </div>
     ${unitsSection}
   `;
@@ -742,6 +884,24 @@ window.selectType = async function(typeId, opts) {
   } else {
     _currentTypeId = typeId;
     _currentTypeName = t.name;
+    // Async: show which systems/packages this type belongs to
+    fetch(`/settings/asset-types/${typeId}/used-in`, {headers:{'X-Requested-With':'XMLHttpRequest'}})
+      .then(r => r.json()).then(systems => {
+        if (!systems.length) return;
+        const wrap = document.getElementById('type-part-of');
+        const list = document.getElementById('type-part-of-list');
+        if (!wrap || !list) return;
+        wrap.style.display = '';
+        list.innerHTML = systems.map(s => {
+          const badge = s.is_system
+            ? `<span style="font-size:9px;background:rgba(245,127,32,.18);color:var(--accent);border-radius:3px;padding:1px 4px;font-weight:700;margin-left:4px">SYSTEM</span>`
+            : `<span style="font-size:9px;background:rgba(72,187,120,.18);color:#48BB78;border-radius:3px;padding:1px 4px;font-weight:700;margin-left:4px">PACKAGE</span>`;
+          return `<div style="display:flex;align-items:center;gap:6px;padding:3px 0">
+            <span style="font-weight:500">${esc(s.name)}${badge}</span>
+            <button class="btn btn-xs btn-ghost" onclick="goToSystem(${s.id})" style="margin-left:auto">View →</button>
+          </div>`;
+        }).join('');
+      }).catch(() => {});
     await loadItems();
   }
 };
@@ -1053,9 +1213,6 @@ window.selectItem = async function(itemId) {
   const condOpts = ['excellent','good','fair','poor','retired'].map(v =>
     `<option value="${v}"${cond===v?' selected':''}>${v.charAt(0).toUpperCase()+v.slice(1)}</option>`).join('');
 
-  const containers = _allContainerItems.filter(c => c.id !== item.id);
-  const contOpts = '<option value="">— None —</option>' +
-    containers.map(c => `<option value="${c.id}"${c.id===item.container_item_id?' selected':''}>${esc(c.type_name)} · ${esc(c.barcode||'#'+c.id)}</option>`).join('');
 
   const backName = t.name.length > 22 ? t.name.slice(0,22)+'…' : t.name;
   const statusCls = item.status==='maintenance'?'maintenance':item.status==='retired'?'retired':'available';
@@ -1109,20 +1266,6 @@ window.selectItem = async function(itemId) {
             <label class="field-label">REPLACEMENT COST ($)</label>
             <input type="number" id="detail-replacement-cost" class="field-input" value="${item.replacement_cost!=null?item.replacement_cost:''}" placeholder="0.00" min="0" step="0.01">
           </div>
-          <div class="field-group" style="grid-column:span 2">
-            <label class="checkbox-label">
-              <input type="checkbox" id="detail-is-container" ${item.is_container?'checked':''}>
-              This item is a container (holds other items)
-            </label>
-          </div>
-          <div id="detail-container-contents-wrap" style="grid-column:span 2;${item.is_container?'':'display:none'}">
-            <label class="field-label">CONTENTS</label>
-            <div id="detail-container-contents" style="font-size:12px;color:var(--text-dim)">Loading…</div>
-          </div>
-          <div class="field-group" style="grid-column:span 2">
-            <label class="field-label">ASSIGN TO CONTAINER</label>
-            <select id="detail-container-sel" class="field-input">${contOpts}</select>
-          </div>
         </div>
         <div id="detail-depreciation-calc" style="margin-top:10px;padding:10px 12px;background:var(--bg);border:1px solid var(--border);border-radius:6px;font-size:12px;display:none"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px;gap:8px;flex-wrap:wrap">
@@ -1153,15 +1296,6 @@ window.selectItem = async function(itemId) {
 
   updateDepreciationCalc();
 
-  if (item.is_container) {
-    fetch(`/settings/asset-items/${item.id}/contents`, {headers:{'X-Requested-With':'XMLHttpRequest'}})
-      .then(r => r.json()).then(items => {
-        const el = document.getElementById('detail-container-contents');
-        if (el) el.innerHTML = items.length
-          ? items.map(i => `<div style="padding:2px 0">${esc(i.type_name)}${i.barcode?' · '+esc(i.barcode):''}</div>`).join('')
-          : '<em>No items assigned</em>';
-      });
-  }
 
   switchDetailTab('info');
   await loadLogEntries(itemId);
@@ -1226,21 +1360,13 @@ window.saveItemDetail = async function() {
     warranty_expires: document.getElementById('detail-warranty').value || null,
     depreciation_start_date: document.getElementById('detail-dep-start').value || null,
     replacement_cost: document.getElementById('detail-replacement-cost').value || null,
-    is_container: document.getElementById('detail-is-container').checked,
   };
-  const contSel = document.getElementById('detail-container-sel');
-  if (contSel) {
-    await fetch(`/settings/asset-items/${id}/set-container`, {
-      method:'POST', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
-      body: JSON.stringify({container_item_id: contSel.value || null})
-    });
-  }
   const r = await fetch(`/settings/asset-items/${id}`, {
     method:'PUT', headers:{'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
     body: JSON.stringify(payload)
   });
   if (!r.ok) { alert('Save failed'); return; }
-  await Promise.all([loadItems(), loadContainerItems()]);
+  await loadItems();
   await selectItem(parseInt(id));
 };
 
@@ -1494,10 +1620,15 @@ window.saveType = async function() {
   }
   closeTypeModal();
   await loadTypes();
-  renderFinderCats();
-  renderFinderGroups();
-  renderFinderTypes();
-  if (_selectedTypeId == savedId) await selectType(parseInt(savedId));
+  if (_activeTab === 'systems') {
+    renderSystemsList();
+    if (_selectedSystemId == savedId) await showSystemDetail(parseInt(savedId));
+  } else {
+    renderFinderCats();
+    renderFinderGroups();
+    renderFinderTypes();
+    if (_selectedTypeId == savedId) await selectType(parseInt(savedId));
+  }
 };
 
 window.retireType = async function(id) {
