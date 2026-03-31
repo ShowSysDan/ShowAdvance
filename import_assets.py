@@ -322,6 +322,77 @@ def main():
         if (i + 1) % 100 == 0 or (i + 1) == len(item_rows):
             print(f"  {i+1}/{len(item_rows)} items processed")
 
+    # ── 4b. QUANTITY-TRACKED TYPES — synthesise blank units from TotalQuantity ──
+    # Items with TrackedBy=QUANTITY don't appear in Items.xlsx at all.
+    # We create the right number of blank (no-barcode) asset_items from RentalInventory.
+    print("\nImporting quantity-tracked units...")
+    qty_added = 0
+    for r in inventory_rows:
+        rental_inv_id = _str(r.get('RentalInventoryId'))
+        asset_type_id = rental_inv_id_map.get(rental_inv_id)
+        if not asset_type_id:
+            continue
+
+        tracked_by = _str(r.get('TrackedBy')).upper()
+        if tracked_by != 'QUANTITY':
+            continue
+
+        # Skip kit/container types — they have no physical units
+        classification = _str(r.get('ClassificationDescription')).upper()
+        if classification == 'CONTAINER':
+            continue
+
+        # Skip consumable inventory types — quantity is managed separately
+        inv_type = _str(r.get('InventoryType'))
+        if inv_type == 'Consumable':
+            continue
+
+        total_qty = r.get('TotalQuantity') or 0
+        try:
+            total_qty = int(float(total_qty))
+        except (ValueError, TypeError):
+            total_qty = 0
+
+        if total_qty <= 0:
+            continue
+
+        # Cap to avoid creating thousands of blank units for service/placeholder items
+        # (e.g. "Parking Validation: 999999"). Physical inventory rarely exceeds 500.
+        MAX_QTY = 500
+        if total_qty > MAX_QTY:
+            name = _str(r.get('Description'))
+            print(f"  SKIP {name}: qty={total_qty} exceeds cap of {MAX_QTY} (likely a service/placeholder)")
+            continue
+
+        # Don't double-create if Items.xlsx somehow already covered this type
+        already = item_sort.get(asset_type_id, 0)
+        needed = total_qty - already
+        if needed <= 0:
+            continue
+
+        inactive = r.get('Inactive')
+        is_retired_item = 1 if (inactive is True or _str(inactive).upper() == 'TRUE') else 0
+        status = 'retired' if is_retired_item else 'available'
+        name = _str(r.get('Description'))
+
+        for _ in range(needed):
+            item_sort[asset_type_id] = item_sort.get(asset_type_id, 0) + 1
+            so = item_sort[asset_type_id]
+            if not dry_run:
+                conn.execute("""
+                    INSERT INTO asset_items
+                      (asset_type_id, barcode, status, condition, sort_order)
+                    VALUES (?,?,?,?,?)
+                """, (asset_type_id, None, status, 'good', so))
+            qty_added += 1
+
+        if not dry_run and needed > 0:
+            conn.commit()
+
+        print(f"  {name}: +{needed} units (TotalQuantity={total_qty})")
+
+    print(f"  Total qty-tracked units synthesised: {qty_added}")
+
     # ── 5. ITEMS PASS 2 — set container relationships ─────────────────────────
     print("\nSetting container relationships (pass 2)...")
     container_links = 0
@@ -353,6 +424,7 @@ def main():
     print(f"  Parent types created:   {len(cat_pairs)}")
     print(f"  Leaf types created:     {len(rental_inv_id_map)}")
     print(f"  Items imported:         {len(item_rows) - skipped}")
+    print(f"  Qty-tracked units:      {qty_added}")
     print(f"  Items skipped:          {skipped}")
     print(f"  Container links:        {container_links}")
     if warnings:

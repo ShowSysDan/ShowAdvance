@@ -36,8 +36,8 @@
 {# ── Finder Browser ── #}
 <div class="finder-browser">
 
-  {# Column 1: Categories #}
-  <div class="finder-col" style="width:210px;min-width:160px;flex-shrink:0">
+  {# Column 1: Categories (InventoryType) #}
+  <div class="finder-col" style="width:185px;min-width:140px;flex-shrink:0">
     <div class="finder-col-hdr">
       <span>CATEGORIES</span>
       <button class="btn btn-xs btn-ghost" style="padding:2px 7px;font-size:10px" onclick="openCategoryModal()">+ Add</button>
@@ -45,22 +45,33 @@
     <div id="finder-cats" class="finder-col-body"></div>
   </div>
 
-  {# Column 2: Types #}
-  <div class="finder-col" style="width:270px;min-width:200px;flex-shrink:0">
+  {# Column 2: Groups (parent types — Category grouping) #}
+  <div class="finder-col" style="width:195px;min-width:150px;flex-shrink:0">
+    <div class="finder-col-hdr">
+      <span id="groups-col-label" style="flex:1">GROUPS</span>
+      <button id="add-group-btn" class="btn btn-xs btn-ghost" style="padding:2px 7px;font-size:10px;display:none" onclick="openTypeModal(null, _selectedCatId)">+ Add</button>
+    </div>
+    <div id="finder-groups" class="finder-col-body">
+      <p class="finder-empty">Select a category</p>
+    </div>
+  </div>
+
+  {# Column 3: Types (leaf types within selected group) #}
+  <div class="finder-col" style="width:230px;min-width:170px;flex-shrink:0">
     <div class="finder-col-hdr">
       <span id="types-col-label" style="flex:1">TYPES</span>
       <button id="add-type-btn" class="btn btn-xs btn-ghost" style="padding:2px 7px;font-size:10px;display:none" onclick="openTypeModal(null, _selectedCatId)">+ Add</button>
     </div>
     <div id="finder-types" class="finder-col-body">
-      <p class="finder-empty">Select a category</p>
+      <p class="finder-empty">Select a group</p>
     </div>
   </div>
 
-  {# Column 3: Detail Pane #}
-  <div class="finder-col" style="flex:1;min-width:380px">
+  {# Column 4: Detail Pane #}
+  <div class="finder-col" style="flex:1;min-width:340px">
     <div class="finder-col-hdr" id="detail-col-hdr">DETAILS</div>
     <div id="finder-detail" class="finder-col-body" style="display:flex;flex-direction:column">
-      <p class="finder-empty" style="margin:auto;padding:40px 20px">Select a category and type to view details</p>
+      <p class="finder-empty" style="margin:auto;padding:40px 20px">Select a type to view details</p>
     </div>
   </div>
 
@@ -292,6 +303,7 @@ const _categories = {{ categories | tojson }};
 const _locations  = {{ locations | tojson }};
 let _allTypes = [];
 let _selectedCatId = null;
+let _selectedParentTypeId = null;
 let _selectedTypeId = null;
 let _currentTypeId = null;
 let _currentTypeName = '';
@@ -315,7 +327,8 @@ window.toggleShowRetired = async function(checked) {
   _showRetired = checked;
   await loadTypes();
   renderFinderCats();
-  if (_selectedCatId) renderFinderTypes();
+  if (_selectedCatId) renderFinderGroups();
+  if (_selectedParentTypeId) renderFinderTypes();
   if (_selectedTypeId) await selectType(_selectedTypeId);
 };
 
@@ -349,16 +362,70 @@ function renderFinderCats() {
 
 window.selectCat = function(catId) {
   _selectedCatId = catId;
+  _selectedParentTypeId = null;
   _selectedTypeId = null;
   _selectedItemId = null;
   renderFinderCats();
+  renderFinderGroups();
+  // Clear types + detail columns
+  document.getElementById('finder-types').innerHTML = '<p class="finder-empty">Select a group</p>';
+  document.getElementById('types-col-label').textContent = 'TYPES';
+  document.getElementById('add-type-btn').style.display = 'none';
+  document.getElementById('finder-detail').innerHTML = '<p class="finder-empty" style="margin:auto;padding:40px 20px">Select a type to view details</p>';
+  document.getElementById('detail-col-hdr').textContent = 'DETAILS';
+};
+
+// ── Groups Column (parent types: parent_type_id = null) ───────────────────────
+function renderFinderGroups() {
+  const c = document.getElementById('finder-groups');
+  const lbl = document.getElementById('groups-col-label');
+  const addBtn = document.getElementById('add-group-btn');
+  if (!c) return;
+
+  if (!_selectedCatId) {
+    c.innerHTML = '<p class="finder-empty">Select a category</p>';
+    if (lbl) lbl.textContent = 'GROUPS';
+    if (addBtn) addBtn.style.display = 'none';
+    return;
+  }
+
+  // Parent types are those with parent_type_id = null in this category
+  const parents = _allTypes.filter(t => t.category_id === _selectedCatId && !t.parent_type_id);
+  const cat = _categories.find(x => x.id === _selectedCatId);
+  if (lbl) lbl.textContent = cat ? cat.name.toUpperCase() : 'GROUPS';
+  if (addBtn) addBtn.style.display = '';
+
+  if (parents.length === 0) {
+    c.innerHTML = '<p class="finder-empty">No groups yet.</p>';
+    return;
+  }
+
+  c.innerHTML = parents.map(p => {
+    const childCount = _allTypes.filter(t => t.parent_type_id === p.id).length;
+    const active = p.id === _selectedParentTypeId ? ' active' : '';
+    const isRetired = !!p.is_retired;
+    // Show direct children count or own item count
+    const countLabel = childCount > 0 ? childCount : (p.item_count || 0);
+    return `<div class="finder-cat-row${active}" onclick="selectGroup(${p.id})" style="${isRetired?'opacity:.45':''}">
+      <svg viewBox="0 0 16 16" fill="currentColor" width="13" height="13" style="flex-shrink:0;opacity:.5"><path d="M1.5 3A1.5 1.5 0 013 1.5h3.879a1.5 1.5 0 011.06.44l.622.621A1.5 1.5 0 009.621 3H13A1.5 1.5 0 0114.5 4.5v8A1.5 1.5 0 0113 14H3a1.5 1.5 0 01-1.5-1.5V3z"/></svg>
+      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span>
+      <span style="font-size:10px;opacity:.5;flex-shrink:0">${countLabel}</span>
+      <span style="color:var(--text-dim);font-size:14px;flex-shrink:0">›</span>
+    </div>`;
+  }).join('');
+}
+
+window.selectGroup = function(parentId) {
+  _selectedParentTypeId = parentId;
+  _selectedTypeId = null;
+  _selectedItemId = null;
+  renderFinderGroups();
   renderFinderTypes();
   document.getElementById('finder-detail').innerHTML = '<p class="finder-empty" style="margin:auto;padding:40px 20px">Select a type to view details</p>';
   document.getElementById('detail-col-hdr').textContent = 'DETAILS';
-  document.getElementById('add-type-btn').style.display = '';
 };
 
-// ── Types Column ──────────────────────────────────────────────────────────────
+// ── Types Column (leaf types: parent_type_id = selectedParentTypeId) ──────────
 function renderFinderTypes() {
   const c = document.getElementById('finder-types');
   const lbl = document.getElementById('types-col-label');
@@ -371,22 +438,35 @@ function renderFinderTypes() {
 
   let types;
   if (isSearching) {
+    // Show all matching leaf types across all categories
     types = _allTypes.filter(t =>
-      (t.name||'').toLowerCase().includes(query) ||
-      (t.manufacturer||'').toLowerCase().includes(query) ||
-      (t.model||'').toLowerCase().includes(query) ||
-      (t.category_name||'').toLowerCase().includes(query) ||
-      (t.storage_location||'').toLowerCase().includes(query)
+      t.parent_type_id && (
+        (t.name||'').toLowerCase().includes(query) ||
+        (t.manufacturer||'').toLowerCase().includes(query) ||
+        (t.model||'').toLowerCase().includes(query) ||
+        (t.category_name||'').toLowerCase().includes(query) ||
+        (t.storage_location||'').toLowerCase().includes(query)
+      )
     );
+    // Also include matching parent-level types that have no children
+    const matchingParents = _allTypes.filter(t =>
+      !t.parent_type_id &&
+      !_allTypes.some(c => c.parent_type_id === t.id) && (
+        (t.name||'').toLowerCase().includes(query) ||
+        (t.manufacturer||'').toLowerCase().includes(query) ||
+        (t.model||'').toLowerCase().includes(query)
+      )
+    );
+    types = [...types, ...matchingParents];
     if (lbl) lbl.textContent = `RESULTS (${types.length})`;
     if (addBtn) addBtn.style.display = 'none';
-  } else if (_selectedCatId) {
-    types = _allTypes.filter(t => t.category_id === _selectedCatId);
-    const cat = _categories.find(c => c.id === _selectedCatId);
-    if (lbl) lbl.textContent = cat ? cat.name.toUpperCase() : 'TYPES';
-    if (addBtn) addBtn.style.display = '';
+  } else if (_selectedParentTypeId) {
+    types = _allTypes.filter(t => t.parent_type_id === _selectedParentTypeId);
+    const parent = _allTypes.find(t => t.id === _selectedParentTypeId);
+    if (lbl) lbl.textContent = parent ? parent.name.toUpperCase() : 'TYPES';
+    if (addBtn) { addBtn.style.display = ''; addBtn.onclick = () => openTypeModal(null, _selectedCatId); }
   } else {
-    c.innerHTML = '<p class="finder-empty">Select a category to browse types</p>';
+    c.innerHTML = '<p class="finder-empty">Select a group</p>';
     if (lbl) lbl.textContent = 'TYPES';
     if (addBtn) addBtn.style.display = 'none';
     return;
@@ -407,7 +487,7 @@ function renderFinderTypes() {
   }
 
   if (types.length === 0) {
-    c.innerHTML = '<p class="finder-empty">No types found.</p>';
+    c.innerHTML = '<p class="finder-empty">No types in this group.</p>';
     return;
   }
 
@@ -416,19 +496,21 @@ function renderFinderTypes() {
     const isRetired = !!t.is_retired;
     const active = t.id === _selectedTypeId ? ' active' : '';
     const thumb = t.photo
-      ? `<img src="/asset-types/${t.id}/photo" style="width:32px;height:32px;border-radius:4px;object-fit:cover;flex-shrink:0" alt="">`
-      : `<div style="width:32px;height:32px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--text-dim);flex-shrink:0">◈</div>`;
-    const catLabel = isSearching ? `<span style="font-size:9px;opacity:.55"> · ${esc(t.category_name||'')}</span>` : '';
+      ? `<img src="/asset-types/${t.id}/photo" style="width:28px;height:28px;border-radius:4px;object-fit:cover;flex-shrink:0" alt="">`
+      : `<div style="width:28px;height:28px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-dim);flex-shrink:0">◈</div>`;
+    const pathLabel = isSearching
+      ? `<span style="font-size:9px;opacity:.5"> ${esc(t.category_name||'')} › ${esc(_allTypes.find(p=>p.id===t.parent_type_id)?.name||'')}</span>`
+      : '';
     const kitBadge = isKit ? `<span style="font-size:9px;background:rgba(245,127,32,.2);color:var(--accent);border-radius:3px;padding:1px 4px;margin-left:3px;font-weight:700">KIT</span>` : '';
     const nameStyle = isRetired ? 'opacity:.4;text-decoration:line-through' : '';
     return `<div class="finder-type-row${active}" onclick="selectType(${t.id})">
       ${thumb}
       <div style="flex:1;min-width:0">
-        <div style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${nameStyle}">
-          ${esc(t.name)}${kitBadge}${catLabel}
+        <div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${nameStyle}">
+          ${esc(t.name)}${kitBadge}
         </div>
         <div style="font-size:10px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-          ${isKit ? 'Kit' : `${t.item_count} units`}${t.manufacturer ? ' · '+esc(t.manufacturer) : ''}
+          ${isKit ? 'Kit' : `${t.item_count} units`}${t.manufacturer ? ' · '+esc(t.manufacturer) : ''}${pathLabel}
         </div>
       </div>
       <span style="color:var(--text-dim);font-size:14px;flex-shrink:0">›</span>
@@ -440,6 +522,18 @@ function renderFinderTypes() {
 window.selectType = async function(typeId) {
   _selectedTypeId = typeId;
   _selectedItemId = null;
+  // When coming from search, sync parent/cat selection so breadcrumb is correct
+  const t0 = _allTypes.find(x => x.id === typeId);
+  if (t0) {
+    if (t0.parent_type_id && _selectedParentTypeId !== t0.parent_type_id) {
+      _selectedParentTypeId = t0.parent_type_id;
+    }
+    if (t0.category_id && _selectedCatId !== t0.category_id) {
+      _selectedCatId = t0.category_id;
+      renderFinderCats();
+      renderFinderGroups();
+    }
+  }
   renderFinderTypes();
 
   const t = _allTypes.find(x => x.id === typeId);
@@ -931,12 +1025,16 @@ window.deleteCategory = async function(id) {
   _allTypes = _allTypes.filter(t => t.category_id !== id);
   if (_selectedCatId === id) {
     _selectedCatId = null;
+    _selectedParentTypeId = null;
     _selectedTypeId = null;
-    document.getElementById('finder-types').innerHTML = '<p class="finder-empty">Select a category to browse types</p>';
-    document.getElementById('finder-detail').innerHTML = '<p class="finder-empty" style="margin:auto;padding:40px 20px">Select a type to view details</p>';
+    document.getElementById('finder-groups').innerHTML = '<p class="finder-empty">Select a category</p>';
+    document.getElementById('groups-col-label').textContent = 'GROUPS';
+    document.getElementById('add-group-btn').style.display = 'none';
+    document.getElementById('finder-types').innerHTML = '<p class="finder-empty">Select a group</p>';
     document.getElementById('types-col-label').textContent = 'TYPES';
-    document.getElementById('detail-col-hdr').textContent = 'DETAILS';
     document.getElementById('add-type-btn').style.display = 'none';
+    document.getElementById('finder-detail').innerHTML = '<p class="finder-empty" style="margin:auto;padding:40px 20px">Select a type to view details</p>';
+    document.getElementById('detail-col-hdr').textContent = 'DETAILS';
   }
   renderFinderCats();
 };
@@ -1033,6 +1131,7 @@ window.saveType = async function() {
   closeTypeModal();
   await loadTypes();
   renderFinderCats();
+  renderFinderGroups();
   renderFinderTypes();
   if (_selectedTypeId == savedId) await selectType(parseInt(savedId));
 };
@@ -1043,6 +1142,7 @@ window.retireType = async function(id) {
   if (!r.ok) { const d = await r.json(); alert(d.error || 'Error'); return; }
   await loadTypes();
   renderFinderCats();
+  renderFinderGroups();
   renderFinderTypes();
   if (_selectedTypeId == id) {
     _selectedTypeId = null;
