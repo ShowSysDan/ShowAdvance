@@ -20,8 +20,12 @@
 
 {# ── Search + Sort Bar ── #}
 <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
-  <input type="text" id="type-search" class="field-input" placeholder="Search types, manufacturers, models…"
-         style="flex:1;min-width:200px;padding:7px 10px;font-size:13px" oninput="renderFinderTypes()">
+  <div style="flex:1;min-width:200px;position:relative">
+    <input type="text" id="type-search" class="field-input" placeholder="Search types, manufacturers, models…"
+           style="width:100%;padding:7px 30px 7px 10px;font-size:13px;box-sizing:border-box" oninput="onTypeSearchInput()">
+    <button id="search-clear-btn" onclick="clearTypeSearch()" title="Clear search"
+            style="position:absolute;right:6px;top:50%;transform:translateY(-50%);background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:18px;line-height:1;padding:0;display:none">×</button>
+  </div>
   <select id="type-sort" class="field-input" style="width:160px;padding:7px 8px;font-size:12px" onchange="renderFinderTypes()">
     <option value="default">Default order</option>
     <option value="name-asc">Name A → Z</option>
@@ -57,7 +61,7 @@
   </div>
 
   {# Column 3: Types (leaf types within selected group) #}
-  <div class="finder-col" style="width:230px;min-width:170px;flex-shrink:0">
+  <div class="finder-col" style="width:280px;min-width:220px;flex-shrink:0">
     <div class="finder-col-hdr">
       <span id="types-col-label" style="flex:1">TYPES</span>
       <button id="add-type-btn" class="btn btn-xs btn-ghost" style="padding:2px 7px;font-size:10px;display:none" onclick="openTypeModal(null, _selectedCatId)">+ Add</button>
@@ -211,6 +215,45 @@
   </div>
 </div>
 
+{# Availability Calendar Modal #}
+<div id="avail-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeAvailModal()">
+  <div class="modal-card" style="max-width:460px">
+    <div class="modal-header">
+      <span id="avail-modal-title">Availability</span>
+      <button onclick="closeAvailModal()" class="modal-close">×</button>
+    </div>
+    <div class="modal-body" style="padding:0">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--border)">
+        <button class="btn btn-ghost btn-sm" onclick="availNavMonth(-1)">‹ Prev</button>
+        <span id="avail-month-label" style="font-weight:600;font-size:14px"></span>
+        <button class="btn btn-ghost btn-sm" onclick="availNavMonth(1)">Next ›</button>
+      </div>
+      <div style="padding:12px 16px">
+        <div class="avail-cal-daynames"></div>
+        <div class="avail-cal-grid" id="avail-cal-grid"></div>
+      </div>
+      <div id="avail-day-detail" style="padding:0 16px 14px;font-size:12px;min-height:40px"></div>
+    </div>
+  </div>
+</div>
+
+{# Component Picker Modal #}
+<div id="comp-picker-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeCompPicker()">
+  <div class="modal-card" style="max-width:440px;max-height:80vh;display:flex;flex-direction:column">
+    <div class="modal-header">
+      Assign Type as Component
+      <button onclick="closeCompPicker()" class="modal-close">×</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;flex:1;padding-top:0">
+      <input type="hidden" id="comp-picker-system-id">
+      <div style="padding:10px 0 8px">
+        <input type="text" id="comp-picker-search" class="field-input" placeholder="Search types…" style="width:100%;padding:7px 10px;font-size:13px;box-sizing:border-box" oninput="renderCompPickerList()">
+      </div>
+      <div id="comp-picker-list"></div>
+    </div>
+  </div>
+</div>
+
 <style>
 .finder-browser {
   display: flex;
@@ -296,6 +339,17 @@
 .log-type-service { background:rgba(72,187,120,.15);color:#48BB78 }
 .log-type-usage   { background:rgba(214,188,250,.15);color:#B794F4 }
 .cond-excellent{color:#48BB78}.cond-good{color:#68D391}.cond-fair{color:#F6AD55}.cond-poor{color:#FC814A}.cond-retired{color:#FC8181}
+.avail-cal-daynames { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:2px; }
+.avail-cal-daynames span { text-align:center; font-size:9px; font-weight:700; color:var(--text-dim); padding:2px 0; }
+.avail-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
+.avail-cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; border-radius:4px; font-size:11px; cursor:default; transition:background .1s; }
+.avail-cal-day.today { outline:1px solid var(--accent); }
+.avail-cal-day.booked { background:rgba(245,127,32,.22); color:var(--accent); font-weight:600; cursor:pointer; }
+.avail-cal-day.booked:hover { background:rgba(245,127,32,.35); }
+.avail-cal-day.full { background:rgba(197,48,48,.2); color:#FC8181; font-weight:600; cursor:pointer; }
+.avail-cal-day.full:hover { background:rgba(197,48,48,.3); }
+.avail-cal-day.empty-cell { opacity:0; }
+.comp-back-bar { padding:8px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; flex-shrink:0; background:var(--bg); }
 </style>
 
 <script>
@@ -310,6 +364,7 @@ let _currentTypeName = '';
 let _currentItems = [];
 let _selectedItemId = null;
 let _showRetired = false;
+let _viewingComponentOf = null; // system type ID when navigated into a component from a system view
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
@@ -322,6 +377,21 @@ async function loadTypes() {
   const r = await fetch(`/settings/asset-types${param}`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
   _allTypes = await r.json();
 }
+
+function onTypeSearchInput() {
+  const inp = document.getElementById('type-search');
+  const btn = document.getElementById('search-clear-btn');
+  if (btn) btn.style.display = (inp?.value || '') ? '' : 'none';
+  renderFinderTypes();
+}
+
+window.clearTypeSearch = function() {
+  const inp = document.getElementById('type-search');
+  if (inp) inp.value = '';
+  const btn = document.getElementById('search-clear-btn');
+  if (btn) btn.style.display = 'none';
+  renderFinderTypes();
+};
 
 window.toggleShowRetired = async function(checked) {
   _showRetired = checked;
@@ -365,6 +435,7 @@ window.selectCat = function(catId) {
   _selectedParentTypeId = null;
   _selectedTypeId = null;
   _selectedItemId = null;
+  _viewingComponentOf = null;
   renderFinderCats();
   renderFinderGroups();
   // Clear types + detail columns
@@ -419,6 +490,7 @@ window.selectGroup = function(parentId) {
   _selectedParentTypeId = parentId;
   _selectedTypeId = null;
   _selectedItemId = null;
+  _viewingComponentOf = null;
   renderFinderGroups();
   renderFinderTypes();
   document.getElementById('finder-detail').innerHTML = '<p class="finder-empty" style="margin:auto;padding:40px 20px">Select a type to view details</p>';
@@ -519,22 +591,37 @@ function renderFinderTypes() {
 }
 
 // ── Type Detail Pane ──────────────────────────────────────────────────────────
-window.selectType = async function(typeId) {
+window.selectType = async function(typeId, opts) {
+  const inSystemContext = opts && opts.inSystemContext;
+  if (!inSystemContext) {
+    _viewingComponentOf = null;
+  }
   _selectedTypeId = typeId;
   _selectedItemId = null;
-  // When coming from search, sync parent/cat selection so breadcrumb is correct
-  const t0 = _allTypes.find(x => x.id === typeId);
-  if (t0) {
-    if (t0.parent_type_id && _selectedParentTypeId !== t0.parent_type_id) {
-      _selectedParentTypeId = t0.parent_type_id;
+
+  if (!inSystemContext) {
+    // When coming from search or column 3, sync parent/cat selection
+    const t0 = _allTypes.find(x => x.id === typeId);
+    if (t0) {
+      if (t0.parent_type_id && _selectedParentTypeId !== t0.parent_type_id) {
+        _selectedParentTypeId = t0.parent_type_id;
+      }
+      if (t0.category_id && _selectedCatId !== t0.category_id) {
+        _selectedCatId = t0.category_id;
+        renderFinderCats();
+        renderFinderGroups();
+      }
     }
-    if (t0.category_id && _selectedCatId !== t0.category_id) {
-      _selectedCatId = t0.category_id;
-      renderFinderCats();
-      renderFinderGroups();
+    renderFinderTypes();
+    // Clear search if navigating via search result
+    const searchInp = document.getElementById('type-search');
+    if (searchInp?.value) {
+      searchInp.value = '';
+      const btn = document.getElementById('search-clear-btn');
+      if (btn) btn.style.display = 'none';
+      renderFinderTypes();
     }
   }
-  renderFinderTypes();
 
   const t = _allTypes.find(x => x.id === typeId);
   if (!t) return;
@@ -567,7 +654,17 @@ window.selectType = async function(typeId) {
       </div>
     </div>`;
 
-  const unitsSection = isSystem ? `<div style="padding:20px;text-align:center;color:var(--text-dim);font-size:12px;flex-shrink:0"><em>System — assembled from individual components. No standalone units.</em></div>` : `
+  const calBtn = isSystem ? '' :
+    `<button class="btn btn-sm btn-ghost" onclick="openAvailabilityCalendar(${t.id})" title="View availability calendar" style="margin-left:auto">📅 Calendar</button>`;
+
+  const unitsSection = isSystem ? `
+    <div style="flex-shrink:0">
+      <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
+        <span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--text-dim);flex:1">COMPONENTS</span>
+        <button class="btn btn-xs btn-primary" onclick="openAddComponentPicker(${t.id})">+ Add</button>
+      </div>
+    </div>
+    <div id="components-list" style="overflow-y:auto;flex:1">${renderComponentsList(t.id)}</div>` : `
     <div style="flex-shrink:0">
       <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
         <span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--text-dim);flex:1">UNITS</span>
@@ -590,10 +687,21 @@ window.selectType = async function(typeId) {
     </div>
     <div id="items-list" style="overflow-y:auto;flex:1"></div>`;
 
+  // Back-to-system bar shown when viewing a component in system context
+  const backBar = _viewingComponentOf ? (() => {
+    const sys = _allTypes.find(x => x.id === _viewingComponentOf);
+    const sysName = sys ? (sys.name.length > 26 ? sys.name.slice(0,26)+'…' : sys.name) : 'System';
+    return `<div class="comp-back-bar">
+      <button class="btn btn-xs btn-ghost" onclick="returnToSystem()">← ${esc(sysName)}</button>
+      <span style="font-size:11px;color:var(--text-dim);flex:1">${esc(t.name)}</span>
+    </div>`;
+  })() : '';
+
   const detail = document.getElementById('finder-detail');
   detail.style.display = 'flex';
   detail.style.flexDirection = 'column';
   detail.innerHTML = `
+    ${backBar}
     <div style="padding:16px;border-bottom:1px solid var(--border);flex-shrink:0">
       <div style="display:flex;gap:14px;align-items:flex-start">
         ${thumb}
@@ -607,6 +715,7 @@ window.selectType = async function(typeId) {
       ${stats}
       <div style="display:flex;gap:8px;margin-top:12px;align-items:center;flex-wrap:wrap">
         <button class="btn btn-sm btn-ghost" onclick="openTypeModal(${t.id})">Edit Type</button>
+        ${calBtn}
         ${t.supplier_name ? `<span style="font-size:11px;color:var(--text-dim)">Supplier: ${esc(t.supplier_name)}</span>` : ''}
       </div>
     </div>
@@ -618,6 +727,225 @@ window.selectType = async function(typeId) {
     _currentTypeName = t.name;
     await loadItems();
   }
+};
+
+// ── System Components ─────────────────────────────────────────────────────────
+function renderComponentsList(systemTypeId) {
+  const components = _allTypes.filter(t => t.parent_type_id === systemTypeId && !t.is_retired);
+  const retired = _allTypes.filter(t => t.parent_type_id === systemTypeId && t.is_retired);
+  const all = [...components, ...retired];
+  if (all.length === 0) {
+    return '<p class="finder-empty">No components assigned yet.<br>Use + Add to assign types as components.</p>';
+  }
+  return all.map(c => {
+    const thumb = c.photo
+      ? `<img src="/asset-types/${c.id}/photo" style="width:28px;height:28px;border-radius:4px;object-fit:cover;flex-shrink:0" alt="">`
+      : `<div style="width:28px;height:28px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-dim);flex-shrink:0">◈</div>`;
+    const retStyle = c.is_retired ? 'opacity:.45' : '';
+    return `<div class="finder-type-row" style="${retStyle}" onclick="navigateToComponent(${c.id},${systemTypeId})">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</div>
+        <div style="font-size:10px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${c.item_count||0} units${c.manufacturer?' · '+esc(c.manufacturer):''}
+        </div>
+      </div>
+      <button class="btn btn-xs btn-ghost" style="color:#FC814A;flex-shrink:0;padding:2px 6px"
+              onclick="event.stopPropagation();removeComponentFromSystem(${c.id},${systemTypeId})"
+              title="Remove from system">✕</button>
+      <span style="color:var(--text-dim);font-size:14px;flex-shrink:0">›</span>
+    </div>`;
+  }).join('');
+}
+
+window.navigateToComponent = function(compId, sysId) {
+  _viewingComponentOf = sysId;
+  selectType(compId, { inSystemContext: true });
+};
+
+window.returnToSystem = async function() {
+  const sysId = _viewingComponentOf;
+  _viewingComponentOf = null;
+  if (sysId) await selectType(sysId);
+};
+
+window.removeComponentFromSystem = async function(componentId, systemId) {
+  if (!confirm('Remove this type from the system? It will return to the main type list in this group.')) return;
+  const comp = _allTypes.find(x => x.id === componentId);
+  const sys  = _allTypes.find(x => x.id === systemId);
+  if (!comp || !sys) return;
+  // Move component back to system's own group (system's parent_type_id)
+  const r = await fetch(`/settings/asset-types/${componentId}`, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+    body: JSON.stringify({
+      name: comp.name, category_id: comp.category_id,
+      parent_type_id: sys.parent_type_id,
+      manufacturer: comp.manufacturer||'', model: comp.model||'',
+      storage_location: comp.storage_location||'',
+      rental_cost: comp.rental_cost||0, weekly_rate: comp.weekly_rate||0,
+      reserve_count: comp.reserve_count||0,
+      is_consumable: !!comp.is_consumable, track_quantity: comp.track_quantity!==0,
+      supplier_name: comp.supplier_name||'', supplier_contact: comp.supplier_contact||'',
+    })
+  });
+  if (!r.ok) { alert('Error removing component'); return; }
+  await loadTypes();
+  await selectType(systemId);
+};
+
+let _compPickerSystemId = null;
+window.openAddComponentPicker = function(sysId) {
+  _compPickerSystemId = sysId;
+  document.getElementById('comp-picker-system-id').value = sysId;
+  document.getElementById('comp-picker-search').value = '';
+  renderCompPickerList();
+  document.getElementById('comp-picker-modal').style.display = 'flex';
+};
+window.closeCompPicker = function() { document.getElementById('comp-picker-modal').style.display = 'none'; };
+
+window.renderCompPickerList = function() {
+  const c = document.getElementById('comp-picker-list');
+  const sysId = _compPickerSystemId;
+  const q = (document.getElementById('comp-picker-search')?.value||'').toLowerCase();
+  // Eligible: non-retired, non-system, not already a component of this or another system type
+  let eligible = _allTypes.filter(t => {
+    if (t.is_retired || t.is_system) return false;
+    if (t.parent_type_id === sysId) return false; // already in this system
+    const parent = _allTypes.find(p => p.id === t.parent_type_id);
+    if (parent?.is_system) return false; // already in another system
+    return true;
+  });
+  if (q) eligible = eligible.filter(t =>
+    (t.name||'').toLowerCase().includes(q) ||
+    (t.manufacturer||'').toLowerCase().includes(q) ||
+    (t.category_name||'').toLowerCase().includes(q)
+  );
+  if (!eligible.length) {
+    c.innerHTML = '<p class="finder-empty">No eligible types found.</p>';
+    return;
+  }
+  c.innerHTML = eligible.map(t => {
+    const thumb = t.photo
+      ? `<img src="/asset-types/${t.id}/photo" style="width:28px;height:28px;border-radius:4px;object-fit:cover;flex-shrink:0" alt="">`
+      : `<div style="width:28px;height:28px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-dim);flex-shrink:0">◈</div>`;
+    return `<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border)">
+      ${thumb}
+      <div style="flex:1;min-width:0">
+        <div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(t.name)}</div>
+        <div style="font-size:10px;color:var(--text-dim)">${esc(t.category_name||'')}${t.manufacturer?' · '+esc(t.manufacturer):''}</div>
+      </div>
+      <button class="btn btn-xs btn-primary" onclick="assignTypeAsComponent(${t.id},${sysId})">Add</button>
+    </div>`;
+  }).join('');
+};
+
+window.assignTypeAsComponent = async function(typeId, sysId) {
+  const t = _allTypes.find(x => x.id === typeId);
+  if (!t) return;
+  const r = await fetch(`/settings/asset-types/${typeId}`, {
+    method: 'PUT',
+    headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+    body: JSON.stringify({
+      name: t.name, category_id: t.category_id,
+      parent_type_id: sysId,
+      manufacturer: t.manufacturer||'', model: t.model||'',
+      storage_location: t.storage_location||'',
+      rental_cost: t.rental_cost||0, weekly_rate: t.weekly_rate||0,
+      reserve_count: t.reserve_count||0,
+      is_consumable: !!t.is_consumable, track_quantity: t.track_quantity!==0,
+      supplier_name: t.supplier_name||'', supplier_contact: t.supplier_contact||'',
+    })
+  });
+  if (!r.ok) { alert('Error assigning component'); return; }
+  closeCompPicker();
+  await loadTypes();
+  await selectType(sysId);
+};
+
+// ── Availability Calendar ─────────────────────────────────────────────────────
+let _availData = null, _availTypeId = null;
+let _availYear = new Date().getFullYear(), _availMonth = new Date().getMonth();
+
+window.openAvailabilityCalendar = async function(typeId) {
+  _availTypeId = typeId;
+  _availYear = new Date().getFullYear();
+  _availMonth = new Date().getMonth();
+  const t = _allTypes.find(x => x.id === typeId);
+  document.getElementById('avail-modal-title').textContent = 'Availability' + (t ? ' — ' + t.name : '');
+  document.getElementById('avail-modal').style.display = 'flex';
+  document.getElementById('avail-cal-grid').innerHTML = '<p style="padding:16px;color:var(--text-dim);font-size:12px">Loading…</p>';
+  const r = await fetch(`/api/asset-types/${typeId}/availability`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
+  _availData = await r.json();
+  renderAvailCalendar();
+};
+window.closeAvailModal = function() { document.getElementById('avail-modal').style.display = 'none'; };
+window.availNavMonth = function(delta) {
+  _availMonth += delta;
+  if (_availMonth < 0)  { _availMonth = 11; _availYear--; }
+  if (_availMonth > 11) { _availMonth = 0;  _availYear++; }
+  renderAvailCalendar();
+};
+
+function renderAvailCalendar() {
+  const grid  = document.getElementById('avail-cal-grid');
+  const label = document.getElementById('avail-month-label');
+  if (!grid || !_availData) return;
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  label.textContent = `${months[_availMonth]} ${_availYear}`;
+
+  // Render day-of-week headers once (outside grid)
+  const hdrEl = document.querySelector('.avail-cal-daynames');
+  if (hdrEl && !hdrEl.children.length) {
+    ['Su','Mo','Tu','We','Th','Fr','Sa'].forEach(d => {
+      const s = document.createElement('span'); s.textContent = d; hdrEl.appendChild(s);
+    });
+  }
+
+  const shows = _availData.shows || [];
+  const total = _availData.total_items || 0;
+  const inMaint = _availData.in_maintenance || 0;
+  const reserve = _availData.reserve_count || 0;
+  const usable = Math.max(0, total - inMaint - reserve);
+  const unlimited = !!_availData.unlimited;
+  const today = new Date().toISOString().slice(0,10);
+
+  function bookedOn(dateStr) {
+    return shows.filter(s => s.rental_start && s.rental_end && s.rental_start <= dateStr && s.rental_end >= dateStr);
+  }
+
+  const firstDay = new Date(_availYear, _availMonth, 1).getDay();
+  const daysInMonth = new Date(_availYear, _availMonth + 1, 0).getDate();
+  let html = '';
+  for (let i = 0; i < firstDay; i++) html += `<div class="avail-cal-day empty-cell"></div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${_availYear}-${String(_availMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const bk = bookedOn(ds);
+    const qty = bk.reduce((s,b) => s+(b.quantity||1), 0);
+    const isToday = ds === today ? ' today' : '';
+    let cls = '';
+    if (!unlimited && qty > 0) cls = (qty >= usable && usable > 0) ? ' full' : ' booked';
+    const tip = qty > 0 ? `${qty} booked${usable>0?' / '+usable+' usable':''}` : 'Available';
+    html += `<div class="avail-cal-day${cls}${isToday}" onclick="showAvailDayDetail('${ds}')" title="${tip}">${d}</div>`;
+  }
+  grid.innerHTML = html;
+  document.getElementById('avail-day-detail').innerHTML = '';
+}
+
+window.showAvailDayDetail = function(dateStr) {
+  const c = document.getElementById('avail-day-detail');
+  if (!_availData) return;
+  const bk = (_availData.shows||[]).filter(s => s.rental_start && s.rental_end && s.rental_start <= dateStr && s.rental_end >= dateStr);
+  if (!bk.length) {
+    c.innerHTML = `<p style="padding:8px 0;color:var(--text-dim);font-size:12px">${dateStr} — no bookings</p>`;
+    return;
+  }
+  c.innerHTML = `<p style="padding:8px 0 4px;font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--text-dim)">${dateStr}</p>` +
+    bk.map(s => `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px;align-items:baseline">
+      <span style="font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.show_name)}</span>
+      <span style="color:var(--accent);flex-shrink:0">×${s.quantity}</span>
+      <span style="color:var(--text-dim);font-size:10px;flex-shrink:0">${s.rental_start||''} – ${s.rental_end||''}</span>
+    </div>`).join('');
 };
 
 // ── Units List ────────────────────────────────────────────────────────────────
@@ -827,7 +1155,13 @@ window.selectItem = async function(itemId) {
 
 window.returnToType = async function() {
   _selectedItemId = null;
-  if (_selectedTypeId) await selectType(_selectedTypeId);
+  if (_selectedTypeId) {
+    if (_viewingComponentOf) {
+      await selectType(_selectedTypeId, { inSystemContext: true });
+    } else {
+      await selectType(_selectedTypeId);
+    }
+  }
 };
 
 function updateDepreciationCalc() {
