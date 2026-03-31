@@ -5366,8 +5366,8 @@ def asset_type_add():
         INSERT INTO asset_types
           (category_id, parent_type_id, name, manufacturer, model,
            storage_location, rental_cost, weekly_rate, reserve_count, is_consumable, track_quantity,
-           supplier_name, supplier_contact, sort_order)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           supplier_name, supplier_contact, is_system, is_package, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         category_id,
         data.get('parent_type_id') or None,
@@ -5382,6 +5382,8 @@ def asset_type_add():
         1 if data.get('track_quantity', True) else 0,
         (data.get('supplier_name') or '').strip(),
         (data.get('supplier_contact') or '').strip(),
+        1 if data.get('is_system') else 0,
+        1 if data.get('is_package') else 0,
         max_order + 1,
     ))
     db.commit()
@@ -5408,7 +5410,7 @@ def asset_type_edit(type_id):
           name=?, manufacturer=?, model=?, storage_location=?,
           rental_cost=?, weekly_rate=?, reserve_count=?, is_consumable=?, track_quantity=?,
           supplier_name=?, supplier_contact=?,
-          category_id=?, parent_type_id=?
+          category_id=?, parent_type_id=?, is_system=?, is_package=?
         WHERE id=?
     """, (
         name,
@@ -5424,6 +5426,8 @@ def asset_type_edit(type_id):
         (data.get('supplier_contact') or '').strip(),
         data.get('category_id'),
         data.get('parent_type_id') or None,
+        1 if data.get('is_system') else 0,
+        1 if data.get('is_package') else 0,
         type_id,
     ))
     db.commit()
@@ -5494,6 +5498,24 @@ def asset_type_photo(type_id):
     resp.headers['Content-Type'] = row['photo_mime'] or 'image/jpeg'
     resp.headers['Cache-Control'] = 'max-age=86400'
     return resp
+
+
+# ─── Asset Manager — Container Items (for assignment dropdown) ────────────────
+
+@app.route('/api/asset-items/containers')
+@login_required
+def asset_items_containers():
+    """Return all items marked as containers, for the Assign to Container dropdown."""
+    db = get_db()
+    rows = db.execute("""
+        SELECT ai.id, ai.barcode, ai.status, at.name as type_name
+        FROM asset_items ai
+        JOIN asset_types at ON at.id = ai.asset_type_id
+        WHERE ai.is_container = 1 AND ai.status != 'retired'
+        ORDER BY at.name, ai.barcode
+    """).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
 
 
 # ─── Asset Manager — System/Package Members ──────────────────────────────────

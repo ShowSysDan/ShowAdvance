@@ -162,6 +162,13 @@
           <label class="checkbox-label"><input type="checkbox" id="type-consumable"> Consumable item</label>
           <label class="checkbox-label"><input type="checkbox" id="type-track-qty" checked> Track by quantity</label>
         </div>
+        <div class="field-group" style="grid-column:span 2;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+          <div style="font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--text-dim);margin-bottom:8px">TYPE CLASSIFICATION</div>
+          <div style="display:flex;gap:20px;align-items:center">
+            <label class="checkbox-label"><input type="checkbox" id="type-is-system" onchange="onTypeClassChange()"> System <span style="font-size:10px;color:var(--text-dim)">(contains component types)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="type-is-package" onchange="onTypeClassChange()"> Package <span style="font-size:10px;color:var(--text-dim)">(bundle / quote line)</span></label>
+          </div>
+        </div>
         <div class="field-group" style="grid-column:span 2">
           <label class="field-label">PHOTO</label>
           <input type="file" id="type-photo" class="field-input" accept="image/*">
@@ -365,10 +372,11 @@ let _currentItems = [];
 let _selectedItemId = null;
 let _showRetired = false;
 let _viewingComponentOf = null; // system type ID when navigated into a component from a system view
+let _allContainerItems = []; // all items with is_container=1, for Assign to Container dropdown
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 (async function init() {
-  await loadTypes();
+  await Promise.all([loadTypes(), loadContainerItems()]);
   renderFinderCats();
 })();
 
@@ -376,6 +384,13 @@ async function loadTypes() {
   const param = _showRetired ? '?show_retired=1' : '';
   const r = await fetch(`/settings/asset-types${param}`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
   _allTypes = await r.json();
+}
+
+async function loadContainerItems() {
+  try {
+    const r = await fetch('/api/asset-items/containers', {headers:{'X-Requested-With':'XMLHttpRequest'}});
+    _allContainerItems = await r.json();
+  } catch(e) { _allContainerItems = []; }
 }
 
 function onTypeSearchInput() {
@@ -1038,9 +1053,9 @@ window.selectItem = async function(itemId) {
   const condOpts = ['excellent','good','fair','poor','retired'].map(v =>
     `<option value="${v}"${cond===v?' selected':''}>${v.charAt(0).toUpperCase()+v.slice(1)}</option>`).join('');
 
-  const containers = _currentItems.filter(i => i.is_container && i.id !== item.id);
+  const containers = _allContainerItems.filter(c => c.id !== item.id);
   const contOpts = '<option value="">— None —</option>' +
-    containers.map(c => `<option value="${c.id}"${c.id===item.container_item_id?' selected':''}>${esc(c.barcode||'#'+c.id)}</option>`).join('');
+    containers.map(c => `<option value="${c.id}"${c.id===item.container_item_id?' selected':''}>${esc(c.type_name)} · ${esc(c.barcode||'#'+c.id)}</option>`).join('');
 
   const backName = t.name.length > 22 ? t.name.slice(0,22)+'…' : t.name;
   const statusCls = item.status==='maintenance'?'maintenance':item.status==='retired'?'retired':'available';
@@ -1225,7 +1240,7 @@ window.saveItemDetail = async function() {
     body: JSON.stringify(payload)
   });
   if (!r.ok) { alert('Save failed'); return; }
-  await loadItems();
+  await Promise.all([loadItems(), loadContainerItems()]);
   await selectItem(parseInt(id));
 };
 
@@ -1407,6 +1422,8 @@ window.openTypeModal = async function(id, defaultCatId) {
       document.getElementById('type-track-qty').checked = t.track_quantity !== 0;
       document.getElementById('type-supplier-name').value = t.supplier_name || '';
       document.getElementById('type-supplier-contact').value = t.supplier_contact || '';
+      document.getElementById('type-is-system').checked = !!t.is_system;
+      document.getElementById('type-is-package').checked = !!t.is_package;
       document.getElementById('type-photo-preview').innerHTML = t.photo
         ? `<img src="/asset-types/${t.id}/photo" style="height:60px;border-radius:4px;object-fit:cover">` : '';
     }
@@ -1424,6 +1441,8 @@ window.openTypeModal = async function(id, defaultCatId) {
     document.getElementById('type-track-qty').checked = true;
     document.getElementById('type-supplier-name').value = '';
     document.getElementById('type-supplier-contact').value = '';
+    document.getElementById('type-is-system').checked = false;
+    document.getElementById('type-is-package').checked = false;
     document.getElementById('type-photo-preview').innerHTML = '';
     document.getElementById('type-photo').value = '';
   }
@@ -1431,6 +1450,16 @@ window.openTypeModal = async function(id, defaultCatId) {
   setTimeout(() => document.getElementById('type-name').focus(), 80);
 };
 window.closeTypeModal = function() { document.getElementById('type-modal').style.display = 'none'; };
+
+window.onTypeClassChange = function() {
+  // System and Package are mutually exclusive
+  const sys = document.getElementById('type-is-system');
+  const pkg = document.getElementById('type-is-package');
+  if (sys.checked && pkg.checked) {
+    if (event.target === sys) pkg.checked = false;
+    else sys.checked = false;
+  }
+};
 
 window.saveType = async function() {
   const id = document.getElementById('type-edit-id').value;
@@ -1448,6 +1477,8 @@ window.saveType = async function() {
     track_quantity: document.getElementById('type-track-qty').checked,
     supplier_name: document.getElementById('type-supplier-name').value.trim(),
     supplier_contact: document.getElementById('type-supplier-contact').value.trim(),
+    is_system: document.getElementById('type-is-system').checked,
+    is_package: document.getElementById('type-is-package').checked,
   };
   if (!payload.name || !payload.category_id) { alert('Name and category required'); return; }
   const url = id ? `/settings/asset-types/${id}` : '/settings/asset-types';
