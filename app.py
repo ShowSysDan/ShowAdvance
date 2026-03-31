@@ -5500,6 +5500,24 @@ def asset_type_photo(type_id):
     return resp
 
 
+# ─── Asset Manager — Used-in (reverse membership lookup) ─────────────────────
+
+@app.route('/settings/asset-types/<int:type_id>/used-in')
+@login_required
+def asset_type_used_in(type_id):
+    """Return system/package types that include this type as a component."""
+    db = get_db()
+    rows = db.execute("""
+        SELECT at.id, at.name, at.is_system, at.is_package
+        FROM asset_type_system_members m
+        JOIN asset_types at ON at.id = m.system_type_id
+        WHERE m.component_type_id = ?
+        ORDER BY at.name
+    """, (type_id,)).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+
 # ─── Asset Manager — System/Package Members ──────────────────────────────────
 
 @app.route('/settings/asset-types/<int:type_id>/members', methods=['GET'])
