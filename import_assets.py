@@ -225,7 +225,7 @@ def main():
         is_retired = 1 if (inactive is True or _str(inactive).upper() == 'TRUE') else 0
         is_consumable = 1 if inv_type == 'Consumable' else 0
         classification = _str(r.get('ClassificationDescription')).upper()
-        is_kit = 1 if classification == 'CONTAINER' else 0
+        is_system = 1 if classification == 'CONTAINER' else 0
 
         type_key = (inv_type, category)
         type_sort[type_key] = type_sort.get(type_key, 0) + 1
@@ -237,10 +237,10 @@ def main():
             conn.execute("""
                 INSERT INTO asset_types
                   (category_id, parent_type_id, name, manufacturer, model,
-                   rental_cost, weekly_rate, is_retired, is_consumable, is_kit, sort_order)
+                   rental_cost, weekly_rate, is_retired, is_consumable, is_system, sort_order)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)
             """, (cat_id, parent_type_id, name, manufacturer, model,
-                  rental_cost, weekly_rate, is_retired, is_consumable, is_kit, so))
+                  rental_cost, weekly_rate, is_retired, is_consumable, is_system, so))
             conn.commit()
             row = conn.execute('SELECT id FROM asset_types ORDER BY id DESC LIMIT 1').fetchone()
             type_id = row['id']

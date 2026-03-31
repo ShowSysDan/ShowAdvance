@@ -1028,11 +1028,11 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         const rateLabel = t.weekly_rate > 0
           ? `$${Number(t.rental_cost||0).toFixed(2)}/day · $${Number(t.weekly_rate||0).toFixed(2)}/wk`
           : `$${Number(t.rental_cost||0).toFixed(2)}/day`;
-        const kitBadge = t.is_kit ? '<span style="font-size:9px;font-weight:700;background:rgba(245,127,32,0.2);color:#F57F20;border-radius:3px;padding:1px 5px;margin-left:4px;letter-spacing:.04em">KIT</span>' : '';
-        html += `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal" onclick="selectAssetType(${t.id}, '${esc(label).replace(/'/g,"\\'")}', ${t.rental_cost || 0}, ${t.weekly_rate || 0}, ${t.is_kit ? 1 : 0})">
-          <div style="font-weight:500">${esc(label)}${kitBadge}</div>
+        const systemBadge = t.is_system ? '<span style="font-size:9px;font-weight:700;background:rgba(245,127,32,0.2);color:#F57F20;border-radius:3px;padding:1px 5px;margin-left:4px;letter-spacing:.04em">SYSTEM</span>' : '';
+        html += `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal" onclick="selectAssetType(${t.id}, '${esc(label).replace(/'/g,"\\'")}', ${t.rental_cost || 0}, ${t.weekly_rate || 0}, ${t.is_system ? 1 : 0})">
+          <div style="font-weight:500">${esc(label)}${systemBadge}</div>
           ${sub ? `<div style="font-size:10px;color:var(--text-dim)">${esc(sub)}</div>` : ''}
-          <div style="font-size:10px;color:var(--text-dim)">${rateLabel}${t.is_consumable ? ' · consumable' : ''}${t.is_kit ? ' · kit' : ''}</div>
+          <div style="font-size:10px;color:var(--text-dim)">${rateLabel}${t.is_consumable ? ' · consumable' : ''}${t.is_system ? ' · system' : ''}</div>
         </button>`;
       });
       html += '</div></div>';
@@ -1042,7 +1042,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   }
 
   // ── Asset Add Detail ──────────────────────────────────────────────────────
-  window.selectAssetType = async function(typeId, label, price, weeklyRate, isKit) {
+  window.selectAssetType = async function(typeId, label, price, weeklyRate, isSystem) {
     _currentAssetTypeId = typeId;
     document.getElementById('asset-add-type-id').value = typeId;
     document.getElementById('asset-add-title').textContent = label;
@@ -1082,8 +1082,8 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
     // Load availability
     const availDiv = document.getElementById('asset-avail-info');
-    if (isKit) {
-      availDiv.innerHTML = '<span style="color:var(--accent)">Kit — components tracked separately, no unit limit.</span>';
+    if (isSystem) {
+      availDiv.innerHTML = '<span style="color:var(--accent)">System — assembled from individual components, no unit limit.</span>';
     } else {
       availDiv.textContent = 'Checking availability…';
       try {
@@ -1104,7 +1104,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     } catch(e) {
       availDiv.textContent = '';
     }
-    } // end if (!isKit)
+    } // end if (!isSystem)
   };
 
   window.closeAssetAddModal = function() {

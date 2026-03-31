@@ -5750,8 +5750,8 @@ def _get_asset_availability(db, asset_type_id, start_date=None, end_date=None):
     if not type_row:
         return None
 
-    # Kit types have no tracked physical units — treat as always available
-    if type_row['is_kit']:
+    # System/package types have no individually tracked units — treat as always available
+    if type_row['is_system'] or type_row['is_package']:
         return {'unlimited': True, 'kit': True}
 
     total_items = db.execute(
