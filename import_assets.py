@@ -301,14 +301,17 @@ def main():
 
         source_item_id = _str(r.get('ItemId'))
 
+        container_inv_id = _str(r.get('ContainerInventoryId'))
+        system_type_id = rental_inv_id_map.get(container_inv_id) if container_inv_id else None
+
         if not dry_run:
             conn.execute("""
                 INSERT INTO asset_items
                   (asset_type_id, barcode, status, condition, year_purchased,
-                   depreciation_start_date, replacement_cost, is_container, sort_order)
-                VALUES (?,?,?,?,?,?,?,?,?)
+                   depreciation_start_date, replacement_cost, is_container, system_type_id, sort_order)
+                VALUES (?,?,?,?,?,?,?,?,?,?)
             """, (asset_type_id, barcode, status, condition, year_purchased,
-                  dep_start, replacement_cost, is_container, so))
+                  dep_start, replacement_cost, is_container, system_type_id, so))
             conn.commit()
             row = conn.execute('SELECT id FROM asset_items ORDER BY id DESC LIMIT 1').fetchone()
             new_id = row['id']

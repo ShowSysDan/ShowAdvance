@@ -371,6 +371,7 @@ CREATE TABLE IF NOT EXISTS asset_items (
     replacement_cost        REAL DEFAULT NULL,
     is_container            INTEGER DEFAULT 0,
     container_item_id       INTEGER REFERENCES asset_items(id) ON DELETE SET NULL,
+    system_type_id          INTEGER REFERENCES asset_types(id) ON DELETE SET NULL,
     sort_order              INTEGER DEFAULT 0,
     created_at              TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -1311,6 +1312,9 @@ def migrate_db():
         )""",
         "CREATE INDEX IF NOT EXISTS idx_sys_members_sys  ON asset_type_system_members(system_type_id)",
         "CREATE INDEX IF NOT EXISTS idx_sys_members_comp ON asset_type_system_members(component_type_id)",
+        # Per-item system membership — links each physical unit to its system type
+        "ALTER TABLE asset_items ADD COLUMN system_type_id INTEGER REFERENCES asset_types(id) ON DELETE SET NULL",
+        "CREATE INDEX IF NOT EXISTS idx_asset_items_sys ON asset_items(system_type_id)",
     ]:
         try:
             conn.execute(alter_sql)

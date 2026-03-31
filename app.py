@@ -5505,7 +5505,7 @@ def asset_type_members_list(type_id):
     rows = db.execute("""
         SELECT at.id, at.name, at.manufacturer, at.model, at.is_system, at.is_package,
                ac.name as category_name,
-               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id AND ai.status != 'retired') as unit_count
+               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id AND ai.system_type_id = m.system_type_id AND ai.status != 'retired') as unit_count
         FROM asset_type_system_members m
         JOIN asset_types at ON at.id = m.component_type_id
         JOIN asset_categories ac ON ac.id = at.category_id
