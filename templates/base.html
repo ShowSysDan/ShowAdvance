@@ -123,12 +123,6 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
         Settings
       </a>
-      {% if user.role == 'admin' %}
-      <a href="{{ url_for('audit_log_view') }}" class="nav-item {% if request.endpoint == 'audit_log_view' %}active{% endif %}">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><path d="M9 12h6M9 16h4"/></svg>
-        Audit Log
-      </a>
-      {% endif %}
     </nav>
 
     <div class="sidebar-footer">
@@ -210,6 +204,22 @@
   {% block auth_content %}{% endblock %}
 {% endif %}
 
+{# Contact Detail Popup — triggered from global search #}
+<div id="gs-contact-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:400;align-items:center;justify-content:center" onclick="if(event.target===this)this.style.display='none'">
+  <div class="modal-card" style="max-width:380px;width:90vw">
+    <div class="modal-header">
+      <span>Contact</span>
+      <button onclick="document.getElementById('gs-contact-modal').style.display='none'" class="modal-close">×</button>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+        <div style="width:48px;height:48px;border-radius:50%;background:rgba(245,127,32,.15);border:1px solid rgba(245,127,32,.3);display:flex;align-items:center;justify-content:center;font-size:22px;flex-shrink:0">👤</div>
+        <div id="gs-contact-name" style="font-size:16px;font-weight:600"></div>
+      </div>
+      <div id="gs-contact-details"></div>
+    </div>
+  </div>
+</div>
 <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 {% block scripts %}{% endblock %}
 <div id="save-toast" class="save-toast"></div>
@@ -390,8 +400,29 @@ function _gsRender(results, q) {
 function _gsNavigate(e, idx) {
   e.preventDefault();
   const item = _gsItems[idx];
-  if (item && item.url) { window.location.href = item.url; }
+  if (item && item.url) {
+    window.location.href = item.url;
+  } else if (item && item.type === 'contact') {
+    _gsShowContact(item);
+  }
   _gsHidePanel();
+}
+
+function _gsShowContact(contact) {
+  const modal = document.getElementById('gs-contact-modal');
+  document.getElementById('gs-contact-name').textContent = contact.label || '';
+  // Parse sub-label: "Department  ·  Title  ·  email@..."
+  const parts = (contact.sub || '').split(/\s+·\s+/).map(s => s.trim()).filter(Boolean);
+  let html = '';
+  parts.forEach(p => {
+    const isEmail = p.includes('@');
+    html += `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid var(--border)">
+      <span style="font-size:11px;color:var(--text-dim);min-width:70px">${isEmail ? 'Email' : (html === '' ? 'Dept / Title' : '')}</span>
+      <span style="font-size:13px">${isEmail ? `<a href="mailto:${_gsEsc(p)}" style="color:var(--accent)">${_gsEsc(p)}</a>` : _gsEsc(p)}</span>
+    </div>`;
+  });
+  document.getElementById('gs-contact-details').innerHTML = html || '<span style="color:var(--text-dim);font-size:12px">No additional details</span>';
+  modal.style.display = 'flex';
 }
 
 function _gsKey(e) {
