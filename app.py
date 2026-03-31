@@ -5502,16 +5502,34 @@ def asset_type_photo(type_id):
 @admin_required
 def asset_type_members_list(type_id):
     db = get_db()
-    rows = db.execute("""
-        SELECT at.id, at.name, at.manufacturer, at.model, at.is_system, at.is_package,
-               ac.name as category_name,
-               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id AND ai.system_type_id = m.system_type_id AND ai.status != 'retired') as unit_count
-        FROM asset_type_system_members m
-        JOIN asset_types at ON at.id = m.component_type_id
-        JOIN asset_categories ac ON ac.id = at.category_id
-        WHERE m.system_type_id = ?
-        ORDER BY m.sort_order, at.name
-    """, (type_id,)).fetchall()
+    try:
+        # Per-system count (requires system_type_id column — added in migration)
+        rows = db.execute("""
+            SELECT at.id, at.name, at.manufacturer, at.model, at.is_system, at.is_package,
+                   ac.name as category_name,
+                   (SELECT COUNT(*) FROM asset_items ai
+                    WHERE ai.asset_type_id = at.id
+                      AND ai.system_type_id = m.system_type_id
+                      AND ai.status != 'retired') as unit_count
+            FROM asset_type_system_members m
+            JOIN asset_types at ON at.id = m.component_type_id
+            JOIN asset_categories ac ON ac.id = at.category_id
+            WHERE m.system_type_id = ?
+            ORDER BY m.sort_order, at.name
+        """, (type_id,)).fetchall()
+    except Exception:
+        # Fallback: column not yet migrated — show total unit count
+        rows = db.execute("""
+            SELECT at.id, at.name, at.manufacturer, at.model, at.is_system, at.is_package,
+                   ac.name as category_name,
+                   (SELECT COUNT(*) FROM asset_items ai
+                    WHERE ai.asset_type_id = at.id AND ai.status != 'retired') as unit_count
+            FROM asset_type_system_members m
+            JOIN asset_types at ON at.id = m.component_type_id
+            JOIN asset_categories ac ON ac.id = at.category_id
+            WHERE m.system_type_id = ?
+            ORDER BY m.sort_order, at.name
+        """, (type_id,)).fetchall()
     db.close()
     return jsonify([dict(r) for r in rows])
 
