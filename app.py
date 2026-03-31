@@ -5496,6 +5496,64 @@ def asset_type_photo(type_id):
     return resp
 
 
+# ─── Asset Manager — System/Package Members ──────────────────────────────────
+
+@app.route('/settings/asset-types/<int:type_id>/members', methods=['GET'])
+@admin_required
+def asset_type_members_list(type_id):
+    db = get_db()
+    rows = db.execute("""
+        SELECT at.id, at.name, at.manufacturer, at.model, at.is_system, at.is_package,
+               ac.name as category_name,
+               (SELECT COUNT(*) FROM asset_items ai WHERE ai.asset_type_id = at.id AND ai.status != 'retired') as unit_count
+        FROM asset_type_system_members m
+        JOIN asset_types at ON at.id = m.component_type_id
+        JOIN asset_categories ac ON ac.id = at.category_id
+        WHERE m.system_type_id = ?
+        ORDER BY m.sort_order, at.name
+    """, (type_id,)).fetchall()
+    db.close()
+    return jsonify([dict(r) for r in rows])
+
+
+@app.route('/settings/asset-types/<int:type_id>/members', methods=['POST'])
+@admin_required
+def asset_type_member_add(type_id):
+    data = request.get_json() or {}
+    component_id = data.get('component_type_id')
+    if not component_id:
+        return jsonify({'error': 'component_type_id required'}), 400
+    db = get_db()
+    try:
+        db.execute("""
+            INSERT OR IGNORE INTO asset_type_system_members (system_type_id, component_type_id)
+            VALUES (?, ?)
+        """, (type_id, component_id))
+        db.commit()
+    except Exception as e:
+        db.close()
+        return jsonify({'error': str(e)}), 400
+    log_audit(db, 'ASSET_MEMBER_ADD', 'asset_type', type_id, detail=f'component={component_id}')
+    db.commit()
+    db.close()
+    return jsonify({'success': True}), 201
+
+
+@app.route('/settings/asset-types/<int:type_id>/members/<int:component_id>', methods=['DELETE'])
+@admin_required
+def asset_type_member_remove(type_id, component_id):
+    db = get_db()
+    db.execute("""
+        DELETE FROM asset_type_system_members
+        WHERE system_type_id = ? AND component_type_id = ?
+    """, (type_id, component_id))
+    db.commit()
+    log_audit(db, 'ASSET_MEMBER_REMOVE', 'asset_type', type_id, detail=f'component={component_id}')
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
 # ─── Asset Manager — Items ────────────────────────────────────────────────────
 
 @app.route('/settings/asset-types/<int:type_id>/items', methods=['GET'])

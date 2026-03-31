@@ -421,12 +421,22 @@ CREATE TABLE IF NOT EXISTS show_external_rentals (
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- System/package component membership (many-to-many: a type can belong to multiple systems)
+CREATE TABLE IF NOT EXISTS asset_type_system_members (
+    system_type_id    INTEGER NOT NULL REFERENCES asset_types(id) ON DELETE CASCADE,
+    component_type_id INTEGER NOT NULL REFERENCES asset_types(id) ON DELETE CASCADE,
+    sort_order        INTEGER DEFAULT 0,
+    PRIMARY KEY (system_type_id, component_type_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_show_assets_show   ON show_assets(show_id);
 CREATE INDEX IF NOT EXISTS idx_show_assets_type   ON show_assets(asset_type_id);
 CREATE INDEX IF NOT EXISTS idx_asset_items_type   ON asset_items(asset_type_id);
 CREATE INDEX IF NOT EXISTS idx_asset_maint_item   ON asset_maintenance(asset_item_id);
 CREATE INDEX IF NOT EXISTS idx_asset_logs_item    ON asset_logs(asset_item_id);
 CREATE INDEX IF NOT EXISTS idx_asset_logs_date    ON asset_logs(log_date);
+CREATE INDEX IF NOT EXISTS idx_sys_members_sys    ON asset_type_system_members(system_type_id);
+CREATE INDEX IF NOT EXISTS idx_sys_members_comp   ON asset_type_system_members(component_type_id);
 
 -- ── User Registration & Recovery ─────────────────────────────────────────────
 
@@ -1292,6 +1302,15 @@ def migrate_db():
         "ALTER TABLE asset_items ADD COLUMN replacement_cost REAL DEFAULT NULL",
         "ALTER TABLE asset_items ADD COLUMN is_container INTEGER DEFAULT 0",
         "ALTER TABLE asset_items ADD COLUMN container_item_id INTEGER REFERENCES asset_items(id) ON DELETE SET NULL",
+        # System/package component membership junction table
+        """CREATE TABLE IF NOT EXISTS asset_type_system_members (
+            system_type_id    INTEGER NOT NULL REFERENCES asset_types(id) ON DELETE CASCADE,
+            component_type_id INTEGER NOT NULL REFERENCES asset_types(id) ON DELETE CASCADE,
+            sort_order        INTEGER DEFAULT 0,
+            PRIMARY KEY (system_type_id, component_type_id)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_sys_members_sys  ON asset_type_system_members(system_type_id)",
+        "CREATE INDEX IF NOT EXISTS idx_sys_members_comp ON asset_type_system_members(component_type_id)",
     ]:
         try:
             conn.execute(alter_sql)

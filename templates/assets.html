@@ -664,7 +664,7 @@ window.selectType = async function(typeId, opts) {
         <button class="btn btn-xs btn-primary" onclick="openAddComponentPicker(${t.id})">+ Add</button>
       </div>
     </div>
-    <div id="components-list" style="overflow-y:auto;flex:1">${renderComponentsList(t.id)}</div>` : `
+    <div id="components-list" style="overflow-y:auto;flex:1"><p class="finder-empty">Loading…</p></div>` : `
     <div style="flex-shrink:0">
       <div style="padding:8px 14px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px">
         <span style="font-size:10.5px;font-weight:700;letter-spacing:.06em;color:var(--text-dim);flex:1">UNITS</span>
@@ -722,7 +722,9 @@ window.selectType = async function(typeId, opts) {
     ${unitsSection}
   `;
 
-  if (!isSystem) {
+  if (isSystem) {
+    await loadAndRenderComponents(typeId);
+  } else {
     _currentTypeId = typeId;
     _currentTypeName = t.name;
     await loadItems();
@@ -730,24 +732,37 @@ window.selectType = async function(typeId, opts) {
 };
 
 // ── System Components ─────────────────────────────────────────────────────────
-function renderComponentsList(systemTypeId) {
-  const components = _allTypes.filter(t => t.parent_type_id === systemTypeId && !t.is_retired);
-  const retired = _allTypes.filter(t => t.parent_type_id === systemTypeId && t.is_retired);
-  const all = [...components, ...retired];
-  if (all.length === 0) {
+// Cache of member lists keyed by system type id, populated from the API
+let _systemMembersCache = {};
+
+async function loadAndRenderComponents(systemTypeId) {
+  const el = document.getElementById('components-list');
+  if (!el) return;
+  try {
+    const resp = await fetch(`/settings/asset-types/${systemTypeId}/members`, {
+      headers: {'X-Requested-With':'XMLHttpRequest'}
+    });
+    if (!resp.ok) throw new Error('fetch failed');
+    const members = await resp.json();
+    _systemMembersCache[systemTypeId] = members;
+    el.innerHTML = renderMembersHTML(members, systemTypeId);
+  } catch(e) {
+    el.innerHTML = '<p class="finder-empty">Error loading components.</p>';
+  }
+}
+
+function renderMembersHTML(members, systemTypeId) {
+  if (!members.length) {
     return '<p class="finder-empty">No components assigned yet.<br>Use + Add to assign types as components.</p>';
   }
-  return all.map(c => {
-    const thumb = c.photo
-      ? `<img src="/asset-types/${c.id}/photo" style="width:28px;height:28px;border-radius:4px;object-fit:cover;flex-shrink:0" alt="">`
-      : `<div style="width:28px;height:28px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-dim);flex-shrink:0">◈</div>`;
-    const retStyle = c.is_retired ? 'opacity:.45' : '';
-    return `<div class="finder-type-row" style="${retStyle}" onclick="navigateToComponent(${c.id},${systemTypeId})">
+  return members.map(c => {
+    const thumb = `<div style="width:28px;height:28px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-dim);flex-shrink:0">◈</div>`;
+    return `<div class="finder-type-row" onclick="navigateToComponent(${c.id},${systemTypeId})">
       ${thumb}
       <div style="flex:1;min-width:0">
         <div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(c.name)}</div>
         <div style="font-size:10px;color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
-          ${c.item_count||0} units${c.manufacturer?' · '+esc(c.manufacturer):''}
+          ${c.unit_count||0} units${c.manufacturer?' · '+esc(c.manufacturer):''}
         </div>
       </div>
       <button class="btn btn-xs btn-ghost" style="color:#FC814A;flex-shrink:0;padding:2px 6px"
@@ -770,35 +785,33 @@ window.returnToSystem = async function() {
 };
 
 window.removeComponentFromSystem = async function(componentId, systemId) {
-  if (!confirm('Remove this type from the system? It will return to the main type list in this group.')) return;
-  const comp = _allTypes.find(x => x.id === componentId);
-  const sys  = _allTypes.find(x => x.id === systemId);
-  if (!comp || !sys) return;
-  // Move component back to system's own group (system's parent_type_id)
-  const r = await fetch(`/settings/asset-types/${componentId}`, {
-    method: 'PUT',
-    headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
-    body: JSON.stringify({
-      name: comp.name, category_id: comp.category_id,
-      parent_type_id: sys.parent_type_id,
-      manufacturer: comp.manufacturer||'', model: comp.model||'',
-      storage_location: comp.storage_location||'',
-      rental_cost: comp.rental_cost||0, weekly_rate: comp.weekly_rate||0,
-      reserve_count: comp.reserve_count||0,
-      is_consumable: !!comp.is_consumable, track_quantity: comp.track_quantity!==0,
-      supplier_name: comp.supplier_name||'', supplier_contact: comp.supplier_contact||'',
-    })
+  if (!confirm('Remove this component from the system?')) return;
+  const r = await fetch(`/settings/asset-types/${systemId}/members/${componentId}`, {
+    method: 'DELETE',
+    headers: {'X-Requested-With':'XMLHttpRequest'}
   });
   if (!r.ok) { alert('Error removing component'); return; }
-  await loadTypes();
-  await selectType(systemId);
+  delete _systemMembersCache[systemId];
+  await loadAndRenderComponents(systemId);
 };
 
 let _compPickerSystemId = null;
-window.openAddComponentPicker = function(sysId) {
+let _compPickerExistingIds = new Set();
+
+window.openAddComponentPicker = async function(sysId) {
   _compPickerSystemId = sysId;
   document.getElementById('comp-picker-system-id').value = sysId;
   document.getElementById('comp-picker-search').value = '';
+  // Fetch current members so we can exclude them
+  try {
+    const resp = await fetch(`/settings/asset-types/${sysId}/members`, {
+      headers: {'X-Requested-With':'XMLHttpRequest'}
+    });
+    const members = await resp.json();
+    _compPickerExistingIds = new Set(members.map(m => m.id));
+  } catch(e) {
+    _compPickerExistingIds = new Set();
+  }
   renderCompPickerList();
   document.getElementById('comp-picker-modal').style.display = 'flex';
 };
@@ -808,12 +821,10 @@ window.renderCompPickerList = function() {
   const c = document.getElementById('comp-picker-list');
   const sysId = _compPickerSystemId;
   const q = (document.getElementById('comp-picker-search')?.value||'').toLowerCase();
-  // Eligible: non-retired, non-system, not already a component of this or another system type
+  // Eligible: non-retired, non-system, not already a member of this system
   let eligible = _allTypes.filter(t => {
     if (t.is_retired || t.is_system) return false;
-    if (t.parent_type_id === sysId) return false; // already in this system
-    const parent = _allTypes.find(p => p.id === t.parent_type_id);
-    if (parent?.is_system) return false; // already in another system
+    if (_compPickerExistingIds.has(t.id)) return false;
     return true;
   });
   if (q) eligible = eligible.filter(t =>
@@ -826,9 +837,7 @@ window.renderCompPickerList = function() {
     return;
   }
   c.innerHTML = eligible.map(t => {
-    const thumb = t.photo
-      ? `<img src="/asset-types/${t.id}/photo" style="width:28px;height:28px;border-radius:4px;object-fit:cover;flex-shrink:0" alt="">`
-      : `<div style="width:28px;height:28px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-dim);flex-shrink:0">◈</div>`;
+    const thumb = `<div style="width:28px;height:28px;border-radius:4px;background:var(--border);display:flex;align-items:center;justify-content:center;font-size:13px;color:var(--text-dim);flex-shrink:0">◈</div>`;
     return `<div style="display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--border)">
       ${thumb}
       <div style="flex:1;min-width:0">
@@ -841,26 +850,16 @@ window.renderCompPickerList = function() {
 };
 
 window.assignTypeAsComponent = async function(typeId, sysId) {
-  const t = _allTypes.find(x => x.id === typeId);
-  if (!t) return;
-  const r = await fetch(`/settings/asset-types/${typeId}`, {
-    method: 'PUT',
+  const r = await fetch(`/settings/asset-types/${sysId}/members`, {
+    method: 'POST',
     headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
-    body: JSON.stringify({
-      name: t.name, category_id: t.category_id,
-      parent_type_id: sysId,
-      manufacturer: t.manufacturer||'', model: t.model||'',
-      storage_location: t.storage_location||'',
-      rental_cost: t.rental_cost||0, weekly_rate: t.weekly_rate||0,
-      reserve_count: t.reserve_count||0,
-      is_consumable: !!t.is_consumable, track_quantity: t.track_quantity!==0,
-      supplier_name: t.supplier_name||'', supplier_contact: t.supplier_contact||'',
-    })
+    body: JSON.stringify({ component_type_id: typeId })
   });
   if (!r.ok) { alert('Error assigning component'); return; }
+  _compPickerExistingIds.add(typeId);
+  delete _systemMembersCache[sysId];
   closeCompPicker();
-  await loadTypes();
-  await selectType(sysId);
+  await loadAndRenderComponents(sysId);
 };
 
 // ── Availability Calendar ─────────────────────────────────────────────────────

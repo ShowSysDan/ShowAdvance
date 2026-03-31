@@ -393,6 +393,32 @@ def main():
 
     print(f"  Total qty-tracked units synthesised: {qty_added}")
 
+    # ── 4c. SYSTEM MEMBERS — populate asset_type_system_members junction table ──
+    # Items.xlsx ContainerInventoryId directly links each physical item to the
+    # system type (e.g. "Bose L1 1") it belongs to.  We derive type-level
+    # membership by collecting unique (system_type_id, component_type_id) pairs.
+    print("\nBuilding system/package member relationships...")
+    member_pairs = set()
+    for r in item_rows:
+        container_inv_id = _str(r.get('ContainerInventoryId'))
+        if not container_inv_id:
+            continue
+        component_inv_id = _str(r.get('RentalInventoryId'))
+        system_type_id = rental_inv_id_map.get(container_inv_id)
+        component_type_id = rental_inv_id_map.get(component_inv_id)
+        if system_type_id and component_type_id and system_type_id != component_type_id:
+            member_pairs.add((system_type_id, component_type_id))
+
+    print(f"  {len(member_pairs)} unique system-member type relationships found")
+    if not dry_run and member_pairs:
+        for sys_id, comp_id in sorted(member_pairs, key=lambda x: (str(x[0]), str(x[1]))):
+            conn.execute("""
+                INSERT OR IGNORE INTO asset_type_system_members (system_type_id, component_type_id)
+                VALUES (?,?)
+            """, (sys_id, comp_id))
+        conn.commit()
+        print(f"  Inserted into asset_type_system_members")
+
     # ── 5. ITEMS PASS 2 — set container relationships ─────────────────────────
     print("\nSetting container relationships (pass 2)...")
     container_links = 0
@@ -426,6 +452,7 @@ def main():
     print(f"  Items imported:         {len(item_rows) - skipped}")
     print(f"  Qty-tracked units:      {qty_added}")
     print(f"  Items skipped:          {skipped}")
+    print(f"  System member pairs:    {len(member_pairs)}")
     print(f"  Container links:        {container_links}")
     if warnings:
         print(f"\nWarnings ({len(warnings)}):")
