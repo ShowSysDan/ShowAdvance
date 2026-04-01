@@ -1416,10 +1416,13 @@ def show_page(show_id):
     advance_data = {r['field_key']: r['field_value'] for r in adv_rows}
 
     # Production schedule
-    sched_rows = db.execute("""
+    _all_sched_rows = db.execute("""
         SELECT * FROM schedule_rows WHERE show_id = ?
         ORDER BY sort_order, id
     """, (show_id,)).fetchall()
+    sched_rows       = [r for r in _all_sched_rows if not r['sched_day_type']]
+    load_in_rows_pg  = [dict(r) for r in _all_sched_rows if r['sched_day_type'] == 'load_in']
+    load_out_rows_pg = [dict(r) for r in _all_sched_rows if r['sched_day_type'] == 'load_out']
     meta_rows = db.execute(
         'SELECT field_key, field_value FROM schedule_meta WHERE show_id = ?', (show_id,)
     ).fetchall()
@@ -1496,6 +1499,8 @@ def show_page(show_id):
                            advance_data=advance_data,
                            performances=[dict(p) for p in performances],
                            schedule_rows=[dict(r) for r in sched_rows],
+                           load_in_rows=load_in_rows_pg,
+                           load_out_rows=load_out_rows_pg,
                            schedule_meta=schedule_meta,
                            sched_meta_fields=get_schedule_meta_fields(),
                            notes_data=notes_data,
@@ -1670,11 +1675,12 @@ def save_schedule(show_id):
     if 'rows' in data:
         db.execute('DELETE FROM schedule_rows WHERE show_id = ?', (show_id,))
         for i, row in enumerate(data['rows']):
-            perf_id = row.get('perf_id')  # None for single-day / first day
+            perf_id        = row.get('perf_id')         # None for single-day / first day
+            sched_day_type = row.get('sched_day_type')  # 'load_in', 'load_out', or None
             db.execute("""
-                INSERT INTO schedule_rows (show_id, perf_id, sort_order, start_time, end_time, description, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (show_id, perf_id, i,
+                INSERT INTO schedule_rows (show_id, perf_id, sched_day_type, sort_order, start_time, end_time, description, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (show_id, perf_id, sched_day_type, i,
                   row.get('start_time', ''), row.get('end_time', ''),
                   row.get('description', ''), row.get('notes', '')))
 
@@ -2488,9 +2494,14 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
         except Exception:
             pass
 
-    # Group schedule rows by perf_id; NULL rows go to the first performance
+    # Separate load-in / load-out rows from regular schedule rows
+    load_in_rows  = [dict(r) for r in all_sched_rows if r['sched_day_type'] == 'load_in']
+    load_out_rows = [dict(r) for r in all_sched_rows if r['sched_day_type'] == 'load_out']
+    normal_rows   = [r for r in all_sched_rows if not r['sched_day_type']]
+
+    # Group regular rows by perf_id; NULL rows go to the first performance
     rows_by_perf = {}
-    for row in all_sched_rows:
+    for row in normal_rows:
         pid = row['perf_id']
         rows_by_perf.setdefault(pid, []).append(dict(row))
 
@@ -2524,6 +2535,8 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
     html = render_template('pdf/schedule_pdf.html',
                            show=show,
                            schedule_days=schedule_days,
+                           load_in_rows=load_in_rows,
+                           load_out_rows=load_out_rows,
                            schedule_meta=schedule_meta,
                            sched_meta_fields=get_schedule_meta_fields(),
                            advance_data=advance_data,
@@ -5365,9 +5378,10 @@ def asset_type_add():
     db.execute("""
         INSERT INTO asset_types
           (category_id, parent_type_id, name, manufacturer, model,
-           storage_location, rental_cost, weekly_rate, reserve_count, is_consumable, track_quantity,
+           storage_location, rental_cost, weekly_rate, rate_mode, rate_day2, rate_subsequent,
+           reserve_count, is_consumable, track_quantity,
            supplier_name, supplier_contact, is_system, is_package, sort_order)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         category_id,
         data.get('parent_type_id') or None,
@@ -5377,6 +5391,9 @@ def asset_type_add():
         (data.get('storage_location') or '').strip(),
         float(data.get('rental_cost') or 0),
         float(data.get('weekly_rate') or 0),
+        data.get('rate_mode') or 'auto',
+        float(data.get('rate_day2') or 0),
+        float(data.get('rate_subsequent') or 0),
         int(data.get('reserve_count') or 0),
         1 if data.get('is_consumable') else 0,
         1 if data.get('track_quantity', True) else 0,
@@ -5408,7 +5425,8 @@ def asset_type_edit(type_id):
     db.execute("""
         UPDATE asset_types SET
           name=?, manufacturer=?, model=?, storage_location=?,
-          rental_cost=?, weekly_rate=?, reserve_count=?, is_consumable=?, track_quantity=?,
+          rental_cost=?, weekly_rate=?, rate_mode=?, rate_day2=?, rate_subsequent=?,
+          reserve_count=?, is_consumable=?, track_quantity=?,
           supplier_name=?, supplier_contact=?,
           category_id=?, parent_type_id=?, is_system=?, is_package=?
         WHERE id=?
@@ -5419,6 +5437,9 @@ def asset_type_edit(type_id):
         (data.get('storage_location') or '').strip(),
         float(data.get('rental_cost') or 0),
         float(data.get('weekly_rate') or 0),
+        data.get('rate_mode') or 'auto',
+        float(data.get('rate_day2') or 0),
+        float(data.get('rate_subsequent') or 0),
         int(data.get('reserve_count') or 0),
         1 if data.get('is_consumable') else 0,
         1 if data.get('track_quantity', True) else 0,
@@ -5833,6 +5854,20 @@ def asset_item_maintenance_resolve(item_id):
     return jsonify({'success': True})
 
 
+# ─── Asset Manager — Rate helpers ─────────────────────────────────────────────
+
+def _tiered_rate(day1, day2, subseq, days):
+    """Calculate tiered daily rental cost.
+    day2 / subseq of 0 mean 'same as day1' (not free).
+    """
+    d2 = day2 if day2 > 0 else day1
+    ds = subseq if subseq > 0 else day1
+    if days <= 0:  return 0.0
+    if days == 1:  return day1
+    if days == 2:  return day1 + d2
+    return day1 + d2 + ds * (days - 2)
+
+
 # ─── Asset Manager — Availability ─────────────────────────────────────────────
 
 def _get_asset_availability(db, asset_type_id, start_date=None, end_date=None):
@@ -6035,23 +6070,34 @@ def show_asset_add(show_id):
     rental_start = data.get('rental_start') or default_start
     rental_end   = data.get('rental_end')   or default_end
 
-    # Smart rate: weekly if weekly_rate set and rental >= 7 days, else daily × days
-    type_row = db.execute('SELECT rental_cost, weekly_rate FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
+    # Smart rate: respects rate_mode and optional tiered daily pricing
+    type_row = db.execute(
+        'SELECT rental_cost, weekly_rate, rate_mode, rate_day2, rate_subsequent FROM asset_types WHERE id=?',
+        (asset_type_id,)
+    ).fetchone()
     if data.get('locked_price') is not None:
         locked_price = float(data['locked_price'])
     elif type_row:
-        daily_rate  = float(type_row['rental_cost'] or 0)
-        weekly_rate = float(type_row['weekly_rate'] or 0)
+        daily   = float(type_row['rental_cost']    or 0)
+        weekly  = float(type_row['weekly_rate']    or 0)
+        day2    = float(type_row['rate_day2']      or 0)
+        subseq  = float(type_row['rate_subsequent']or 0)
+        mode    = type_row['rate_mode'] or 'auto'
         try:
             d_start = date.fromisoformat(str(rental_start)) if rental_start else None
             d_end   = date.fromisoformat(str(rental_end))   if rental_end   else None
             days = max(1, (d_end - d_start).days + 1) if d_start and d_end else 1
         except (ValueError, TypeError):
             days = 1
-        if weekly_rate > 0 and days >= 7:
-            locked_price = weekly_rate * math.ceil(days / 7)
-        else:
-            locked_price = daily_rate * days
+        if mode == 'weekly':
+            locked_price = (weekly * math.ceil(days / 7)) if weekly else _tiered_rate(daily, day2, subseq, days)
+        elif mode == 'daily':
+            locked_price = _tiered_rate(daily, day2, subseq, days)
+        else:  # auto
+            if weekly > 0 and days >= 7:
+                locked_price = weekly * math.ceil(days / 7)
+            else:
+                locked_price = _tiered_rate(daily, day2, subseq, days)
     else:
         locked_price = 0.0
 

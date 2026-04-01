@@ -34,9 +34,10 @@
   </label>
 
 {% elif field.is_notes_field %}
+  {% set _has_notes = cur and cur.strip() %}
   <div class="notes-section" style="grid-column:span 6">
-    <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ {{ field.label }}</button>
-    <div class="notes-body hidden">
+    <button type="button" class="notes-toggle" onclick="toggleNotes(this)">{{ '▾' if _has_notes else '▸' }} {{ field.label }}</button>
+    <div class="notes-body{% if not _has_notes %} hidden{% endif %}">
       <textarea class="field-input field-textarea adv-field" data-key="{{ field.field_key }}"
                 rows="3" placeholder="{{ field.placeholder }}" {% if restricted %}disabled{% endif %}>{{ cur }}</textarea>
     </div>
@@ -334,6 +335,8 @@
 <script>
 const SCHED_PERFORMANCES = {{ performances | tojson }};
 const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
+const LOAD_IN_ROWS  = {{ load_in_rows  | default([]) | tojson }};
+const LOAD_OUT_ROWS = {{ load_out_rows | default([]) | tojson }};
 </script>
 
 <div id="tab-schedule" class="tab-pane {% if tab == 'schedule' %}active{% endif %}">
@@ -377,17 +380,120 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
     </div>
   </div>
 
-  {# ── Day Tabs (multi-performance) ─────────────────────────────────────── #}
-  {% if performances | length > 1 %}
-  <div class="sched-day-tabs" style="display:flex;gap:6px;padding:0 0 0 0;margin-bottom:0">
+  {# ── Load-In / Load-Out reference section ─────────────────────────────── #}
+  {% if show.load_in_date or show.load_out_date %}
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> LOAD-IN / LOAD-OUT</div>
+    <div class="form-section-body">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        {% if show.load_in_date %}
+        <div class="field-group">
+          <label class="field-label">LOAD-IN</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--fg)">
+            {{ show.load_in_date }}{% if show.load_in_time %} &nbsp;·&nbsp; {{ show.load_in_time }}{% endif %}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
+        {% endif %}
+        {% if show.load_out_date %}
+        <div class="field-group">
+          <label class="field-label">LOAD-OUT</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--fg)">
+            {{ show.load_out_date }}{% if show.load_out_time %} &nbsp;·&nbsp; {{ show.load_out_time }}{% endif %}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Day Tabs (load-in + performances + load-out) ──────────────────────── #}
+  {% set has_load_in  = show.load_in_date %}
+  {% set has_load_out = show.load_out_date %}
+  {% set show_tabs = (performances | length > 1) or has_load_in or has_load_out %}
+  {% if show_tabs %}
+  <div class="sched-day-tabs" style="display:flex;gap:6px;padding:0 0 0 0;margin-bottom:0;flex-wrap:wrap">
+    {% if has_load_in %}
+    <button type="button"
+            class="btn btn-sm btn-ghost sched-day-tab"
+            data-sched-day-type="load_in"
+            onclick="switchSchedSpecialDay('load_in', this)">
+      LOAD IN{% if show.load_in_date %} · {{ show.load_in_date[5:] | replace('-','/') }}{% endif %}
+    </button>
+    {% endif %}
     {% for p in performances %}
     <button type="button"
-            class="btn btn-sm {% if loop.first %}btn-primary{% else %}btn-ghost{% endif %} sched-day-tab"
+            class="btn btn-sm {% if loop.first and not has_load_in %}btn-primary{% else %}btn-ghost{% endif %} sched-day-tab"
             data-perf-id="{{ p.id }}"
             onclick="switchSchedDay({{ p.id }}, this)">
       DAY {{ loop.index }}{% if p.perf_date %} · {{ p.perf_date[5:] | replace('-','/') }}{% endif %}
     </button>
     {% endfor %}
+    {% if has_load_out %}
+    <button type="button"
+            class="btn btn-sm btn-ghost sched-day-tab"
+            data-sched-day-type="load_out"
+            onclick="switchSchedSpecialDay('load_out', this)">
+      LOAD OUT{% if show.load_out_date %} · {{ show.load_out_date[5:] | replace('-','/') }}{% endif %}
+    </button>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# ── Load-In timeline pane ────────────────────────────────────────────── #}
+  {% if show.load_in_date %}
+  <div class="sched-day-pane hidden" data-sched-day-type="load_in" style="display:none">
+    <div class="form-section">
+      <div class="form-section-header">
+        <span class="section-icon">◈</span>
+        LOAD-IN TIMELINE — {{ show.load_in_date }}{% if show.load_in_time %} · {{ show.load_in_time }}{% endif %}
+        {% if not restricted %}
+        <div style="display:flex;gap:6px;align-items:center;margin-left:auto">
+          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedSpecialDay('load_in')" title="Sort by start time">⇅ Sort</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="addSchedSpecialRow('load_in')">+ Add Row</button>
+        </div>
+        {% endif %}
+      </div>
+      <div class="form-section-body no-pad">
+        <table class="schedule-table">
+          <thead><tr>
+            {% if not restricted %}<th style="width:24px"></th>{% endif %}
+            <th style="width:100px">START</th><th style="width:100px">END</th>
+            <th>DESCRIPTION</th><th style="width:160px">NOTES</th>
+            {% if not restricted %}<th style="width:40px"></th>{% endif %}
+          </tr></thead>
+          <tbody id="schedule-rows-load_in">
+            {% for row in load_in_rows %}
+            <tr class="schedule-row">
+              {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+              <td><input type="text" class="sched-cell" placeholder="08:00" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="09:00" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
+              {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
+            </tr>
+            {% else %}
+            <tr class="schedule-row">
+              {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+              <td><input type="text" class="sched-cell" placeholder="08:00" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="09:00" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Truck arrives / Crew call" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="" value="" {% if restricted %}disabled{% endif %}></td>
+              {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if not restricted %}
+      <div class="form-section-footer">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addSchedSpecialRow('load_in')">+ Add Row</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedSpecialDay('load_in')">⇅ Sort by time</button>
+      </div>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
 
@@ -551,6 +657,61 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
     </div>
   </div>
   {% endfor %}
+
+  {# ── Load-Out timeline pane ────────────────────────────────────────────── #}
+  {% if show.load_out_date %}
+  <div class="sched-day-pane hidden" data-sched-day-type="load_out" style="display:none">
+    <div class="form-section">
+      <div class="form-section-header">
+        <span class="section-icon">◈</span>
+        LOAD-OUT TIMELINE — {{ show.load_out_date }}{% if show.load_out_time %} · {{ show.load_out_time }}{% endif %}
+        {% if not restricted %}
+        <div style="display:flex;gap:6px;align-items:center;margin-left:auto">
+          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedSpecialDay('load_out')" title="Sort by start time">⇅ Sort</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="addSchedSpecialRow('load_out')">+ Add Row</button>
+        </div>
+        {% endif %}
+      </div>
+      <div class="form-section-body no-pad">
+        <table class="schedule-table">
+          <thead><tr>
+            {% if not restricted %}<th style="width:24px"></th>{% endif %}
+            <th style="width:100px">START</th><th style="width:100px">END</th>
+            <th>DESCRIPTION</th><th style="width:160px">NOTES</th>
+            {% if not restricted %}<th style="width:40px"></th>{% endif %}
+          </tr></thead>
+          <tbody id="schedule-rows-load_out">
+            {% for row in load_out_rows %}
+            <tr class="schedule-row">
+              {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+              <td><input type="text" class="sched-cell" placeholder="08:00" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="09:00" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
+              {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
+            </tr>
+            {% else %}
+            <tr class="schedule-row">
+              {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+              <td><input type="text" class="sched-cell" placeholder="08:00" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="09:00" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Strike / Truck departs" value="" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="" value="" {% if restricted %}disabled{% endif %}></td>
+              {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if not restricted %}
+      <div class="form-section-footer">
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addSchedSpecialRow('load_out')">+ Add Row</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedSpecialDay('load_out')">⇅ Sort by time</button>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
 
   {# ── Contacts ──────────────────────────────────────────────────────────── #}
   <div class="form-section">
@@ -1524,11 +1685,17 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   initShow({{ show.id }}, INITIAL_TAB);
 
   /* ── Restore section open/closed states from localStorage ───── */
+  /* Always force-expand sections that have non-empty field values  */
   document.querySelectorAll('.form-section[data-key]').forEach(sec => {
     const saved = localStorage.getItem('adv_sec_' + sec.dataset.key);
-    if (saved === 'open')   sec.classList.remove('collapsed');
-    else if (saved === 'closed') sec.classList.add('collapsed');
-    // no saved state → server-rendered default_open class is used as-is
+    const hasData = Array.from(sec.querySelectorAll('.adv-field')).some(f => {
+      if (f.type === 'checkbox') return false;
+      const v = (f.value || '').trim();
+      return v !== '' && v !== '-' && v !== '—';
+    });
+    if (saved === 'open' || hasData) sec.classList.remove('collapsed');
+    else if (saved === 'closed')     sec.classList.add('collapsed');
+    // no saved state and no data → keep server-rendered default
   });
 
   /* ── Performances (multiple dates/times) ────────────────────── */

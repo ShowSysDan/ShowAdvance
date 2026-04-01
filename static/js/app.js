@@ -488,6 +488,56 @@ function switchSchedDay(perfId, btn) {
   });
 }
 
+/* Switch to a load-in or load-out special day pane */
+function switchSchedSpecialDay(dayType, btn) {
+  document.querySelectorAll('.sched-day-tab').forEach(t => {
+    t.classList.remove('btn-primary');
+    t.classList.add('btn-ghost');
+  });
+  btn.classList.add('btn-primary');
+  btn.classList.remove('btn-ghost');
+  document.querySelectorAll('.sched-day-pane').forEach(p => {
+    const show = p.dataset.schedDayType === dayType;
+    p.classList.toggle('hidden', !show);
+    p.style.display = show ? '' : 'none';
+  });
+}
+
+/* Add a row to a load-in or load-out pane */
+function addSchedSpecialRow(dayType) {
+  const tbody = document.getElementById(`schedule-rows-${dayType}`);
+  if (!tbody) return;
+  const tr = document.createElement('tr');
+  tr.className = 'schedule-row';
+  tr.innerHTML = `
+    <td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>
+    <td><input type="text" class="sched-cell" placeholder="08:00" value=""></td>
+    <td><input type="text" class="sched-cell" placeholder="09:00" value=""></td>
+    <td><input type="text" class="sched-cell" placeholder="Description" value=""></td>
+    <td><input type="text" class="sched-cell" placeholder="Notes" value=""></td>
+    <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
+  `;
+  tbody.appendChild(tr);
+  _bindRowDrag(tr);
+  tr.querySelectorAll('.sched-cell')[0].focus();
+}
+
+/* Sort special-day rows by start time */
+function sortSchedSpecialDay(dayType) {
+  const tbody = document.getElementById(`schedule-rows-${dayType}`);
+  if (!tbody) return;
+  const rows = Array.from(tbody.querySelectorAll('.schedule-row'));
+  rows.sort((a, b) => {
+    const ta = parseTimeToHHMM(a.querySelectorAll('.sched-cell')[0]?.value || '');
+    const tb = parseTimeToHHMM(b.querySelectorAll('.sched-cell')[0]?.value || '');
+    if (!ta) return 1;
+    if (!tb) return -1;
+    return ta.localeCompare(tb);
+  });
+  rows.forEach(r => tbody.appendChild(r));
+  scheduleSave();
+}
+
 /* Copy all rows from sourcePerfId day into targetPerfId day */
 function copySchedDay(sourcePerfId, targetPerfId) {
   if (!confirm('Replace this day\'s rows with a copy from the selected day?')) return;
@@ -568,16 +618,18 @@ function collectScheduleData() {
   const rows = [];
   // Collect all day panes (multi-day or single legacy)
   document.querySelectorAll('.sched-day-pane').forEach(pane => {
-    const rawId  = pane.dataset.perfId;
-    const perfId = (rawId && rawId !== '') ? parseInt(rawId, 10) : null;
+    const rawId       = pane.dataset.perfId;
+    const dayType     = pane.dataset.schedDayType || null;  // 'load_in', 'load_out', or null
+    const perfId      = (!dayType && rawId && rawId !== '') ? parseInt(rawId, 10) : null;
     pane.querySelectorAll('.schedule-row').forEach(tr => {
       const cells = tr.querySelectorAll('.sched-cell');
       rows.push({
-        perf_id:     perfId,
-        start_time:  cells[0]?.value || '',
-        end_time:    cells[1]?.value || '',
-        description: cells[2]?.value || '',
-        notes:       cells[3]?.value || '',
+        perf_id:        perfId,
+        sched_day_type: dayType,
+        start_time:     cells[0]?.value || '',
+        end_time:       cells[1]?.value || '',
+        description:    cells[2]?.value || '',
+        notes:          cells[3]?.value || '',
       });
     });
   });

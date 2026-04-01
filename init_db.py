@@ -62,6 +62,7 @@ CREATE TABLE IF NOT EXISTS schedule_rows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
     perf_id INTEGER DEFAULT NULL,
+    sched_day_type TEXT DEFAULT NULL,
     sort_order INTEGER DEFAULT 0,
     start_time TEXT DEFAULT '',
     end_time TEXT DEFAULT '',
@@ -344,6 +345,9 @@ CREATE TABLE IF NOT EXISTS asset_types (
     storage_location TEXT DEFAULT '',
     rental_cost      REAL DEFAULT 0.0,
     weekly_rate      REAL DEFAULT 0.0,
+    rate_mode        TEXT DEFAULT 'auto',
+    rate_day2        REAL DEFAULT 0.0,
+    rate_subsequent  REAL DEFAULT 0.0,
     reserve_count    INTEGER DEFAULT 0,
     is_consumable    INTEGER DEFAULT 0,
     is_system        INTEGER DEFAULT 0,
@@ -1185,6 +1189,9 @@ def migrate_db():
             storage_location TEXT DEFAULT '',
             rental_cost      REAL DEFAULT 0.0,
             weekly_rate      REAL DEFAULT 0.0,
+            rate_mode        TEXT DEFAULT 'auto',
+            rate_day2        REAL DEFAULT 0.0,
+            rate_subsequent  REAL DEFAULT 0.0,
             reserve_count    INTEGER DEFAULT 0,
             is_consumable    INTEGER DEFAULT 0,
             is_system        INTEGER DEFAULT 0,
@@ -1315,6 +1322,12 @@ def migrate_db():
         # Per-item system membership — links each physical unit to its system type
         "ALTER TABLE asset_items ADD COLUMN system_type_id INTEGER REFERENCES asset_types(id) ON DELETE SET NULL",
         "CREATE INDEX IF NOT EXISTS idx_asset_items_sys ON asset_items(system_type_id)",
+        # Rate mode + tiered daily pricing
+        "ALTER TABLE asset_types ADD COLUMN rate_mode TEXT DEFAULT 'auto'",
+        "ALTER TABLE asset_types ADD COLUMN rate_day2 REAL DEFAULT 0.0",
+        "ALTER TABLE asset_types ADD COLUMN rate_subsequent REAL DEFAULT 0.0",
+        # Load-in/out schedule day rows
+        "ALTER TABLE schedule_rows ADD COLUMN sched_day_type TEXT DEFAULT NULL",
     ]:
         try:
             conn.execute(alter_sql)
@@ -1539,6 +1552,7 @@ CREATE TABLE IF NOT EXISTS schedule_rows (
     id SERIAL PRIMARY KEY,
     show_id INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
     perf_id INTEGER DEFAULT NULL,
+    sched_day_type TEXT DEFAULT NULL,
     sort_order INTEGER DEFAULT 0,
     start_time TEXT DEFAULT '',
     end_time TEXT DEFAULT '',

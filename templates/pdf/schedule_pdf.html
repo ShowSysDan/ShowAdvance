@@ -72,6 +72,55 @@
 {% set _bar_fields = _smf | selectattr('width_hint', 'ne', 'full') | list %}
 {% set _full_fields = _smf | selectattr('width_hint', 'eq', 'full') | list %}
 
+{# ── Load-In day section ────────────────────────────────────────────────── #}
+{% if show.load_in_date %}
+<div class="day-section">
+  <div class="doc-header">
+    <div style="display:flex;align-items:center;gap:12px">
+      {% if logo_data %}<img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">{% endif %}
+      <div>
+        <div class="doc-title">DPC <span>PRODUCTION</span> SCHEDULE</div>
+        <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+      </div>
+    </div>
+    <div class="doc-meta">
+      <div class="version">v{{ version }}</div>
+      <div>{{ export_date }}</div>
+      <div style="margin-top:3px;font-size:8pt;color:#222">
+        <strong>{{ show.name }}</strong> &nbsp;·&nbsp; <strong>LOAD-IN</strong>
+        &nbsp;·&nbsp; {{ show.load_in_date }}{% if show.load_in_time %} &nbsp;·&nbsp; {{ show.load_in_time }}{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="day-banner">
+    <span>Load-In</span>
+    <span class="day-date">{{ show.load_in_date }}{% if show.load_in_time %} · {{ show.load_in_time }}{% endif %}</span>
+  </div>
+  <table class="sched-table">
+    <thead><tr>
+      <th style="width:90px">Start</th><th style="width:90px">End</th>
+      <th>Description</th><th style="width:200px">Notes</th>
+    </tr></thead>
+    <tbody>
+      {% set _li_rows = load_in_rows | default([]) %}
+      {% for row in _li_rows %}
+      {% if row.description or row.start_time %}
+      <tr>
+        <td class="time-col">{{ row.start_time or '' }}</td>
+        <td class="time-col">{{ row.end_time or '' }}</td>
+        <td class="desc-col">{{ row.description or '' }}</td>
+        <td class="notes-col">{{ row.notes or '' }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      {% if not _li_rows %}
+      <tr><td colspan="4" style="text-align:center;color:#aaa;padding:12px;">No load-in schedule rows entered.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
 {% for day in schedule_days %}
 <div class="day-section">
 
@@ -222,6 +271,55 @@
 
 </div>{# end .day-section #}
 {% endfor %}
+
+{# ── Load-Out day section ───────────────────────────────────────────────── #}
+{% if show.load_out_date %}
+<div class="day-section">
+  <div class="doc-header">
+    <div style="display:flex;align-items:center;gap:12px">
+      {% if logo_data %}<img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">{% endif %}
+      <div>
+        <div class="doc-title">DPC <span>PRODUCTION</span> SCHEDULE</div>
+        <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+      </div>
+    </div>
+    <div class="doc-meta">
+      <div class="version">v{{ version }}</div>
+      <div>{{ export_date }}</div>
+      <div style="margin-top:3px;font-size:8pt;color:#222">
+        <strong>{{ show.name }}</strong> &nbsp;·&nbsp; <strong>LOAD-OUT</strong>
+        &nbsp;·&nbsp; {{ show.load_out_date }}{% if show.load_out_time %} &nbsp;·&nbsp; {{ show.load_out_time }}{% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="day-banner">
+    <span>Load-Out</span>
+    <span class="day-date">{{ show.load_out_date }}{% if show.load_out_time %} · {{ show.load_out_time }}{% endif %}</span>
+  </div>
+  <table class="sched-table">
+    <thead><tr>
+      <th style="width:90px">Start</th><th style="width:90px">End</th>
+      <th>Description</th><th style="width:200px">Notes</th>
+    </tr></thead>
+    <tbody>
+      {% set _lo_rows = load_out_rows | default([]) %}
+      {% for row in _lo_rows %}
+      {% if row.description or row.start_time %}
+      <tr>
+        <td class="time-col">{{ row.start_time or '' }}</td>
+        <td class="time-col">{{ row.end_time or '' }}</td>
+        <td class="desc-col">{{ row.description or '' }}</td>
+        <td class="notes-col">{{ row.notes or '' }}</td>
+      </tr>
+      {% endif %}
+      {% endfor %}
+      {% if not _lo_rows %}
+      <tr><td colspan="4" style="text-align:center;color:#aaa;padding:12px;">No load-out schedule rows entered.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <!-- Footer -->
 <div class="doc-footer">
