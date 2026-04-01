@@ -319,7 +319,7 @@
 
 {# Availability Calendar Modal #}
 <div id="avail-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeAvailModal()">
-  <div class="modal-card" style="max-width:460px">
+  <div class="modal-card" style="max-width:min(860px,94vw);width:min(860px,94vw)">
     <div class="modal-header">
       <span id="avail-modal-title">Availability</span>
       <button onclick="closeAvailModal()" class="modal-close">×</button>
@@ -330,7 +330,8 @@
         <span id="avail-month-label" style="font-weight:600;font-size:14px"></span>
         <button class="btn btn-ghost btn-sm" onclick="availNavMonth(1)">Next ›</button>
       </div>
-      <div style="padding:12px 16px">
+      <div id="avail-legend" style="display:flex;gap:16px;padding:8px 16px 0;font-size:11px;flex-wrap:wrap"></div>
+      <div style="padding:10px 14px">
         <div class="avail-cal-daynames"></div>
         <div class="avail-cal-grid" id="avail-cal-grid"></div>
       </div>
@@ -441,16 +442,26 @@
 .log-type-service { background:rgba(72,187,120,.15);color:#48BB78 }
 .log-type-usage   { background:rgba(214,188,250,.15);color:#B794F4 }
 .cond-excellent{color:#48BB78}.cond-good{color:#68D391}.cond-fair{color:#F6AD55}.cond-poor{color:#FC814A}.cond-retired{color:#FC8181}
-.avail-cal-daynames { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; margin-bottom:2px; }
-.avail-cal-daynames span { text-align:center; font-size:9px; font-weight:700; color:var(--text-dim); padding:2px 0; }
-.avail-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:2px; }
-.avail-cal-day { aspect-ratio:1; display:flex; align-items:center; justify-content:center; border-radius:4px; font-size:11px; cursor:default; transition:background .1s; }
-.avail-cal-day.today { outline:1px solid var(--accent); }
-.avail-cal-day.booked { background:rgba(245,127,32,.22); color:var(--accent); font-weight:600; cursor:pointer; }
-.avail-cal-day.booked:hover { background:rgba(245,127,32,.35); }
-.avail-cal-day.full { background:rgba(197,48,48,.2); color:#FC8181; font-weight:600; cursor:pointer; }
-.avail-cal-day.full:hover { background:rgba(197,48,48,.3); }
-.avail-cal-day.empty-cell { opacity:0; }
+.avail-cal-daynames { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; margin-bottom:3px; }
+.avail-cal-daynames span { text-align:center; font-size:9px; font-weight:700; color:var(--text-dim); padding:2px 0; letter-spacing:.04em; }
+.avail-cal-grid { display:grid; grid-template-columns:repeat(7,1fr); gap:3px; }
+.avail-cal-day {
+  min-height:70px; display:flex; flex-direction:column; border-radius:5px; font-size:11px;
+  cursor:default; transition:background .1s; padding:4px 5px 3px; gap:2px;
+  border:1px solid var(--border); background:var(--bg-card);
+}
+.avail-cal-day.today { border-color:var(--accent); border-width:2px; }
+.avail-cal-day.clickable { cursor:pointer; }
+.avail-cal-day.clickable:hover { background:var(--bg-hover); }
+.avail-cal-day.empty-cell { border:none; background:none; min-height:70px; }
+.avail-day-num { font-size:10px; font-weight:600; color:var(--text-dim); text-align:right; line-height:1; margin-bottom:1px; }
+.avail-day-num.today-num { color:var(--accent); }
+.avail-pill { border-radius:20px; padding:2px 6px; font-size:10px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; line-height:1.4; }
+.avail-pill.available  { background:rgba(72,187,120,.25);  color:#48BB78; }
+.avail-pill.reserved   { background:rgba(200,200,210,.18); color:var(--text-dim); }
+.avail-pill.returning  { background:rgba(66,153,225,.25);  color:#63B3ED; }
+.avail-pill.full-pill  { background:rgba(197,48,48,.22);   color:#FC8181; }
+.avail-pill.unlimited  { background:rgba(72,187,120,.15);  color:#48BB78; font-style:italic; }
 .comp-back-bar { padding:8px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; flex-shrink:0; background:var(--bg); }
 </style>
 
@@ -1120,39 +1131,82 @@ function renderAvailCalendar() {
   const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
   label.textContent = `${months[_availMonth]} ${_availYear}`;
 
-  // Render day-of-week headers once (outside grid)
+  // Mon-first day-of-week headers
   const hdrEl = document.querySelector('.avail-cal-daynames');
-  if (hdrEl && !hdrEl.children.length) {
-    ['Su','Mo','Tu','We','Th','Fr','Sa'].forEach(d => {
+  if (hdrEl) {
+    hdrEl.innerHTML = '';
+    ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].forEach(d => {
       const s = document.createElement('span'); s.textContent = d; hdrEl.appendChild(s);
     });
   }
 
-  const shows = _availData.shows || [];
-  const total = _availData.total_items || 0;
-  const inMaint = _availData.in_maintenance || 0;
-  const reserve = _availData.reserve_count || 0;
-  const usable = Math.max(0, total - inMaint - reserve);
-  const unlimited = !!_availData.unlimited;
-  const today = new Date().toISOString().slice(0,10);
+  const shows      = _availData.shows || [];
+  const total      = _availData.total_items || 0;
+  const inMaint    = _availData.in_maintenance || 0;
+  const reserve    = _availData.reserve_count || 0;
+  const usable     = Math.max(0, total - inMaint - reserve);
+  const unlimited  = !!_availData.unlimited;
+  const today      = new Date().toISOString().slice(0,10);
 
-  function bookedOn(dateStr) {
-    return shows.filter(s => s.rental_start && s.rental_end && s.rental_start <= dateStr && s.rental_end >= dateStr);
+  // Legend
+  const legend = document.getElementById('avail-legend');
+  if (legend) {
+    const pill = (cls, label) =>
+      `<span style="display:inline-flex;align-items:center;gap:4px">
+         <span class="avail-pill ${cls}" style="font-size:10px">${label}</span>
+       </span>`;
+    legend.innerHTML = unlimited
+      ? pill('unlimited','Unlimited / no unit tracking')
+      : [
+          pill('available', `Available (of ${usable} usable)`),
+          pill('reserved',  'Reserved'),
+          pill('returning', 'Returning'),
+          usable > 0 ? pill('full-pill','Fully booked') : '',
+        ].join('');
   }
 
-  const firstDay = new Date(_availYear, _availMonth, 1).getDay();
+  // Helpers
+  function bookedOn(ds)   { return shows.filter(s => s.rental_start && s.rental_end && s.rental_start <= ds && s.rental_end >= ds); }
+  function returningOn(ds){ return shows.filter(s => s.rental_end === ds); }
+
+  // Mon-first: JS getDay() is 0=Sun; offset so Mon=0
+  const rawFirst = new Date(_availYear, _availMonth, 1).getDay(); // 0=Sun
+  const firstOffset = (rawFirst + 6) % 7; // Mon=0 … Sun=6
   const daysInMonth = new Date(_availYear, _availMonth + 1, 0).getDate();
+
   let html = '';
-  for (let i = 0; i < firstDay; i++) html += `<div class="avail-cal-day empty-cell"></div>`;
+  for (let i = 0; i < firstOffset; i++) html += `<div class="avail-cal-day empty-cell"></div>`;
+
   for (let d = 1; d <= daysInMonth; d++) {
-    const ds = `${_availYear}-${String(_availMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const bk = bookedOn(ds);
-    const qty = bk.reduce((s,b) => s+(b.quantity||1), 0);
-    const isToday = ds === today ? ' today' : '';
-    let cls = '';
-    if (!unlimited && qty > 0) cls = (qty >= usable && usable > 0) ? ' full' : ' booked';
-    const tip = qty > 0 ? `${qty} booked${usable>0?' / '+usable+' usable':''}` : 'Available';
-    html += `<div class="avail-cal-day${cls}${isToday}" onclick="showAvailDayDetail('${ds}')" title="${tip}">${d}</div>`;
+    const ds  = `${_availYear}-${String(_availMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const bk  = bookedOn(ds);
+    const ret = returningOn(ds);
+    const qty      = bk.reduce((s,b) => s+(b.quantity||1), 0);
+    const retQty   = ret.reduce((s,b) => s+(b.quantity||1), 0);
+    const avail    = unlimited ? null : Math.max(0, usable - qty);
+    const isFull   = !unlimited && qty >= usable && usable > 0;
+    const isToday  = ds === today;
+    const hasAny   = qty > 0 || retQty > 0;
+
+    let pills = '';
+    if (unlimited) {
+      pills = `<span class="avail-pill unlimited">Available</span>`;
+    } else {
+      // Available bar
+      const availCls = isFull ? 'full-pill' : 'available';
+      pills += `<span class="avail-pill ${availCls}">Available ${avail}</span>`;
+      // Reserved bar (only when something is booked)
+      if (qty > 0) pills += `<span class="avail-pill reserved">Reserved ${qty}</span>`;
+      // Returning bar (load-out day for any booking)
+      if (retQty > 0) pills += `<span class="avail-pill returning">Returning ${retQty}</span>`;
+    }
+
+    html += `<div class="avail-cal-day${isToday?' today':''}${hasAny?' clickable':''}"
+               onclick="${hasAny?`showAvailDayDetail('${ds}')`:'void(0)'}"
+               title="${ds}">
+               <div class="avail-day-num${isToday?' today-num':''}">${d}</div>
+               ${pills}
+             </div>`;
   }
   grid.innerHTML = html;
   document.getElementById('avail-day-detail').innerHTML = '';
