@@ -9,7 +9,6 @@ Usage:
 import sqlite3
 import os
 import json
-from werkzeug.security import generate_password_hash
 
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advance.db')
 
@@ -1464,6 +1463,7 @@ def init_db(force=False):
     conn.executescript(SCHEMA)
 
     # Admin user (must_change_password=1 forces change on first login)
+    from werkzeug.security import generate_password_hash
     conn.execute("""
         INSERT OR REPLACE INTO users (username, password_hash, display_name, role, must_change_password)
         VALUES (?, ?, ?, ?, 1)
