@@ -10,6 +10,9 @@ showadvance.db
 # Environment file (SECRET_KEY and other secrets)
 .env
 
+# PostgreSQL credentials — copy db_config.ini.example to db_config.ini
+db_config.ini
+
 # Backup files
 backups/
 

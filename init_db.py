@@ -2201,6 +2201,27 @@ if __name__ == '__main__':
             print("No PostgreSQL settings found. Configure database settings in the app first.")
             sys.exit(1)
         init_db_postgres(settings)
+    elif '--migrate-to-postgres' in sys.argv:
+        from db_adapter import read_db_settings
+        settings = read_db_settings(DATABASE)
+        if settings.get('db_type') != 'postgres':
+            print("db_type is not 'postgres' in app_settings — set it in the app first.")
+            sys.exit(1)
+        print(f"Migrating {DATABASE} → PostgreSQL ({settings.get('pg_host')}:{settings.get('pg_port')}/{settings.get('pg_dbname')}) ...")
+
+        def _progress(table):
+            print(f"  copying {table} ...", flush=True)
+
+        stats = migrate_sqlite_to_postgres(DATABASE, settings, progress_callback=_progress)
+        if 'error' in stats:
+            print(f"✗ Migration failed: {stats['error']}")
+            sys.exit(1)
+        total_copied  = sum(v.get('copied',  0) for v in stats.values() if isinstance(v, dict))
+        total_skipped = sum(v.get('skipped', 0) for v in stats.values() if isinstance(v, dict))
+        print(f"\n✓ Done — {total_copied} rows copied, {total_skipped} skipped/existing")
+        for table, s in stats.items():
+            if isinstance(s, dict) and s.get('error'):
+                print(f"  ⚠  {table}: {s['error']}")
     else:
         force = '--force' in sys.argv
         init_db(force=force)
