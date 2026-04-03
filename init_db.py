@@ -9,6 +9,7 @@ Usage:
 import sqlite3
 import os
 import json
+import re
 
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advance.db')
 
@@ -1903,12 +1904,21 @@ CREATE TABLE IF NOT EXISTS show_external_rentals (
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS asset_type_system_members (
+    system_type_id    INTEGER NOT NULL REFERENCES asset_types(id) ON DELETE CASCADE,
+    component_type_id INTEGER NOT NULL REFERENCES asset_types(id) ON DELETE CASCADE,
+    sort_order        INTEGER DEFAULT 0,
+    PRIMARY KEY (system_type_id, component_type_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_show_assets_show   ON show_assets(show_id);
 CREATE INDEX IF NOT EXISTS idx_show_assets_type   ON show_assets(asset_type_id);
 CREATE INDEX IF NOT EXISTS idx_asset_items_type   ON asset_items(asset_type_id);
 CREATE INDEX IF NOT EXISTS idx_asset_maint_item   ON asset_maintenance(asset_item_id);
 CREATE INDEX IF NOT EXISTS idx_asset_logs_item    ON asset_logs(asset_item_id);
 CREATE INDEX IF NOT EXISTS idx_asset_logs_date    ON asset_logs(log_date);
+CREATE INDEX IF NOT EXISTS idx_sys_members_sys    ON asset_type_system_members(system_type_id);
+CREATE INDEX IF NOT EXISTS idx_sys_members_comp   ON asset_type_system_members(component_type_id);
 
 -- ── User Registration & Recovery ─────────────────────────────────────────────
 
@@ -1989,10 +1999,41 @@ CREATE INDEX IF NOT EXISTS idx_ai_sessions_status ON ai_sessions(status);
 """
 
 
+# Tables that belong in the shared schema (user/auth — reusable across apps)
+SHARED_TABLES = {
+    'users', 'user_groups', 'user_group_members', 'active_sessions',
+    'app_settings', 'audit_log', 'password_reset_tokens',
+    'user_pending_registration', 'site_messages', 'site_message_dismissals',
+}
+
+# Regex to extract the table name from a CREATE TABLE statement
+_CREATE_TABLE_RE = re.compile(
+    r'CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+(\w+)', re.IGNORECASE
+)
+_CREATE_INDEX_RE = re.compile(
+    r'CREATE\s+(?:UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS\s+\w+\s+ON\s+(\w+)',
+    re.IGNORECASE,
+)
+
+
+def _table_for_stmt(stmt):
+    """Return the table name referenced by a CREATE TABLE or CREATE INDEX statement."""
+    m = _CREATE_TABLE_RE.search(stmt)
+    if m:
+        return m.group(1)
+    m = _CREATE_INDEX_RE.search(stmt)
+    if m:
+        return m.group(1)
+    return None
+
+
 def init_db_postgres(settings, seed=True):
     """
     Initialize a PostgreSQL database with the ShowAdvance schema.
-    Creates the schema namespace and all tables. Safe to run on an existing DB.
+    Creates two schema namespaces:
+      - shared schema: user/auth tables (reusable across apps)
+      - app schema:    theater-specific tables
+    Safe to run on an existing DB.
     """
     try:
         import psycopg2
@@ -2000,7 +2041,9 @@ def init_db_postgres(settings, seed=True):
         print("psycopg2 is not installed. Run: pip install psycopg2-binary")
         return False
 
-    schema = settings.get('pg_schema', '321theater') or '321theater'
+    app_schema = settings.get('pg_app_schema', '') or settings.get('pg_schema', '') or 'theater321'
+    shared_schema = settings.get('pg_shared_schema', '') or 'shared'
+
     try:
         conn = psycopg2.connect(
             host=settings.get('pg_host', 'localhost'),
@@ -2010,19 +2053,34 @@ def init_db_postgres(settings, seed=True):
             password=settings.get('pg_password', ''),
             connect_timeout=10,
         )
-        cur = conn.cursor()
-        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-        cur.execute(f'SET search_path TO "{schema}"')
 
-        # Create tables one by one (PG_SCHEMA contains multiple CREATE TABLE statements)
+        # Create schemas with autocommit so they're committed immediately
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{app_schema}"')
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{shared_schema}"')
+        cur.close()
+
+        # Switch to transactional mode for table creation
+        conn.autocommit = False
+        cur = conn.cursor()
+
+        # Create tables, routing each to the correct schema
         for stmt in PG_SCHEMA.split(';'):
             stmt = stmt.strip()
-            if stmt:
-                cur.execute(stmt)
+            if not stmt:
+                continue
+            table = _table_for_stmt(stmt)
+            if table and table in SHARED_TABLES:
+                cur.execute(f'SET search_path TO "{shared_schema}"')
+            else:
+                cur.execute(f'SET search_path TO "{app_schema}", "{shared_schema}"')
+            cur.execute(stmt)
 
         if seed:
-            # Admin user
+            # Admin user (in shared schema)
             from werkzeug.security import generate_password_hash
+            cur.execute(f'SET search_path TO "{shared_schema}"')
             cur.execute("""
                 INSERT INTO users (username, password_hash, display_name, role)
                 VALUES (%s, %s, %s, %s)
@@ -2032,7 +2090,7 @@ def init_db_postgres(settings, seed=True):
         conn.commit()
         cur.close()
         conn.close()
-        print(f"✓ PostgreSQL schema '{schema}' initialized")
+        print(f"✓ PostgreSQL initialized — app schema: '{app_schema}', shared schema: '{shared_schema}'")
         return True
     except Exception as e:
         print(f"✗ PostgreSQL init failed: {e}")
@@ -2042,6 +2100,7 @@ def init_db_postgres(settings, seed=True):
 def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None):
     """
     Copy all data from a SQLite database to PostgreSQL.
+    Routes tables to the correct schema (shared vs app).
     Safe to run multiple times — uses ON CONFLICT DO NOTHING to skip duplicates.
     Returns a dict with per-table stats: {table: {'copied': N, 'skipped': N}}.
     """
@@ -2054,12 +2113,13 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
     if not os.path.exists(sqlite_path):
         return {'error': f'SQLite database not found: {sqlite_path}'}
 
-    # First ensure the PostgreSQL schema exists
+    # First ensure the PostgreSQL schemas and tables exist
     ok = init_db_postgres(pg_settings, seed=False)
     if not ok:
         return {'error': 'Could not initialize PostgreSQL schema'}
 
-    schema = pg_settings.get('pg_schema', '321theater') or '321theater'
+    app_schema = pg_settings.get('pg_app_schema', '') or pg_settings.get('pg_schema', '') or 'theater321'
+    shared_schema = pg_settings.get('pg_shared_schema', '') or 'shared'
 
     # Table copy order respects foreign key dependencies (parents before children)
     TABLE_ORDER = [
@@ -2094,7 +2154,14 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
         connect_timeout=10,
     )
     pg_cur = pg_conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-    pg_cur.execute(f'SET search_path TO "{schema}"')
+
+    def _set_search_path_for(table):
+        """Set search_path so unqualified table names resolve to the right schema."""
+        if table in SHARED_TABLES:
+            pg_cur.execute(f'SET search_path TO "{shared_schema}"')
+        else:
+            # App tables may reference shared tables via FK, so include both
+            pg_cur.execute(f'SET search_path TO "{app_schema}", "{shared_schema}"')
 
     stats = {}
 
@@ -2112,6 +2179,8 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
         if not rows:
             stats[table] = {'copied': 0, 'skipped': 0}
             continue
+
+        _set_search_path_for(table)
 
         col_names = list(rows[0].keys())
         cols_str = ', '.join(f'"{c}"' for c in col_names)
@@ -2142,8 +2211,7 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
             except Exception as e:
                 skipped += 1
                 pg_conn.rollback()
-                # Re-set search path after rollback
-                pg_cur.execute(f'SET search_path TO "{schema}"')
+                _set_search_path_for(table)
 
         pg_conn.commit()
         stats[table] = {'copied': copied, 'skipped': skipped}
@@ -2168,6 +2236,7 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
         'asset_logs',
     ]
     for table in serial_tables:
+        _set_search_path_for(table)
         try:
             pg_cur.execute(f"""
                 SELECT setval(

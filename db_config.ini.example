@@ -5,11 +5,16 @@
 # The app reads db_type from the database (toggled in Settings).
 # All PostgreSQL credentials come from this file only.
 # Edit this file and restart the app to apply changes.
+#
+# Two schemas are used:
+#   app_schema    – theater-specific data (shows, schedules, contacts, etc.)
+#   shared_schema – user/auth data shared across apps (users, groups, sessions)
 
 [postgresql]
-host     = localhost
-port     = 5432
-dbname   = 321theater
-user     = showadvance
-password = yourpassword
-schema   = 321theater
+host           = localhost
+port           = 5432
+dbname         = 321theater
+user           = showadvance
+password       = yourpassword
+app_schema     = theater321
+shared_schema  = shared
