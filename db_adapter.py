@@ -226,6 +226,11 @@ def _read_pg_config(database_path):
     Read PostgreSQL credentials from db_config.ini, located in the same
     directory as the SQLite bootstrap file. Returns a dict with pg_* keys,
     or an empty dict if the file doesn't exist or can't be parsed.
+
+    Two schemas are supported:
+      pg_app_schema    – theater-specific data (shows, schedules, etc.)
+      pg_shared_schema – user/auth data shared across apps
+    Legacy 'schema' key maps to pg_app_schema for backward compatibility.
     """
     config_path = os.path.join(os.path.dirname(os.path.abspath(database_path)), 'db_config.ini')
     if not os.path.exists(config_path):
@@ -234,13 +239,16 @@ def _read_pg_config(database_path):
         cp = configparser.ConfigParser()
         cp.read(config_path, encoding='utf-8')
         sec = cp['postgresql'] if 'postgresql' in cp else {}
+        # Support new dual-schema keys with fallback to legacy 'schema' key
+        legacy_schema = sec.get('schema', '')
         return {
-            'pg_host':     sec.get('host',     'localhost'),
-            'pg_port':     sec.get('port',     '5432'),
-            'pg_dbname':   sec.get('dbname',   '321theater'),
-            'pg_user':     sec.get('user',     ''),
-            'pg_password': sec.get('password', ''),
-            'pg_schema':   sec.get('schema',   '321theater'),
+            'pg_host':          sec.get('host',     'localhost'),
+            'pg_port':          sec.get('port',     '5432'),
+            'pg_dbname':        sec.get('dbname',   '321theater'),
+            'pg_user':          sec.get('user',     ''),
+            'pg_password':      sec.get('password', ''),
+            'pg_app_schema':    sec.get('app_schema', '') or legacy_schema or 'theater321',
+            'pg_shared_schema': sec.get('shared_schema', '') or 'shared',
         }
     except Exception:
         return {}
@@ -286,10 +294,15 @@ def _validate_identifier(name, label='identifier'):
     return name
 
 
-def test_postgres_connection(host, port, dbname, user, password, schema):
-    """Test a PostgreSQL connection. Returns (True, None) or (False, error_message)."""
+def test_postgres_connection(host, port, dbname, user, password,
+                             schema=None, app_schema=None, shared_schema=None):
+    """Test a PostgreSQL connection. Returns (True, None) or (False, error_message).
+    Accepts either legacy 'schema' or the new dual-schema keys."""
+    app_sch = app_schema or schema or 'theater321'
+    shared_sch = shared_schema or 'shared'
     try:
-        _validate_identifier(schema, 'schema')
+        _validate_identifier(app_sch, 'app_schema')
+        _validate_identifier(shared_sch, 'shared_schema')
     except ValueError as e:
         return False, str(e)
     try:
@@ -302,9 +315,12 @@ def test_postgres_connection(host, port, dbname, user, password, schema):
             password=password,
             connect_timeout=5,
         )
+        conn.autocommit = True
         cur = conn.cursor()
-        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-        cur.execute(f'SET search_path TO "{schema}"')
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{app_sch}"')
+        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{shared_sch}"')
+        conn.autocommit = False
+        cur.execute(f'SET search_path TO "{app_sch}", "{shared_sch}"')
         cur.execute("SELECT 1")
         conn.rollback()
         conn.close()
@@ -330,8 +346,10 @@ def connect(database_path, settings=None):
     if db_type == 'postgres':
         try:
             import psycopg2
-            schema = settings.get('pg_schema', '321theater') or '321theater'
-            _validate_identifier(schema, 'schema')
+            app_schema = settings.get('pg_app_schema', '') or settings.get('pg_schema', '') or 'theater321'
+            shared_schema = settings.get('pg_shared_schema', '') or 'shared'
+            _validate_identifier(app_schema, 'app_schema')
+            _validate_identifier(shared_schema, 'shared_schema')
             conn = psycopg2.connect(
                 host=settings.get('pg_host', 'localhost'),
                 port=int(settings.get('pg_port', 5432) or 5432),
@@ -340,14 +358,19 @@ def connect(database_path, settings=None):
                 password=settings.get('pg_password', ''),
                 connect_timeout=10,
             )
-            conn.autocommit = False
-            # Set schema search path
+            # Create schemas with autocommit so they're visible immediately
+            conn.autocommit = True
             cur = conn.cursor()
-            cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{schema}"')
-            cur.execute(f'SET search_path TO "{schema}"')
+            cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{app_schema}"')
+            cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{shared_schema}"')
+            cur.close()
+            # Now switch to transactional mode and set the search path
+            conn.autocommit = False
+            cur = conn.cursor()
+            cur.execute(f'SET search_path TO "{app_schema}", "{shared_schema}"')
             cur.close()
             conn.commit()
-            return DBConnection(conn, 'postgres', schema=schema)
+            return DBConnection(conn, 'postgres', schema=app_schema)
         except ImportError:
             import logging
             logging.getLogger('showadvance').warning(

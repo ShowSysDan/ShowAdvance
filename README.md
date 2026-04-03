@@ -6,7 +6,7 @@
 
 ## Version Numbering
 
-**Current version: `2.6.0`**
+**Current version: `2.7.0`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -38,6 +38,7 @@ Version history:
 - `2.5.0` — Global site-wide search: persistent search box in sidebar (/ or Ctrl+K to focus) searches shows (access-controlled), contacts, asset types, and barcodes; grouped results panel with keyboard navigation (↑↓ Enter Escape); `<mark>` highlight on matching text; leading-zero barcode tolerance client- and server-side
 - `2.5.1` — Security patch: XSS fix in Retired Assets JS template literals (esc() helper); rate limiting on /api/search (60/min); max query length guard; log_date ISO format validation; syslog coverage for ADMIN_VIEW_AS, ADMIN_VIEW_AS_RESET, ASSET_LOG_ADD, ASSET_LOG_DELETE
 - `2.6.0` — RentalWorks bulk import script (`import_assets.py`): one-time migration from RentalWorks exports into Asset Manager with full 3-tier hierarchy, container/kit linking, daily+weekly rates, depreciation dates, and replacement costs. Kit/container feature: items can be flagged as containers and linked to their contents. Load-in/load-out dates on shows for smart asset rental pricing (weekly rate applies when load period ≥ 7 days; daily × days otherwise). Sidebar redesign: gradient background, scaled-up nav items, pill-style active state.
+- `2.7.0` — PostgreSQL dual-schema support: user/auth tables live in a `shared` schema (reusable across apps) while theater-specific tables live in an `app` schema (default `theater321`). Database credentials stored in gitignored `db_config.ini`. CLI commands for schema init and SQLite→PostgreSQL data migration. Settings UI simplified to read-only database status. Fixed schema creation bug that prevented PostgreSQL init.
 
 ---
 
@@ -85,8 +86,12 @@ Version history:
    - [Database Backups](#database-backups)
    - [File Manager](#file-manager)
    - [God Mode](#god-mode)
-6. [Security](#security)
-7. [Troubleshooting](#troubleshooting)
+6. [Database Configuration](#database-configuration)
+   - [SQLite (Default)](#sqlite-default)
+   - [PostgreSQL (Dual-Schema)](#postgresql-dual-schema)
+   - [Migrating from SQLite to PostgreSQL](#migrating-from-sqlite-to-postgresql)
+7. [Security](#security)
+8. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -99,6 +104,7 @@ Version history:
 | RAM | 512 MB |
 | Disk | 1 GB (for database and backups) |
 | Network | LAN access for crew devices |
+| Database | SQLite (built-in) or PostgreSQL 13+ (optional) |
 
 Python packages installed automatically: Flask, Werkzeug, gunicorn, WeasyPrint (PDF generation), APScheduler (backups), flask-limiter (login rate limiting), qrcode[pil] + Pillow (WiFi QR codes), dnspython (direct MX email delivery), pdfplumber + python-docx + openpyxl + xlrd + striprtf (document import/AI extraction), psycopg2-binary (optional PostgreSQL support).
 
@@ -124,7 +130,7 @@ sudo ./install.sh
 ./install.sh
 ```
 
-The installer: creates a Python venv, installs dependencies, initialises/migrates the SQLite database, creates backup directories, writes a systemd service unit (`321theater`) generates a SECRET_KEY, and starts the service.
+The installer: creates a Python venv, installs dependencies, initialises/migrates the SQLite database, creates backup directories, writes a systemd service unit (`321theater`), generates a SECRET_KEY, and starts the service. For PostgreSQL setup, see [Database Configuration](#database-configuration).
 
 After installation the app is available at `http://<server-ip>:<port>` (default port **5400**).
 
@@ -539,10 +545,15 @@ Events: LOGIN/LOGOUT · SHOW_CREATE/ARCHIVE/DELETE/RESTORE · FORM_SAVE · PDF_E
 
 Settings → Backups. Automatic hourly (keeps 24) and daily at midnight (keeps 30) SQLite backups in `backups/`. Click **Run Backup Now** for immediate backup.
 
-**Restore:**
+**SQLite Restore:**
 ```bash
 cp backups/daily/advance_YYYYMMDD_0000.db advance.db
 sudo systemctl restart 321theater
+```
+
+**PostgreSQL Backups:** When using PostgreSQL, use standard `pg_dump` for database backups. The in-app backup system backs up the SQLite bootstrap file (`advance.db`) only.
+```bash
+pg_dump -h localhost -U showadvance 321theater > backup_$(date +%Y%m%d).sql
 ```
 
 ### File Manager
@@ -555,6 +566,136 @@ Settings → God Mode (admin only).
 
 - **Active Sessions** — users on a show page in the last 5 minutes (user, show, tab, last seen)
 - **User Last Login** — last login timestamp per user
+
+---
+
+## Database Configuration
+
+321Theater supports two database backends: **SQLite** (default, zero-config) and **PostgreSQL** (recommended for production and multi-app environments).
+
+### SQLite (Default)
+
+Out of the box, all data lives in a single file: `advance.db`. No configuration needed. The installer handles initialization and migrations automatically.
+
+SQLite is ideal for single-server installs and development.
+
+### PostgreSQL (Dual-Schema)
+
+PostgreSQL mode uses **two schemas** within one database:
+
+| Schema | Default Name | Contents | Purpose |
+|--------|-------------|----------|---------|
+| **Shared** | `shared` | `users`, `user_groups`, `user_group_members`, `active_sessions`, `app_settings`, `audit_log`, `password_reset_tokens`, `user_pending_registration`, `site_messages`, `site_message_dismissals` | User/auth data — designed to be shared across multiple apps |
+| **App** | `theater321` | Shows, schedules, contacts, forms, assets, labor, exports, comments, and all other theater-specific tables | App-specific data |
+
+This separation means another app can connect to the same PostgreSQL database and share the user/auth system without touching theater data.
+
+#### Setup
+
+1. **Create a PostgreSQL database and user** on your server:
+   ```sql
+   CREATE DATABASE "321theater";
+   CREATE USER showadvance WITH PASSWORD 'your_secure_password';
+   GRANT ALL PRIVILEGES ON DATABASE "321theater" TO showadvance;
+   -- Grant schema creation permission:
+   ALTER DATABASE "321theater" OWNER TO showadvance;
+   ```
+
+2. **Create `db_config.ini`** in the app directory (copy from the example):
+   ```bash
+   cp db_config.ini.example db_config.ini
+   nano db_config.ini
+   ```
+
+   ```ini
+   [postgresql]
+   host           = localhost
+   port           = 5432
+   dbname         = 321theater
+   user           = showadvance
+   password       = your_secure_password
+   app_schema     = theater321
+   shared_schema  = shared
+   ```
+
+   This file is **gitignored** — credentials are never committed.
+
+3. **Initialize the PostgreSQL schemas and tables:**
+   ```bash
+   python3 init_db.py --init-postgres
+   ```
+   This creates both schemas and all tables. Safe to run multiple times (uses `IF NOT EXISTS`).
+
+4. **Set the app to use PostgreSQL:**
+   ```bash
+   # In the SQLite database, set db_type to 'postgres':
+   sqlite3 advance.db "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('db_type', 'postgres');"
+   ```
+
+5. **Restart the app:**
+   ```bash
+   sudo systemctl restart 321theater
+   ```
+
+#### Configuration Reference
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `host` | `localhost` | PostgreSQL server hostname |
+| `port` | `5432` | PostgreSQL server port |
+| `dbname` | `321theater` | Database name |
+| `user` | — | Database user |
+| `password` | — | Database password |
+| `app_schema` | `theater321` | Schema for theater-specific tables |
+| `shared_schema` | `shared` | Schema for user/auth tables (shared across apps) |
+
+Legacy note: the old `schema` key is still accepted as a fallback for `app_schema`.
+
+#### How it Works at Runtime
+
+When the app connects to PostgreSQL, it sets `search_path` to `"app_schema", "shared_schema"`. This means all SQL queries work with unqualified table names — no code changes needed. Foreign key references (e.g., `shows.created_by → users.id`) resolve correctly across schemas.
+
+SQLite remains the "bootstrap" database — it always stores the `db_type` setting so the app knows which backend to use on startup.
+
+### Migrating from SQLite to PostgreSQL
+
+Two options: **CLI** (recommended) or **Web UI**.
+
+#### CLI Migration
+
+```bash
+# 1. Ensure db_config.ini is configured (see above)
+
+# 2. Initialize PostgreSQL schemas and tables:
+python3 init_db.py --init-postgres
+
+# 3. Copy all data from SQLite to PostgreSQL:
+python3 init_db.py --migrate-to-postgres
+
+# 4. Set the app to use PostgreSQL:
+sqlite3 advance.db "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('db_type', 'postgres');"
+
+# 5. Restart:
+sudo systemctl restart 321theater
+```
+
+The migration is **idempotent** — duplicate rows are skipped via `ON CONFLICT DO NOTHING`. You can safely re-run it if interrupted. Tables are copied in foreign-key dependency order, and serial sequences are synced after copy so new inserts get correct IDs.
+
+Each table is routed to the correct schema: shared tables go to the `shared` schema, app tables go to the `theater321` schema.
+
+#### Web UI Migration
+
+If the app is already set to `db_type=postgres`, go to **Settings → Database** and click **Migrate Now**. This runs the same migration as the CLI command. Progress and per-table stats are shown in the browser.
+
+#### CLI Reference
+
+| Command | Description |
+|---------|-------------|
+| `python3 init_db.py` | Fresh SQLite init (skips if DB exists) |
+| `python3 init_db.py --force` | Destroy and reinitialize SQLite |
+| `python3 init_db.py --migrate` | Run schema migrations on existing SQLite DB |
+| `python3 init_db.py --init-postgres` | Create PostgreSQL schemas + tables from `db_config.ini` |
+| `python3 init_db.py --migrate-to-postgres` | Copy all SQLite data → PostgreSQL |
 
 ---
 
@@ -598,10 +739,19 @@ journalctl -u 321theater -f
 journalctl -u 321theater -n 100
 ```
 
-**Database migration errors:**
+**SQLite migration errors:**
 ```bash
 venv/bin/python init_db.py --migrate
 ```
+
+**PostgreSQL "no schema has been selected to create in":** Ensure your `db_config.ini` has valid `app_schema` and `shared_schema` values. The database user must have permission to create schemas. Re-run:
+```bash
+python3 init_db.py --init-postgres
+```
+
+**PostgreSQL connection refused:** Check that PostgreSQL is running, the host/port/credentials in `db_config.ini` are correct, and `pg_hba.conf` allows connections from the app server.
+
+**Falling back to SQLite:** If the app logs `PostgreSQL connection failed — falling back to SQLite`, check `db_config.ini` credentials and PostgreSQL server status. The app silently falls back to SQLite when PostgreSQL is unreachable.
 
 **Login rate limiting:** After 15 failed login attempts per minute from an IP, further attempts return HTTP 429. Wait 60 seconds or restart the app.
 
@@ -612,7 +762,9 @@ venv/bin/python init_db.py --migrate
 The git repository and codebase were previously named **ShowAdvance**. The rename to **321Theater** is in progress. For the current transition period:
 
 - The **service name** on new installs is `321theater` (old installs still use `showadvance` — both are auto-detected)
-- The **SQLite database file** remains `advance.db` until the upcoming PostgreSQL migration, at which point the database and schema will be named `321theater`
+- The **SQLite database file** remains `advance.db` as the bootstrap database (stores `db_type` setting even when using PostgreSQL)
+- The **PostgreSQL database** is named `321theater` with schemas `theater321` (app data) and `shared` (user/auth data)
 - The **syslog identifier** (`showadvance`) will update to `321theater` on the new server install — update any syslog filters at that time
 - The **folder** should be cloned as `321theater/` on new servers (`git clone <url> 321theater`)
 - Internal table names are generic (`shows`, `asset_types`, etc.) and require no renaming
+- The `shared` schema is designed for future multi-app use — other apps can share the same user/auth system by connecting to the same database and setting their `search_path` to include the `shared` schema

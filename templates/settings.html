@@ -679,35 +679,32 @@
 {% if user.role == 'admin' %}
 <div id="stab-database" class="stab-pane" style="display:none">
   <div class="form-section" style="margin-bottom:16px">
-    <div class="form-section-header"><span class="section-icon">◈</span> DATABASE CONFIGURATION</div>
+    <div class="form-section-header"><span class="section-icon">◈</span> DATABASE STATUS</div>
     <div class="form-section-body" style="max-width:600px">
-      <p class="field-hint" style="margin-bottom:16px">Configure the database backend. SQLite is the default for single-server installs. PostgreSQL supports multiple apps sharing one database via schema namespacing.</p>
-      <div class="field-group">
-        <label class="field-label">DATABASE TYPE</label>
-        <select id="db-type" class="field-input" onchange="toggleDbFields()" style="max-width:240px">
-          <option value="sqlite" {% if (db_settings.db_type or 'sqlite') == 'sqlite' %}selected{% endif %}>SQLite (local file)</option>
-          <option value="postgres" {% if db_settings.db_type == 'postgres' %}selected{% endif %}>PostgreSQL</option>
-        </select>
-      </div>
-      <div id="pg-fields" style="display:{% if db_settings.db_type == 'postgres' %}block{% else %}none{% endif %}">
-        <div class="field-hint" style="background:var(--bg-2,#23272e);border:1px solid var(--border,#333);border-radius:6px;padding:12px 14px;margin-top:4px;line-height:1.6">
-          PostgreSQL credentials are configured in <code>db_config.ini</code> on the server — not stored in the app.<br>
-          Copy <code>db_config.ini.example</code> to <code>db_config.ini</code>, fill in your values, and restart the app.<br>
-          <span class="text-dim" style="font-size:11px">This file is gitignored and never committed.</span>
-        </div>
+      <p class="field-hint" style="margin-bottom:16px">Database backend is configured via <code>db_config.ini</code> on the server and <code>db_type</code> in app_settings. Use the CLI to switch backends and run migrations.</p>
+      <div class="field-hint" style="background:var(--bg-2,#23272e);border:1px solid var(--border,#333);border-radius:6px;padding:12px 14px;line-height:1.8">
+        <strong>Current backend:</strong> <code>{{ db_settings.db_type or 'sqlite' }}</code><br>
+        {% if db_settings.db_type == 'postgres' %}
+        <strong>Host:</strong> <code>{{ db_settings.pg_host }}:{{ db_settings.pg_port }}/{{ db_settings.pg_dbname }}</code><br>
+        <strong>App schema:</strong> <code>{{ db_settings.pg_app_schema }}</code> &nbsp; <strong>Shared schema:</strong> <code>{{ db_settings.pg_shared_schema }}</code><br>
+        {% endif %}
+        <span class="text-dim" style="font-size:11px">
+          Edit <code>db_config.ini</code> to change credentials. See <code>db_config.ini.example</code> for format.<br>
+          CLI: <code>python3 init_db.py --init-postgres</code> &nbsp;|&nbsp; <code>python3 init_db.py --migrate-to-postgres</code>
+        </span>
       </div>
       <div id="db-msg" class="field-msg" style="display:none;margin-top:8px"></div>
-      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap">
+      <div style="margin-top:12px">
         <button class="btn btn-ghost" onclick="testDbConnection()">Test Connection</button>
-        <button class="btn btn-primary" onclick="saveDatabaseSettings()">Save Settings</button>
       </div>
     </div>
   </div>
 
-  <div class="form-section" id="migrate-section" style="margin-bottom:16px;display:{% if db_settings.db_type == 'postgres' %}block{% else %}none{% endif %}">
+  {% if db_settings.db_type == 'postgres' %}
+  <div class="form-section" id="migrate-section" style="margin-bottom:16px">
     <div class="form-section-header"><span class="section-icon">◈</span> MIGRATE FROM SQLITE → POSTGRESQL</div>
     <div class="form-section-body">
-      <p class="field-hint" style="margin-bottom:12px">Copy all data from the local SQLite file to PostgreSQL. Safe to run multiple times — duplicate rows are skipped automatically. Run this after configuring and saving PostgreSQL credentials above.</p>
+      <p class="field-hint" style="margin-bottom:12px">Copy all data from the local SQLite file to PostgreSQL. Safe to run multiple times — duplicate rows are skipped automatically. Shared tables (users, groups, sessions) go to the <code>{{ db_settings.pg_shared_schema }}</code> schema; app tables go to <code>{{ db_settings.pg_app_schema }}</code>.</p>
       <div id="migrate-msg" class="field-msg" style="display:none;margin-bottom:8px"></div>
       <button class="btn btn-primary" onclick="runMigration()">Migrate Now</button>
       <div id="migrate-results" style="display:none;margin-top:16px">
@@ -718,6 +715,7 @@
       </div>
     </div>
   </div>
+  {% endif %}
 </div>
 {% endif %}
 
@@ -1816,18 +1814,12 @@ async function adminDeleteFile(showId, fileId, btn) {
 })();
 
 /* ── Database Settings ──────────────────────────────────────────── */
-function toggleDbFields() {
-  const dbType = document.getElementById('db-type').value;
-  document.getElementById('pg-fields').style.display = dbType === 'postgres' ? 'block' : 'none';
-  document.getElementById('migrate-section').style.display = dbType === 'postgres' ? 'block' : 'none';
-}
-
 async function testDbConnection() {
   const msg = document.getElementById('db-msg');
   msg.style.display = '';
   msg.textContent = 'Testing...';
   msg.className = 'field-msg';
-  const payload = { db_type: document.getElementById('db-type').value };
+  const payload = { db_type: '{{ db_settings.db_type or "sqlite" }}' };
   try {
     const resp = await fetch('/settings/database/test', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
@@ -1835,23 +1827,6 @@ async function testDbConnection() {
     const d = await resp.json();
     msg.textContent = d.message;
     msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
-  } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
-}
-
-async function saveDatabaseSettings() {
-  const msg = document.getElementById('db-msg');
-  msg.style.display = '';
-  msg.textContent = 'Saving...';
-  msg.className = 'field-msg';
-  const payload = { db_type: document.getElementById('db-type').value };
-  try {
-    const resp = await fetch('/settings/database', {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
-    });
-    const d = await resp.json();
-    msg.textContent = d.success ? 'Saved. Restart the app to apply changes.' : (d.error || 'Save failed.');
-    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
-    if (d.success) toggleDbFields();
   } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
 }
 

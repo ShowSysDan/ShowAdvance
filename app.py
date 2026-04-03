@@ -189,7 +189,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.6.0'
+APP_VERSION = '2.7.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -2936,12 +2936,13 @@ def settings():
     db3.close()
 
     db_settings = {
-        'db_type':   all_settings.get('db_type', 'sqlite'),
-        'pg_host':   all_settings.get('pg_host', 'localhost'),
-        'pg_port':   all_settings.get('pg_port', '5432'),
-        'pg_dbname': all_settings.get('pg_dbname', '321theater'),
-        'pg_user':   all_settings.get('pg_user', ''),
-        'pg_schema': all_settings.get('pg_schema', '321theater'),
+        'db_type':          all_settings.get('db_type', 'sqlite'),
+        'pg_host':          all_settings.get('pg_host', 'localhost'),
+        'pg_port':          all_settings.get('pg_port', '5432'),
+        'pg_dbname':        all_settings.get('pg_dbname', '321theater'),
+        'pg_user':          all_settings.get('pg_user', ''),
+        'pg_app_schema':    all_settings.get('pg_app_schema', 'theater321'),
+        'pg_shared_schema': all_settings.get('pg_shared_schema', 'shared'),
     }
     ai_settings = {
         'ollama_enabled': all_settings.get('ollama_enabled', '0'),
@@ -4243,7 +4244,8 @@ def test_database_connection():
             dbname=settings.get('pg_dbname', '321theater'),
             user=settings.get('pg_user', ''),
             password=settings.get('pg_password', ''),
-            schema=settings.get('pg_schema', '321theater'),
+            app_schema=settings.get('pg_app_schema', 'theater321'),
+            shared_schema=settings.get('pg_shared_schema', 'shared'),
         )
         if ok:
             return jsonify({'success': True, 'message': 'Connected to PostgreSQL successfully.'})
