@@ -2172,17 +2172,17 @@ if __name__ == '__main__':
         print(f"Running migrations on: {DATABASE}")
         migrate_db()
     elif '--init-postgres' in sys.argv:
-        from db_adapter import read_db_settings
-        settings = read_db_settings(DATABASE)
-        if settings.get('db_type') != 'postgres':
-            print("No PostgreSQL settings found. Configure database settings in the app first.")
+        from db_adapter import _read_pg_config
+        settings = _read_pg_config(DATABASE)
+        if not settings.get('pg_host'):
+            print("db_config.ini not found or missing [postgresql] section. See db_config.ini.example.")
             sys.exit(1)
         init_db_postgres(settings)
     elif '--migrate-to-postgres' in sys.argv:
-        from db_adapter import read_db_settings
-        settings = read_db_settings(DATABASE)
-        if settings.get('db_type') != 'postgres':
-            print("db_type is not 'postgres' in app_settings — set it in the app first.")
+        from db_adapter import _read_pg_config
+        settings = _read_pg_config(DATABASE)
+        if not settings.get('pg_host'):
+            print("db_config.ini not found or missing [postgresql] section. See db_config.ini.example.")
             sys.exit(1)
         print(f"Migrating {DATABASE} → PostgreSQL ({settings.get('pg_host')}:{settings.get('pg_port')}/{settings.get('pg_dbname')}) ...")
 
