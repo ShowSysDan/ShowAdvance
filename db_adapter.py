@@ -2,7 +2,12 @@
 Database adapter for ShowAdvance.
 Provides a unified interface for SQLite and PostgreSQL connections.
 SQL written for SQLite (using ? placeholders) is automatically adapted for PostgreSQL.
+
+PostgreSQL credentials are read from db_config.ini (gitignored) in the same
+directory as the SQLite bootstrap file. db_type is still stored in the SQLite
+app_settings table and toggled via the Settings UI.
 """
+import configparser
 import re
 import sqlite3
 import os
@@ -216,32 +221,59 @@ class DBConnection:
         self.close()
 
 
+def _read_pg_config(database_path):
+    """
+    Read PostgreSQL credentials from db_config.ini, located in the same
+    directory as the SQLite bootstrap file. Returns a dict with pg_* keys,
+    or an empty dict if the file doesn't exist or can't be parsed.
+    """
+    config_path = os.path.join(os.path.dirname(os.path.abspath(database_path)), 'db_config.ini')
+    if not os.path.exists(config_path):
+        return {}
+    try:
+        cp = configparser.ConfigParser()
+        cp.read(config_path, encoding='utf-8')
+        sec = cp['postgresql'] if 'postgresql' in cp else {}
+        return {
+            'pg_host':     sec.get('host',     'localhost'),
+            'pg_port':     sec.get('port',     '5432'),
+            'pg_dbname':   sec.get('dbname',   '321theater'),
+            'pg_user':     sec.get('user',     ''),
+            'pg_password': sec.get('password', ''),
+            'pg_schema':   sec.get('schema',   '321theater'),
+        }
+    except Exception:
+        return {}
+
+
 def read_db_settings(database_path):
     """
-    Read database connection settings directly from the SQLite bootstrap file.
-    Always reads from SQLite regardless of configured db_type, so this is safe
-    to call before any DB connection is established. Results are cached for
-    _CACHE_TTL seconds to avoid a SQLite open on every request.
+    Read database connection settings.
+    - db_type is read from the SQLite bootstrap app_settings table.
+    - PostgreSQL credentials are read from db_config.ini (gitignored),
+      located in the same directory as the SQLite file.
+    Results are cached for _CACHE_TTL seconds.
     """
     global _settings_cache, _settings_ts
     if _settings_cache and (time.time() - _settings_ts) < _CACHE_TTL:
         return _settings_cache
-    if not os.path.exists(database_path):
-        return {}
-    try:
-        conn = sqlite3.connect(database_path)
-        conn.row_factory = _row_factory
-        rows = conn.execute(
-            "SELECT key, value FROM app_settings WHERE key IN "
-            "('db_type','pg_host','pg_port','pg_dbname','pg_user','pg_password','pg_schema')"
-        ).fetchall()
-        conn.close()
-        result = {r['key']: r['value'] for r in rows}
-        _settings_cache = result
-        _settings_ts = time.time()
-        return result
-    except Exception:
-        return {}
+    result = {}
+    if os.path.exists(database_path):
+        try:
+            conn = sqlite3.connect(database_path)
+            conn.row_factory = _row_factory
+            rows = conn.execute(
+                "SELECT key, value FROM app_settings WHERE key = 'db_type'"
+            ).fetchall()
+            conn.close()
+            result = {r['key']: r['value'] for r in rows}
+        except Exception:
+            pass
+    # Merge PG credentials from flat config file
+    result.update(_read_pg_config(database_path))
+    _settings_cache = result
+    _settings_ts = time.time()
+    return result
 
 
 _SAFE_IDENTIFIER_RE = re.compile(r'^[a-zA-Z0-9_]+$')

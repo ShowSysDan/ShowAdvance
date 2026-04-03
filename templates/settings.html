@@ -690,35 +690,10 @@
         </select>
       </div>
       <div id="pg-fields" style="display:{% if db_settings.db_type == 'postgres' %}block{% else %}none{% endif %}">
-        <div class="form-row cols-2">
-          <div class="field-group">
-            <label class="field-label">HOST</label>
-            <input type="text" id="pg-host" class="field-input" value="{{ db_settings.pg_host or 'localhost' }}" placeholder="localhost">
-          </div>
-          <div class="field-group">
-            <label class="field-label">PORT</label>
-            <input type="number" id="pg-port" class="field-input" value="{{ db_settings.pg_port or '5432' }}" placeholder="5432" style="max-width:120px">
-          </div>
-        </div>
-        <div class="form-row cols-2">
-          <div class="field-group">
-            <label class="field-label">DATABASE NAME</label>
-            <input type="text" id="pg-dbname" class="field-input" value="{{ db_settings.pg_dbname or '321theater' }}" placeholder="321theater">
-          </div>
-          <div class="field-group">
-            <label class="field-label">SCHEMA <span class="text-dim" style="font-size:10px">(namespace, for multi-app isolation)</span></label>
-            <input type="text" id="pg-schema" class="field-input" value="{{ db_settings.pg_schema or '321theater' }}" placeholder="321theater">
-          </div>
-        </div>
-        <div class="form-row cols-2">
-          <div class="field-group">
-            <label class="field-label">USERNAME</label>
-            <input type="text" id="pg-user" class="field-input" value="{{ db_settings.pg_user or '' }}" autocomplete="off">
-          </div>
-          <div class="field-group">
-            <label class="field-label">PASSWORD</label>
-            <input type="password" id="pg-password" class="field-input" value="" placeholder="(leave blank to keep current)" autocomplete="new-password">
-          </div>
+        <div class="field-hint" style="background:var(--bg-2,#23272e);border:1px solid var(--border,#333);border-radius:6px;padding:12px 14px;margin-top:4px;line-height:1.6">
+          PostgreSQL credentials are configured in <code>db_config.ini</code> on the server — not stored in the app.<br>
+          Copy <code>db_config.ini.example</code> to <code>db_config.ini</code>, fill in your values, and restart the app.<br>
+          <span class="text-dim" style="font-size:11px">This file is gitignored and never committed.</span>
         </div>
       </div>
       <div id="db-msg" class="field-msg" style="display:none;margin-top:8px"></div>
@@ -1852,15 +1827,7 @@ async function testDbConnection() {
   msg.style.display = '';
   msg.textContent = 'Testing...';
   msg.className = 'field-msg';
-  const payload = {
-    db_type: document.getElementById('db-type').value,
-    pg_host: document.getElementById('pg-host')?.value || '',
-    pg_port: document.getElementById('pg-port')?.value || '5432',
-    pg_dbname: document.getElementById('pg-dbname')?.value || '',
-    pg_user: document.getElementById('pg-user')?.value || '',
-    pg_password: document.getElementById('pg-password')?.value || '',
-    pg_schema: document.getElementById('pg-schema')?.value || '321theater',
-  };
+  const payload = { db_type: document.getElementById('db-type').value };
   try {
     const resp = await fetch('/settings/database/test', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
@@ -1876,21 +1843,13 @@ async function saveDatabaseSettings() {
   msg.style.display = '';
   msg.textContent = 'Saving...';
   msg.className = 'field-msg';
-  const payload = {
-    db_type: document.getElementById('db-type').value,
-    pg_host: document.getElementById('pg-host')?.value || '',
-    pg_port: document.getElementById('pg-port')?.value || '5432',
-    pg_dbname: document.getElementById('pg-dbname')?.value || '',
-    pg_user: document.getElementById('pg-user')?.value || '',
-    pg_password: document.getElementById('pg-password')?.value || '',
-    pg_schema: document.getElementById('pg-schema')?.value || '321theater',
-  };
+  const payload = { db_type: document.getElementById('db-type').value };
   try {
     const resp = await fetch('/settings/database', {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
     });
     const d = await resp.json();
-    msg.textContent = d.success ? 'Settings saved. Restart the app to apply changes.' : (d.error || 'Save failed.');
+    msg.textContent = d.success ? 'Saved. Restart the app to apply changes.' : (d.error || 'Save failed.');
     msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
     if (d.success) toggleDbFields();
   } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
