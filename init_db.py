@@ -2047,6 +2047,9 @@ def init_db_postgres(settings, seed=True):
     app_schema = settings.get('pg_app_schema', '') or settings.get('pg_schema', '') or 'theater321'
     shared_schema = settings.get('pg_shared_schema', '') or 'shared'
 
+    print(f"  app_schema={app_schema!r}, shared_schema={shared_schema!r}")
+    print(f"  host={settings.get('pg_host')}, dbname={settings.get('pg_dbname')}, user={settings.get('pg_user')}")
+
     try:
         conn = psycopg2.connect(
             host=settings.get('pg_host', 'localhost'),
@@ -2056,12 +2059,20 @@ def init_db_postgres(settings, seed=True):
             password=settings.get('pg_password', ''),
             connect_timeout=10,
         )
+        print("  Connected OK")
 
         # Create schemas with autocommit so they're committed immediately
         conn.autocommit = True
         cur = conn.cursor()
         cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{app_schema}"')
+        print(f"  CREATE SCHEMA {app_schema} OK")
         cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{shared_schema}"')
+        print(f"  CREATE SCHEMA {shared_schema} OK")
+
+        # Verify schemas exist
+        cur.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name IN (%s, %s)", (app_schema, shared_schema))
+        found = [r[0] for r in cur.fetchall()]
+        print(f"  Schemas found in DB: {found}")
         cur.close()
 
         # Switch to transactional mode for table creation
