@@ -626,16 +626,12 @@ This separation means another app can connect to the same PostgreSQL database an
    ```
    This creates both schemas and all tables. Safe to run multiple times (uses `IF NOT EXISTS`).
 
-4. **Set the app to use PostgreSQL:**
-   ```bash
-   # In the SQLite database, set db_type to 'postgres':
-   sqlite3 advance.db "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('db_type', 'postgres');"
-   ```
-
-5. **Restart the app:**
+4. **Restart the app:**
    ```bash
    sudo systemctl restart 321theater
    ```
+
+   The app auto-detects the backend: if `db_config.ini` exists with valid credentials, it uses PostgreSQL. No manual toggle needed.
 
 #### Configuration Reference
 
@@ -653,9 +649,11 @@ Legacy note: the old `schema` key is still accepted as a fallback for `app_schem
 
 #### How it Works at Runtime
 
-When the app connects to PostgreSQL, it sets `search_path` to `"app_schema", "shared_schema"`. This means all SQL queries work with unqualified table names — no code changes needed. Foreign key references (e.g., `shows.created_by → users.id`) resolve correctly across schemas.
+The app auto-detects the backend: if `db_config.ini` exists with valid `host` and `user` fields, it uses PostgreSQL. Otherwise it falls back to SQLite. No manual toggle or bootstrap database needed.
 
-SQLite remains the "bootstrap" database — it always stores the `db_type` setting so the app knows which backend to use on startup.
+When connecting to PostgreSQL, the app sets `search_path` to `"app_schema", "shared_schema"`. This means all SQL queries work with unqualified table names — no code changes needed. Foreign key references (e.g., `shows.created_by → users.id`) resolve correctly across schemas.
+
+To switch back to SQLite, simply rename or delete `db_config.ini` and restart.
 
 ### Migrating from SQLite to PostgreSQL
 
@@ -672,10 +670,7 @@ python3 init_db.py --init-postgres
 # 3. Copy all data from SQLite to PostgreSQL:
 python3 init_db.py --migrate-to-postgres
 
-# 4. Set the app to use PostgreSQL:
-sqlite3 advance.db "INSERT OR REPLACE INTO app_settings (key, value) VALUES ('db_type', 'postgres');"
-
-# 5. Restart:
+# 4. Restart (auto-detects PostgreSQL from db_config.ini):
 sudo systemctl restart 321theater
 ```
 

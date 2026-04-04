@@ -4203,56 +4203,31 @@ def check_field_key():
 
 # ─── Database Settings ─────────────────────────────────────────────────────────
 
-@app.route('/settings/database', methods=['POST'])
-@admin_required
-def save_database_settings():
-    data = request.get_json(force=True) or {}
-    db_type = data.get('db_type', 'sqlite')
-
-    # Only db_type is stored in the database. PG credentials live in db_config.ini.
-    # Write to SQLite bootstrap directly so it works even when active DB is PostgreSQL.
-    _sqlite_conn = sqlite3.connect(DATABASE)
-    _sqlite_conn.execute(
-        'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)', ('db_type', db_type)
-    )
-    _sqlite_conn.commit(); _sqlite_conn.close()
-
-    db_adapter.clear_settings_cache()
-    syslog_logger.info(f"SETTINGS_CHANGE key=database db_type={db_type} by={session.get('username')}")
-    return jsonify({'success': True})
-
-
 @app.route('/settings/database/test', methods=['POST'])
 @admin_required
 def test_database_connection():
-    data = request.get_json(force=True) or {}
-    db_type = data.get('db_type', 'sqlite')
+    settings = db_adapter.read_db_settings(DATABASE)
+    db_type = settings.get('db_type', 'sqlite')
 
     if db_type == 'sqlite':
         if os.path.exists(DATABASE):
             return jsonify({'success': True, 'message': 'SQLite database found and accessible.'})
         return jsonify({'success': False, 'message': 'SQLite database not found. Run init_db.py first.'})
 
-    if db_type == 'postgres':
-        # Credentials come from db_config.ini, not the request
-        settings = db_adapter.read_db_settings(DATABASE)
-        if not settings.get('pg_host'):
-            return jsonify({'success': False, 'message': 'db_config.ini not found or missing [postgresql] section. See db_config.ini.example.'})
-        ok, err = db_adapter.test_postgres_connection(
-            host=settings.get('pg_host', 'localhost'),
-            port=settings.get('pg_port', 5432),
-            dbname=settings.get('pg_dbname', '321theater'),
-            user=settings.get('pg_user', ''),
-            password=settings.get('pg_password', ''),
-            app_schema=settings.get('pg_app_schema', 'theater321'),
-            shared_schema=settings.get('pg_shared_schema', 'shared'),
-        )
-        if ok:
-            return jsonify({'success': True, 'message': 'Connected to PostgreSQL successfully.'})
-        app.logger.warning(f'PostgreSQL test failed: {err}')
-        return jsonify({'success': False, 'message': err or 'PostgreSQL connection failed.'})
-
-    return jsonify({'success': False, 'message': 'Unknown database type.'})
+    # PostgreSQL — credentials from db_config.ini
+    ok, err = db_adapter.test_postgres_connection(
+        host=settings.get('pg_host', 'localhost'),
+        port=settings.get('pg_port', 5432),
+        dbname=settings.get('pg_dbname', '321theater'),
+        user=settings.get('pg_user', ''),
+        password=settings.get('pg_password', ''),
+        app_schema=settings.get('pg_app_schema', 'theater321'),
+        shared_schema=settings.get('pg_shared_schema', 'shared'),
+    )
+    if ok:
+        return jsonify({'success': True, 'message': 'Connected to PostgreSQL successfully.'})
+    app.logger.warning(f'PostgreSQL test failed: {err}')
+    return jsonify({'success': False, 'message': err or 'PostgreSQL connection failed.'})
 
 
 @app.route('/settings/database/migrate', methods=['POST'])

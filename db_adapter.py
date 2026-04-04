@@ -257,28 +257,22 @@ def _read_pg_config(database_path):
 def read_db_settings(database_path):
     """
     Read database connection settings.
-    - db_type is read from the SQLite bootstrap app_settings table.
-    - PostgreSQL credentials are read from db_config.ini (gitignored),
-      located in the same directory as the SQLite file.
+    - If db_config.ini exists and has valid PostgreSQL credentials,
+      db_type is 'postgres' automatically.
+    - Otherwise falls back to SQLite.
     Results are cached for _CACHE_TTL seconds.
     """
     global _settings_cache, _settings_ts
     if _settings_cache and (time.time() - _settings_ts) < _CACHE_TTL:
         return _settings_cache
     result = {}
-    if os.path.exists(database_path):
-        try:
-            conn = sqlite3.connect(database_path)
-            conn.row_factory = _row_factory
-            rows = conn.execute(
-                "SELECT key, value FROM app_settings WHERE key = 'db_type'"
-            ).fetchall()
-            conn.close()
-            result = {r['key']: r['value'] for r in rows}
-        except Exception:
-            pass
-    # Merge PG credentials from flat config file
-    result.update(_read_pg_config(database_path))
+    # Check for PostgreSQL config file — its presence determines db_type
+    pg_config = _read_pg_config(database_path)
+    if pg_config.get('pg_host') and pg_config.get('pg_user'):
+        result['db_type'] = 'postgres'
+        result.update(pg_config)
+    else:
+        result['db_type'] = 'sqlite'
     _settings_cache = result
     _settings_ts = time.time()
     return result
