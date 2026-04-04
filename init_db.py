@@ -1504,6 +1504,10 @@ CREATE TABLE IF NOT EXISTS users (
     theme TEXT DEFAULT 'dark',
     last_login TIMESTAMP,
     must_change_password INTEGER DEFAULT 0,
+    email TEXT DEFAULT '',
+    is_readonly INTEGER DEFAULT 0,
+    email_confirmed INTEGER DEFAULT 1,
+    pending_approval INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1670,6 +1674,9 @@ CREATE TABLE IF NOT EXISTS show_comments (
     show_id    INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     body       TEXT NOT NULL,
+    deleted_at TIMESTAMP,
+    deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    edited_at  TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -2206,7 +2213,7 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
             rows = src.execute(f'SELECT * FROM {table}').fetchall()
         except Exception:
             # Table might not exist in older SQLite DBs
-            stats[table] = {'copied': 0, 'skipped': 0, 'error': 'table not found in source'}
+            stats[table] = {'copied': 0, 'skipped': 0, 'note': 'table not found in source'}
             continue
 
         if not rows:
@@ -2215,16 +2222,38 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
 
         _set_search_path_for(table)
 
-        col_names = list(rows[0].keys())
-        cols_str = ', '.join(f'"{c}"' for c in col_names)
-        placeholders = ', '.join(['%s'] * len(col_names))
+        # Get the columns that actually exist in the PG table
+        pg_cur.execute("""
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = %s
+              AND table_schema = ANY(string_to_array(current_setting('search_path'), ', '))
+        """, (table,))
+        pg_columns = {r[0] for r in pg_cur.fetchall()}
+
+        # Intersect: only copy columns present in BOTH SQLite and PG
+        sqlite_cols = list(rows[0].keys())
+        common_cols = [c for c in sqlite_cols if c in pg_columns]
+        dropped_cols = [c for c in sqlite_cols if c not in pg_columns]
+        if dropped_cols:
+            print(f"    ⚠ {table}: skipping columns not in PG: {dropped_cols}")
+
+        if not common_cols:
+            stats[table] = {'copied': 0, 'skipped': len(rows), 'note': 'no matching columns'}
+            continue
+
+        cols_str = ', '.join(f'"{c}"' for c in common_cols)
+        placeholders = ', '.join(['%s'] * len(common_cols))
+        # Build index map for extracting only common columns from each row
+        col_indices = [sqlite_cols.index(c) for c in common_cols]
 
         copied = 0
         skipped = 0
+        errors = []
 
         for row in rows:
             values = []
-            for v in row:
+            for idx in col_indices:
+                v = row[idx]
                 # Convert SQLite bytes to psycopg2 Binary for BYTEA columns
                 if isinstance(v, bytes):
                     import psycopg2
@@ -2233,21 +2262,30 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
                     values.append(v)
 
             try:
+                # Use SAVEPOINT so a failed row doesn't rollback the whole table
+                pg_cur.execute("SAVEPOINT row_sp")
                 pg_cur.execute(
                     f'INSERT INTO "{table}" ({cols_str}) VALUES ({placeholders}) ON CONFLICT DO NOTHING',
                     values
                 )
+                pg_cur.execute("RELEASE SAVEPOINT row_sp")
                 if pg_cur.rowcount > 0:
                     copied += 1
                 else:
                     skipped += 1
             except Exception as e:
                 skipped += 1
-                pg_conn.rollback()
-                _set_search_path_for(table)
+                pg_cur.execute("ROLLBACK TO SAVEPOINT row_sp")
+                pg_cur.execute("RELEASE SAVEPOINT row_sp")
+                if len(errors) < 3:
+                    errors.append(str(e).split('\n')[0])
 
         pg_conn.commit()
-        stats[table] = {'copied': copied, 'skipped': skipped}
+        stat = {'copied': copied, 'skipped': skipped}
+        if errors:
+            stat['errors'] = errors
+            print(f"    ⚠ {table}: {len(errors)}+ row errors, first: {errors[0][:120]}")
+        stats[table] = stat
 
     # Sync sequences so new inserts get correct IDs after copy
     serial_tables = [
@@ -2296,6 +2334,33 @@ if __name__ == '__main__':
             sys.exit(1)
         print(f"Running migrations on: {DATABASE}")
         migrate_db()
+    elif '--reset-postgres' in sys.argv:
+        from db_adapter import _read_pg_config
+        settings = _read_pg_config(DATABASE)
+        if not settings.get('pg_host'):
+            print("db_config.ini not found or missing [postgresql] section.")
+            sys.exit(1)
+        app_schema = settings.get('pg_app_schema', '') or settings.get('pg_schema', '') or 'theater321'
+        shared_schema = settings.get('pg_shared_schema', '') or 'shared'
+        confirm = input(f"This will DROP schemas '{app_schema}' and '{shared_schema}' and ALL their data. Type YES to confirm: ")
+        if confirm != 'YES':
+            print("Aborted.")
+            sys.exit(0)
+        import psycopg2
+        conn = psycopg2.connect(
+            host=settings.get('pg_host', 'localhost'),
+            port=int(settings.get('pg_port', 5432) or 5432),
+            dbname=settings.get('pg_dbname', '321theater'),
+            user=settings.get('pg_user', ''),
+            password=settings.get('pg_password', ''),
+        )
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute(f'DROP SCHEMA IF EXISTS "{app_schema}" CASCADE')
+        cur.execute(f'DROP SCHEMA IF EXISTS "{shared_schema}" CASCADE')
+        conn.close()
+        print(f"✓ Dropped schemas '{app_schema}' and '{shared_schema}'")
+        print("Now run: python3 init_db.py --init-postgres")
     elif '--init-postgres' in sys.argv:
         from db_adapter import _read_pg_config
         settings = _read_pg_config(DATABASE)
