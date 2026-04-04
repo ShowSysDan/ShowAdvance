@@ -2064,15 +2064,30 @@ def init_db_postgres(settings, seed=True):
         # Create schemas with autocommit so they're committed immediately
         conn.autocommit = True
         cur = conn.cursor()
-        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{app_schema}"')
-        print(f"  CREATE SCHEMA {app_schema} OK")
-        cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{shared_schema}"')
-        print(f"  CREATE SCHEMA {shared_schema} OK")
 
-        # Verify schemas exist
-        cur.execute("SELECT schema_name FROM information_schema.schemata WHERE schema_name IN (%s, %s)", (app_schema, shared_schema))
-        found = [r[0] for r in cur.fetchall()]
-        print(f"  Schemas found in DB: {found}")
+        pg_user = settings.get('pg_user', '')
+
+        for sch in (app_schema, shared_schema):
+            # Check if schema already exists (pg_namespace sees all, unlike information_schema)
+            cur.execute("SELECT nspowner, pg_get_userbyid(nspowner) FROM pg_namespace WHERE nspname = %s", (sch,))
+            row = cur.fetchone()
+            if row:
+                owner = row[1]
+                print(f"  Schema '{sch}' already exists (owner: {owner})")
+                # Ensure this user has CREATE + USAGE privileges
+                cur.execute("SELECT has_schema_privilege(%s, %s, 'CREATE')", (pg_user, sch))
+                can_create = cur.fetchone()[0]
+                if not can_create:
+                    print(f"  ✗ User '{pg_user}' lacks CREATE privilege on schema '{sch}'")
+                    print(f"    Fix: connect as the DB owner and run:")
+                    print(f"      GRANT ALL ON SCHEMA \"{sch}\" TO \"{pg_user}\";")
+                    cur.close()
+                    conn.close()
+                    return False
+            else:
+                cur.execute(f'CREATE SCHEMA IF NOT EXISTS "{sch}"')
+                print(f"  Created schema '{sch}'")
+
         cur.close()
 
         # Switch to transactional mode for table creation
