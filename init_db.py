@@ -1999,11 +1999,14 @@ CREATE INDEX IF NOT EXISTS idx_ai_sessions_status ON ai_sessions(status);
 """
 
 
-# Tables that belong in the shared schema (user/auth — reusable across apps)
+# Tables that belong in the shared schema (user/auth — reusable across apps).
+# Only tables whose FK references stay within the shared schema belong here.
+# Tables like active_sessions and audit_log reference shows (app schema)
+# so they must live in the app schema.
 SHARED_TABLES = {
-    'users', 'user_groups', 'user_group_members', 'active_sessions',
-    'app_settings', 'audit_log', 'password_reset_tokens',
-    'user_pending_registration', 'site_messages', 'site_message_dismissals',
+    'users', 'user_groups', 'user_group_members', 'app_settings',
+    'password_reset_tokens', 'user_pending_registration',
+    'site_messages', 'site_message_dismissals',
 }
 
 # Regex to extract the table name from a CREATE TABLE statement

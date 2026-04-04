@@ -585,8 +585,8 @@ PostgreSQL mode uses **two schemas** within one database:
 
 | Schema | Default Name | Contents | Purpose |
 |--------|-------------|----------|---------|
-| **Shared** | `shared` | `users`, `user_groups`, `user_group_members`, `active_sessions`, `app_settings`, `audit_log`, `password_reset_tokens`, `user_pending_registration`, `site_messages`, `site_message_dismissals` | User/auth data — designed to be shared across multiple apps |
-| **App** | `theater321` | Shows, schedules, contacts, forms, assets, labor, exports, comments, and all other theater-specific tables | App-specific data |
+| **Shared** | `shared` | `users`, `user_groups`, `user_group_members`, `app_settings`, `password_reset_tokens`, `user_pending_registration`, `site_messages`, `site_message_dismissals` | User/auth data — designed to be shared across multiple apps |
+| **App** | `theater321` | Shows, schedules, contacts, forms, assets, labor, exports, comments, active_sessions, audit_log, and all other theater-specific tables | App-specific data |
 
 This separation means another app can connect to the same PostgreSQL database and share the user/auth system without touching theater data.
 
