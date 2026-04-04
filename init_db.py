@@ -2269,17 +2269,17 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
         'asset_logs',
     ]
     for table in serial_tables:
-        _set_search_path_for(table)
         try:
+            _set_search_path_for(table)
             pg_cur.execute(f"""
                 SELECT setval(
                     pg_get_serial_sequence('"{table}"', 'id'),
                     COALESCE((SELECT MAX(id) FROM "{table}"), 1)
                 )
             """)
+            pg_conn.commit()
         except Exception:
-            pass
-    pg_conn.commit()
+            pg_conn.rollback()
 
     src.close()
     pg_cur.close()
