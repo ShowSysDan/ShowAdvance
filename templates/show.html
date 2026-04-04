@@ -385,7 +385,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
             class="btn btn-sm {% if loop.first %}btn-primary{% else %}btn-ghost{% endif %} sched-day-tab"
             data-perf-id="{{ p.id }}"
             onclick="switchSchedDay({{ p.id }}, this)">
-      DAY {{ loop.index }}{% if p.perf_date %} · {{ p.perf_date[5:] | replace('-','/') }}{% endif %}
+      DAY {{ loop.index }}{% if p.perf_date %} · {{ (p.perf_date|string)[5:] | replace('-','/') }}{% endif %}
     </button>
     {% endfor %}
   </div>
@@ -426,7 +426,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
             <option value="">Copy from…</option>
             {% for op in performances %}
             {% if op.id != p.id %}
-            <option value="{{ op.id }}">Day {{ loop.index }}{% if op.perf_date %} ({{ op.perf_date[5:] | replace('-','/') }}){% endif %}</option>
+            <option value="{{ op.id }}">Day {{ loop.index }}{% if op.perf_date %} ({{ o(p.perf_date|string)[5:] | replace('-','/') }}){% endif %}</option>
             {% endif %}
             {% endfor %}
           </select>
