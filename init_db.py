@@ -2065,7 +2065,11 @@ def init_db_postgres(settings, seed=True):
         conn.autocommit = True
         cur = conn.cursor()
 
-        pg_user = settings.get('pg_user', '')
+        # Use current_user (as PostgreSQL sees it) for privilege checks —
+        # PG lowercases unquoted identifiers, so the config value may differ in case.
+        cur.execute("SELECT current_user")
+        pg_user = cur.fetchone()[0]
+        print(f"  Connected as PG role: {pg_user}")
 
         for sch in (app_schema, shared_schema):
             # Check if schema already exists (pg_namespace sees all, unlike information_schema)
@@ -2075,10 +2079,10 @@ def init_db_postgres(settings, seed=True):
                 owner = row[1]
                 print(f"  Schema '{sch}' already exists (owner: {owner})")
                 # Ensure this user has CREATE + USAGE privileges
-                cur.execute("SELECT has_schema_privilege(%s, %s, 'CREATE')", (pg_user, sch))
+                cur.execute("SELECT has_schema_privilege(current_user, %s, 'CREATE')", (sch,))
                 can_create = cur.fetchone()[0]
                 if not can_create:
-                    print(f"  ✗ User '{pg_user}' lacks CREATE privilege on schema '{sch}'")
+                    print(f"  ✗ Role '{pg_user}' lacks CREATE privilege on schema '{sch}'")
                     print(f"    Fix: connect as the DB owner and run:")
                     print(f"      GRANT ALL ON SCHEMA \"{sch}\" TO \"{pg_user}\";")
                     cur.close()
