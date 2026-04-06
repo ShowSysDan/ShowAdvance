@@ -363,6 +363,24 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
         <p class="text-dim" style="font-size:12px;grid-column:1/-1">No fields configured. Add fields in Settings → Form Fields → Schedule Template.</p>
         {% endfor %}
 
+        {# ── Load-In / Load-Out (read-only, from Advance Sheet) ─────────── #}
+        {% if show.load_in_date or show.load_in_time or show.load_out_date or show.load_out_time %}
+        <div class="field-group">
+          <label class="field-label">LOAD-IN</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ show.load_in_date or '' }}{% if show.load_in_date and show.load_in_time %} · {% endif %}{{ show.load_in_time or '' }}{{ '—' if not show.load_in_date and not show.load_in_time }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
+        <div class="field-group">
+          <label class="field-label">LOAD-OUT</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ show.load_out_date or '' }}{% if show.load_out_date and show.load_out_time %} · {% endif %}{{ show.load_out_time or '' }}{{ '—' if not show.load_out_date and not show.load_out_time }}
+          </div>
+          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
+        {% endif %}
+
         {# ── Global WiFi (read-only) ──────────────────────────────────────── #}
         {% if global_wifi_network %}
         <div class="field-group" style="grid-column:1 / -1">
@@ -376,42 +394,6 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
       </div>
     </div>
   </div>
-
-  {# ── Load-In / Load-Out (from Advance Sheet) ───────────────────────────── #}
-  {% if show.load_in_date or show.load_in_time or show.load_out_date or show.load_out_time %}
-  <div class="form-section">
-    <div class="form-section-header"><span class="section-icon">◈</span> LOAD-IN / LOAD-OUT</div>
-    <div class="form-section-body">
-      <div class="form-row cols-4">
-        <div class="field-group">
-          <label class="field-label">LOAD-IN DATE</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ show.load_in_date or '—' }}
-          </div>
-        </div>
-        <div class="field-group">
-          <label class="field-label">LOAD-IN TIME</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ show.load_in_time or '—' }}
-          </div>
-        </div>
-        <div class="field-group">
-          <label class="field-label">LOAD-OUT DATE</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ show.load_out_date or '—' }}
-          </div>
-        </div>
-        <div class="field-group">
-          <label class="field-label">LOAD-OUT TIME</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ show.load_out_time or '—' }}
-          </div>
-        </div>
-      </div>
-      <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-    </div>
-  </div>
-  {% endif %}
 
   {# ── Day Tabs (multi-performance) ─────────────────────────────────────── #}
   {% if performances | length > 1 %}
