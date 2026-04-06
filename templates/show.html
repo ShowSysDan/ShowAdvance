@@ -377,6 +377,42 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
     </div>
   </div>
 
+  {# ── Load-In / Load-Out (from Advance Sheet) ───────────────────────────── #}
+  {% if show.load_in_date or show.load_in_time or show.load_out_date or show.load_out_time %}
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> LOAD-IN / LOAD-OUT</div>
+    <div class="form-section-body">
+      <div class="form-row cols-4">
+        <div class="field-group">
+          <label class="field-label">LOAD-IN DATE</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ show.load_in_date or '—' }}
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label">LOAD-IN TIME</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ show.load_in_time or '—' }}
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label">LOAD-OUT DATE</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ show.load_out_date or '—' }}
+          </div>
+        </div>
+        <div class="field-group">
+          <label class="field-label">LOAD-OUT TIME</label>
+          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {{ show.load_out_time or '—' }}
+          </div>
+        </div>
+      </div>
+      <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+    </div>
+  </div>
+  {% endif %}
+
   {# ── Day Tabs (multi-performance) ─────────────────────────────────────── #}
   {% if performances | length > 1 %}
   <div class="sched-day-tabs" style="display:flex;gap:6px;padding:0 0 0 0;margin-bottom:0">
