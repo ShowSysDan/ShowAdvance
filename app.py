@@ -1531,11 +1531,6 @@ def save_advance(show_id):
     data = request.get_json(force=True) or {}
     db = get_db()
 
-    # DEBUG: log load_in fields
-    _li_keys = {k: v for k, v in data.items() if 'load_in' in k}
-    if _li_keys:
-        app.logger.warning(f"DEBUG save_advance show={show_id} load_in_fields={_li_keys}")
-
     for key, value in data.items():
         db.execute("""
             INSERT OR REPLACE INTO advance_data (show_id, field_key, field_value, updated_at)
@@ -1580,15 +1575,6 @@ def save_advance(show_id):
     log_audit(db, 'FORM_SAVE', 'form', show_id, show_id=show_id, detail='type=advance')
 
     db.commit()
-
-    # DEBUG: verify load_in_time actually persisted
-    if _li_keys:
-        db2 = get_db()
-        row = db2.execute('SELECT load_in_time FROM shows WHERE id=?', (show_id,)).fetchone()
-        adv_row = db2.execute("SELECT field_value FROM advance_data WHERE show_id=? AND field_key='load_in_time'", (show_id,)).fetchone()
-        app.logger.warning(f"DEBUG post-commit show={show_id} shows.load_in_time={row['load_in_time']!r} advance_data={adv_row['field_value']!r if adv_row else 'MISSING'}")
-        db2.close()
-
     db.close()
     syslog_logger.info(f"FORM_SAVE show_id={show_id} type=advance by={session.get('username')}")
     return jsonify({'success': True})
