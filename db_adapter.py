@@ -188,13 +188,17 @@ class DBConnection:
                 cur.execute(adapted_sql, params)
                 adapted = AdaptedCursor(cur, 'postgres')
                 if needs_lastval:
+                    lv_cur = self._conn.cursor()
+                    lv_cur.execute("SAVEPOINT _lastval_sp")
                     try:
-                        cur.execute("SELECT lastval()")
-                        row = cur.fetchone()
+                        lv_cur.execute("SELECT lastval()")
+                        row = lv_cur.fetchone()
                         adapted.lastrowid = row[0] if row else None
+                        lv_cur.execute("RELEASE SAVEPOINT _lastval_sp")
                     except Exception:
-                        self._conn.rollback()
+                        lv_cur.execute("ROLLBACK TO SAVEPOINT _lastval_sp")
                         adapted.lastrowid = None
+                    lv_cur.close()
                 return adapted
             except psycopg2.errors.UniqueViolation as e:
                 self._conn.rollback()
