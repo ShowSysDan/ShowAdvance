@@ -493,9 +493,13 @@ def get_form_fields_for_template():
     ).fetchall()
     db.close()
 
+    # Keys already hardcoded in the template (load-in/out section)
+    _hardcoded_keys = {'load_in_date', 'load_in_time', 'load_out_date', 'load_out_time'}
     field_map = {}
     for f in fields:
         fd = dict(f)
+        if fd['field_key'] in _hardcoded_keys:
+            continue  # skip — these are rendered by the hardcoded load-in/out section
         if fd['options_json']:
             try:
                 fd['options'] = json.loads(fd['options_json'])
