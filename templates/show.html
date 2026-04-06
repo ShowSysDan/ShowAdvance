@@ -281,7 +281,7 @@
           <label class="field-label">LOAD-IN TIME</label>
           <input type="text" class="field-input adv-field" data-key="load_in_time"
                  id="load-in-time" value="{{ show.load_in_time or '' }}"
-                 placeholder="e.g. 8:00 AM"
+                 placeholder="08:00" maxlength="5"
                  {% if restricted %}disabled{% endif %}>
         </div>
         <div class="field-group">
@@ -294,12 +294,12 @@
           <label class="field-label">LOAD-OUT TIME</label>
           <input type="text" class="field-input adv-field" data-key="load_out_time"
                  id="load-out-time" value="{{ show.load_out_time or '' }}"
-                 placeholder="e.g. 11:00 PM"
+                 placeholder="23:00" maxlength="5"
                  {% if restricted %}disabled{% endif %}>
         </div>
       </div>
       <p class="field-note" style="margin:6px 0 0;font-size:11px;color:var(--text-muted)">
-        Used to calculate asset rental costs — weekly rate applies when load period is 7+ days.
+        Times use 24-hour format (e.g. 08:00, 23:00). Used to calculate asset rental costs — weekly rate applies when load period is 7+ days.
       </p>
     </div>
   </div>
