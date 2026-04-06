@@ -2434,7 +2434,7 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
         db2.commit()
         db2.close()
     except Exception as e:
-        syslog_logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=advance error={e}")
+        app.logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=advance error={e}")
         pdf_bytes = None
 
     syslog_logger.info(
@@ -2546,7 +2546,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
         db2.commit()
         db2.close()
     except Exception as e:
-        syslog_logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=schedule error={e}")
+        app.logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=schedule error={e}")
         pdf_bytes = None
 
     syslog_logger.info(
@@ -2578,7 +2578,7 @@ def export_advance(show_id):
         resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
     except Exception as e:
-        syslog_logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=advance error={e}")
+        app.logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=advance error={e}")
         resp = make_response(html)
         resp.headers['Content-Type'] = 'text/html'
         return resp
@@ -2606,7 +2606,7 @@ def export_schedule(show_id):
         resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
     except Exception as e:
-        syslog_logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=schedule error={e}")
+        app.logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=schedule error={e}")
         resp = make_response(html)
         resp.headers['Content-Type'] = 'text/html'
         return resp
@@ -2694,7 +2694,7 @@ def export_postnotes(show_id):
         resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
     except Exception as e:
-        syslog_logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=postnotes error={e}")
+        app.logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=postnotes error={e}")
         resp = make_response(html)
         resp.headers['Content-Type'] = 'text/html'
         return resp

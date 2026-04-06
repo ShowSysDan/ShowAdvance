@@ -63,6 +63,12 @@ _INSERT_OR_REPLACE_RE = re.compile(
 )
 _INSERT_RE = re.compile(r'^\s*INSERT\b', re.IGNORECASE)
 
+# SQLite datetime('now', '-N unit') → PostgreSQL NOW() +/- INTERVAL 'N unit'
+_SQLITE_DATETIME_RE = re.compile(
+    r"datetime\(\s*'now'\s*,\s*'(-?)(\d+\s+\w+)'\s*\)",
+    re.IGNORECASE
+)
+
 # Conflict columns for each table (used for INSERT OR REPLACE → ON CONFLICT ... DO UPDATE SET)
 _CONFLICT_COLS = {
     'app_settings':      ['key'],
@@ -127,6 +133,14 @@ class DBConnection:
 
         result = sql.replace('?', '%s')
 
+        # datetime('now', '-60 seconds') → NOW() - INTERVAL '60 seconds'
+        def _pg_datetime(m):
+            sign = m.group(1)
+            interval = m.group(2)
+            op = '-' if sign == '-' else '+'
+            return f"(NOW() {op} INTERVAL '{interval}')"
+        result = _SQLITE_DATETIME_RE.sub(_pg_datetime, result)
+
         # INSERT OR IGNORE → INSERT INTO ... ON CONFLICT DO NOTHING
         if _INSERT_OR_IGNORE_RE.search(result):
             result = _INSERT_OR_IGNORE_RE.sub('INSERT INTO', result)
@@ -181,7 +195,11 @@ class DBConnection:
                         adapted.lastrowid = None
                 return adapted
             except psycopg2.errors.UniqueViolation as e:
+                self._conn.rollback()
                 raise DBIntegrityError(str(e)) from e
+            except Exception:
+                self._conn.rollback()
+                raise
         else:
             try:
                 cur = self._conn.execute(adapted_sql, params)
