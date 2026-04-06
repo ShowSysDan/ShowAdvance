@@ -107,7 +107,8 @@
   {% endif %}
 
   <!-- Info Bar -->
-  <div class="info-bar" style="grid-template-columns: 1fr {% for _ in _bar_fields %}1fr {% endfor %}">
+  {% set _has_load = show.load_in_date or show.load_in_time or show.load_out_date or show.load_out_time %}
+  <div class="info-bar" style="grid-template-columns: 1fr {% for _ in _bar_fields %}1fr {% endfor %}{% if _has_load %} 1fr 1fr{% endif %}">
     <div class="info-item">
       <div class="lbl">Venue</div>
       <div class="val">{{ show.venue or '—' }}</div>
@@ -121,6 +122,16 @@
       </div>
     </div>
     {% endfor %}
+    {% if _has_load %}
+    <div class="info-item">
+      <div class="lbl">Load-In</div>
+      <div class="val">{{ show.load_in_date or '' }}{% if show.load_in_date and show.load_in_time %} · {% endif %}{{ show.load_in_time or '' }}{{ '—' if not show.load_in_date and not show.load_in_time }}</div>
+    </div>
+    <div class="info-item">
+      <div class="lbl">Load-Out</div>
+      <div class="val">{{ show.load_out_date or '' }}{% if show.load_out_date and show.load_out_time %} · {% endif %}{{ show.load_out_time or '' }}{{ '—' if not show.load_out_date and not show.load_out_time }}</div>
+    </div>
+    {% endif %}
   </div>
 
   {% for f in _full_fields %}
@@ -131,18 +142,6 @@
   </div>
   {% endif %}
   {% endfor %}
-
-  <!-- Load-In / Load-Out -->
-  {% if show.load_in_date or show.load_in_time or show.load_out_date or show.load_out_time %}
-  <div style="background:#f5f5f5; border:1px solid #ddd; padding:5px 10px; margin-bottom:8px; font-size:8.5pt; border-radius:3px; display:flex; gap:18px;">
-    {% if show.load_in_date or show.load_in_time %}
-    <span><strong>LOAD-IN:</strong> {{ show.load_in_date or '' }}{% if show.load_in_time %} {{ show.load_in_time }}{% endif %}</span>
-    {% endif %}
-    {% if show.load_out_date or show.load_out_time %}
-    <span><strong>LOAD-OUT:</strong> {{ show.load_out_date or '' }}{% if show.load_out_time %} {{ show.load_out_time }}{% endif %}</span>
-    {% endif %}
-  </div>
-  {% endif %}
 
   <!-- Crew Call Times -->
   {% if crew_call_times %}
