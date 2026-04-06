@@ -331,15 +331,31 @@ function bindAdvanceForm() {
   if (!form) return;
   form.addEventListener('change', () => { evaluateAllConditionals(); scheduleSave(); });
   form.addEventListener('input', () => scheduleSave());
+
+  // Normalize load-in/out time fields to 24-hour HH:MM on blur
+  ['load_in_time', 'load_out_time'].forEach(key => {
+    const el = form.querySelector(`[data-key="${key}"]`);
+    if (el) el.addEventListener('blur', () => {
+      const parsed = parseTimeToHHMM(el.value);
+      if (parsed !== el.value) {
+        el.value = parsed;
+        scheduleSave();
+      }
+    });
+  });
 }
 
 function collectAdvanceData() {
   const data = {};
+  const _timeKeys = new Set(['load_in_time', 'load_out_time']);
   document.querySelectorAll('#advance-form .adv-field').forEach(el => {
     const key = el.dataset.key;
     if (!key) return;
     if (el.type === 'checkbox') {
       data[key] = el.checked ? 'true' : 'false';
+    } else if (_timeKeys.has(key) && el.value) {
+      data[key] = parseTimeToHHMM(el.value);
+      el.value = data[key];
     } else {
       data[key] = el.value;
     }

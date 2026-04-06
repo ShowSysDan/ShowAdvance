@@ -1550,17 +1550,19 @@ def save_advance(show_id):
         db.execute('UPDATE shows SET venue=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
                    (data['venue'], show_id))
     if 'load_in_date' in data:
+        val = data['load_in_date'].strip() if data['load_in_date'] else None
         db.execute('UPDATE shows SET load_in_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                   (data['load_in_date'] or None, show_id))
+                   (val or None, show_id))
     if 'load_in_time' in data:
         db.execute('UPDATE shows SET load_in_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                   (data['load_in_time'], show_id))
+                   (data['load_in_time'].strip() if data['load_in_time'] else '', show_id))
     if 'load_out_date' in data:
+        val = data['load_out_date'].strip() if data['load_out_date'] else None
         db.execute('UPDATE shows SET load_out_date=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                   (data['load_out_date'] or None, show_id))
+                   (val or None, show_id))
     if 'load_out_time' in data:
         db.execute('UPDATE shows SET load_out_time=?, updated_at=CURRENT_TIMESTAMP WHERE id=?',
-                   (data['load_out_time'], show_id))
+                   (data['load_out_time'].strip() if data['load_out_time'] else '', show_id))
 
     # Track last saved
     db.execute("""
