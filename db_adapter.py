@@ -169,7 +169,8 @@ class DBConnection:
             return result, False
 
         # Plain INSERT — needs lastval() after for lastrowid
-        if _INSERT_RE.match(result):
+        # Skip for ON CONFLICT (upserts don't always call nextval)
+        if _INSERT_RE.match(result) and 'ON CONFLICT' not in result.upper():
             return result, True
 
         return result, False
@@ -192,6 +193,7 @@ class DBConnection:
                         row = cur.fetchone()
                         adapted.lastrowid = row[0] if row else None
                     except Exception:
+                        self._conn.rollback()
                         adapted.lastrowid = None
                 return adapted
             except psycopg2.errors.UniqueViolation as e:
