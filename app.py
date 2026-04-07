@@ -21,6 +21,7 @@ from io import BytesIO
 
 import db_adapter
 from db_adapter import DBIntegrityError
+import s3_storage
 
 from flask import (Flask, render_template, request, redirect, url_for,
                    flash, session, jsonify, make_response, abort)
@@ -792,16 +793,28 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
     try:
         with app.app_context():
             if pdf_type == 'advance':
-                _, _, show_dict, pdf_bytes = _build_advance_pdf(
+                _, pdf_version, show_dict, pdf_bytes, pdf_log_id = _build_advance_pdf(
                     show_id, exported_by_id=exported_by_id, base_url='/'
                 )
             else:
-                _, _, show_dict, pdf_bytes = _build_schedule_pdf(
+                _, pdf_version, show_dict, pdf_bytes, pdf_log_id = _build_schedule_pdf(
                     show_id, exported_by_id=exported_by_id, base_url='/'
                 )
     except Exception as e:
         app.logger.error(f'PDF build failed for email show={show_id} type={pdf_type}: {e}')
         return False, f'PDF generation failed: {e}', 0
+
+    # Push PDF to S3 for archival (synchronous — no user waiting on this path)
+    if pdf_bytes and pdf_log_id and s3_storage.is_configured():
+        try:
+            s3_key = f"exports/{show_id}/{pdf_type}/v{pdf_version}.pdf"
+            s3_storage.upload_file(s3_key, pdf_bytes, 'application/pdf')
+            _db_s3 = get_db()
+            _db_s3.execute('UPDATE export_log SET s3_key=? WHERE id=?', (s3_key, pdf_log_id))
+            _db_s3.commit()
+            _db_s3.close()
+        except Exception as e:
+            app.logger.error(f"S3 push failed for email PDF show={show_id} type={pdf_type}: {e}")
 
     if not pdf_bytes:
         return False, 'PDF generation produced no output.', 0
@@ -2132,11 +2145,23 @@ def upload_attachment(show_id):
     filename  = secure_filename(f.filename) or 'file'
     mime_type = f.content_type or 'application/octet-stream'
     db = get_db()
+    # Insert row first (without file data) to get the auto-assigned id
     cur = db.execute("""
         INSERT INTO show_attachments (show_id, uploaded_by, filename, mime_type, file_data, file_size)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (show_id, session['user_id'], filename, mime_type, data, len(data)))
+        VALUES (?, ?, ?, ?, NULL, ?)
+    """, (show_id, session['user_id'], filename, mime_type, len(data)))
     aid = cur.lastrowid
+    # Upload to S3; fall back to DB storage if S3 is unavailable
+    if s3_storage.is_configured():
+        try:
+            s3_key = f"attachments/{show_id}/{aid}/{filename}"
+            s3_storage.upload_file(s3_key, data, mime_type)
+            db.execute('UPDATE show_attachments SET s3_key=? WHERE id=?', (s3_key, aid))
+        except Exception as e:
+            app.logger.warning(f"S3 upload failed for attachment {aid}, falling back to DB: {e}")
+            db.execute('UPDATE show_attachments SET file_data=? WHERE id=?', (data, aid))
+    else:
+        db.execute('UPDATE show_attachments SET file_data=? WHERE id=?', (data, aid))
     log_audit(db, 'FILE_UPLOAD', 'attachment', aid, show_id=show_id, detail=filename)
     db.commit()
     row = db.execute("""
@@ -2172,7 +2197,17 @@ def download_attachment(show_id, aid):
     db.close()
     if not row:
         abort(404)
-    resp = make_response(bytes(row['file_data']))
+    if row['s3_key']:
+        try:
+            data = s3_storage.download_file(row['s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 download failed for attachment {aid}: {e}")
+            abort(503)
+    elif row['file_data']:
+        data = bytes(row['file_data'])
+    else:
+        abort(404)
+    resp = make_response(data)
     resp.headers['Content-Type'] = row['mime_type']
     resp.headers['Content-Disposition'] = _safe_content_disposition(row['filename'])
     return resp
@@ -2193,6 +2228,11 @@ def delete_attachment(show_id, aid):
     if row['uploaded_by'] != session['user_id'] and session.get('user_role') != 'admin':
         db.close()
         return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    if row['s3_key']:
+        try:
+            s3_storage.delete_file(row['s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 delete failed for attachment {aid} key={row['s3_key']}: {e}")
     log_audit(db, 'FILE_DELETE', 'attachment', aid, show_id=show_id,
               detail=row['filename'] if row else str(aid))
     db.execute('DELETE FROM show_attachments WHERE id=?', (aid,))
@@ -2432,14 +2472,10 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
                                version=new_v,
                                export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
 
-    # Store PDF bytes in export_log for re-download
+    # Generate PDF bytes (S3 push is handled by the caller)
     try:
         from weasyprint import HTML as WP_HTML
         pdf_bytes = WP_HTML(string=html, base_url=base_url).write_pdf()
-        db2 = get_db()
-        db2.execute('UPDATE export_log SET pdf_data=? WHERE id=?', (pdf_bytes, log_id))
-        db2.commit()
-        db2.close()
     except Exception as e:
         app.logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=advance error={e}")
         pdf_bytes = None
@@ -2447,7 +2483,7 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
     syslog_logger.info(
         f"PDF_EXPORT show_id={show_id} type=advance v={new_v} by={exported_by_id}"
     )
-    return html, new_v, dict(show), pdf_bytes
+    return html, new_v, dict(show), pdf_bytes, log_id
 
 
 def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
@@ -2544,14 +2580,10 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
                            version=new_v,
                            export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
 
-    # Store PDF bytes in export_log for re-download
+    # Generate PDF bytes (S3 push is handled by the caller)
     try:
         from weasyprint import HTML as WP_HTML
         pdf_bytes = WP_HTML(string=html, base_url=base_url).write_pdf()
-        db2 = get_db()
-        db2.execute('UPDATE export_log SET pdf_data=? WHERE id=?', (pdf_bytes, log_id))
-        db2.commit()
-        db2.close()
     except Exception as e:
         app.logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=schedule error={e}")
         pdf_bytes = None
@@ -2559,7 +2591,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
     syslog_logger.info(
         f"PDF_EXPORT show_id={show_id} type=schedule v={new_v} by={exported_by_id}"
     )
-    return html, new_v, dict(show), pdf_bytes
+    return html, new_v, dict(show), pdf_bytes, log_id
 
 
 @app.route('/shows/<int:show_id>/export/advance')
@@ -2568,13 +2600,29 @@ def export_advance(show_id):
     if not can_access_show(session['user_id'], show_id):
         abort(403)
     get_show_or_404(show_id)
-    html, version, show, pdf_bytes = _build_advance_pdf(show_id)
+    html, version, show, pdf_bytes, log_id = _build_advance_pdf(show_id)
     safe_name = show['name'].replace(' ', '_').replace('/', '-')
     filename  = f"Advance_{safe_name}_{show.get('show_date','nodate')}_v{version}.pdf"
     if pdf_bytes:
         resp = make_response(pdf_bytes)
         resp.headers['Content-Type'] = 'application/pdf'
         resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
+        # Push to S3 in background for archival (public links, export history)
+        if s3_storage.is_configured():
+            _s3_key = f"exports/{show_id}/advance/v{version}.pdf"
+            _pdf = pdf_bytes
+            _lid = log_id
+            def _push_advance():
+                try:
+                    s3_storage.upload_file(_s3_key, _pdf, 'application/pdf')
+                    with app.app_context():
+                        db2 = get_db()
+                        db2.execute('UPDATE export_log SET s3_key=? WHERE id=?', (_s3_key, _lid))
+                        db2.commit()
+                        db2.close()
+                except Exception as e:
+                    app.logger.error(f"S3 push failed for advance PDF log_id={_lid}: {e}")
+            threading.Thread(target=_push_advance, daemon=True).start()
         return resp
     # Fallback to HTML if weasyprint failed
     try:
@@ -2597,13 +2645,29 @@ def export_schedule(show_id):
     if not can_access_show(session['user_id'], show_id):
         abort(403)
     get_show_or_404(show_id)
-    html, version, show, pdf_bytes = _build_schedule_pdf(show_id)
+    html, version, show, pdf_bytes, log_id = _build_schedule_pdf(show_id)
     safe_name = show['name'].replace(' ', '_').replace('/', '-')
     filename  = f"Schedule_{safe_name}_{show.get('show_date','nodate')}_v{version}.pdf"
     if pdf_bytes:
         resp = make_response(pdf_bytes)
         resp.headers['Content-Type'] = 'application/pdf'
         resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
+        # Push to S3 in background for archival (public links, export history)
+        if s3_storage.is_configured():
+            _s3_key = f"exports/{show_id}/schedule/v{version}.pdf"
+            _pdf = pdf_bytes
+            _lid = log_id
+            def _push_schedule():
+                try:
+                    s3_storage.upload_file(_s3_key, _pdf, 'application/pdf')
+                    with app.app_context():
+                        db2 = get_db()
+                        db2.execute('UPDATE export_log SET s3_key=? WHERE id=?', (_s3_key, _lid))
+                        db2.commit()
+                        db2.close()
+                except Exception as e:
+                    app.logger.error(f"S3 push failed for schedule PDF log_id={_lid}: {e}")
+            threading.Thread(target=_push_schedule, daemon=True).start()
         return resp
     try:
         from weasyprint import HTML
@@ -2629,10 +2693,18 @@ def download_export_history(show_id, log_id):
         'SELECT * FROM export_log WHERE id=? AND show_id=?', (log_id, show_id)
     ).fetchone()
     db.close()
-    if not row or not row['pdf_data']:
+    if not row or (not row['s3_key'] and not row['pdf_data']):
         abort(404)
     filename = f"{row['export_type'].capitalize()}_v{row['version']}.pdf"
-    resp = make_response(bytes(row['pdf_data']))
+    if row['s3_key']:
+        try:
+            data = s3_storage.download_file(row['s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 download failed for export_log {log_id}: {e}")
+            abort(503)
+    else:
+        data = bytes(row['pdf_data'])
+    resp = make_response(data)
     resp.headers['Content-Type'] = 'application/pdf'
     resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
     return resp
@@ -2807,6 +2879,108 @@ def get_show_access(show_id):
 
 
 # ─── Audit Log ────────────────────────────────────────────────────────────────
+
+@app.route('/admin/s3-test')
+@admin_required
+def admin_s3_test():
+    """Verify SeaweedFS S3 connectivity by uploading, reading back, and deleting a test object."""
+    result = s3_storage.test_connection()
+    return jsonify(result)
+
+
+@app.route('/admin/migrate-files-to-s3', methods=['POST'])
+@admin_required
+def admin_migrate_files_to_s3():
+    """
+    One-time migration: move existing BLOB/BYTEA file data from the database
+    to SeaweedFS S3.  Safe to re-run — skips rows that already have an s3_key.
+    Returns a JSON summary of migrated / failed counts.
+    """
+    if not s3_storage.is_configured():
+        return jsonify({'success': False, 'error': 'SeaweedFS not configured in db_config.ini.'}), 400
+
+    migrated = 0
+    failed = 0
+    errors = []
+
+    db = get_db()
+    try:
+        # ── show_attachments ──────────────────────────────────────────────────
+        rows = db.execute(
+            "SELECT id, show_id, filename, mime_type, file_data FROM show_attachments "
+            "WHERE file_data IS NOT NULL AND s3_key IS NULL"
+        ).fetchall()
+        for row in rows:
+            try:
+                key = f"attachments/{row['show_id']}/{row['id']}/{row['filename']}"
+                s3_storage.upload_file(key, bytes(row['file_data']),
+                                       row['mime_type'] or 'application/octet-stream')
+                db.execute('UPDATE show_attachments SET s3_key=?, file_data=NULL WHERE id=?',
+                           (key, row['id']))
+                migrated += 1
+            except Exception as e:
+                failed += 1
+                errors.append(f"attachment id={row['id']}: {e}")
+        db.commit()
+
+        # ── export_log ────────────────────────────────────────────────────────
+        rows = db.execute(
+            "SELECT id, show_id, export_type, version, pdf_data FROM export_log "
+            "WHERE pdf_data IS NOT NULL AND s3_key IS NULL"
+        ).fetchall()
+        for row in rows:
+            try:
+                key = f"exports/{row['show_id']}/{row['export_type']}/v{row['version']}.pdf"
+                s3_storage.upload_file(key, bytes(row['pdf_data']), 'application/pdf')
+                db.execute('UPDATE export_log SET s3_key=?, pdf_data=NULL WHERE id=?',
+                           (key, row['id']))
+                migrated += 1
+            except Exception as e:
+                failed += 1
+                errors.append(f"export_log id={row['id']}: {e}")
+        db.commit()
+
+        # ── asset_types photos ────────────────────────────────────────────────
+        rows = db.execute(
+            "SELECT id, photo, photo_mime FROM asset_types "
+            "WHERE photo IS NOT NULL AND photo_s3_key IS NULL"
+        ).fetchall()
+        for row in rows:
+            try:
+                key = f"asset-photos/{row['id']}"
+                s3_storage.upload_file(key, bytes(row['photo']),
+                                       row['photo_mime'] or 'image/jpeg')
+                db.execute('UPDATE asset_types SET photo_s3_key=?, photo=NULL WHERE id=?',
+                           (key, row['id']))
+                migrated += 1
+            except Exception as e:
+                failed += 1
+                errors.append(f"asset_type id={row['id']}: {e}")
+        db.commit()
+
+        # ── show_external_rentals ─────────────────────────────────────────────
+        rows = db.execute(
+            "SELECT id, pdf_data, pdf_filename FROM show_external_rentals "
+            "WHERE pdf_data IS NOT NULL AND s3_key IS NULL"
+        ).fetchall()
+        for row in rows:
+            try:
+                fname = row['pdf_filename'] or 'rental.pdf'
+                key = f"external-rentals/{row['id']}/{fname}"
+                s3_storage.upload_file(key, bytes(row['pdf_data']), 'application/pdf')
+                db.execute('UPDATE show_external_rentals SET s3_key=?, pdf_data=NULL WHERE id=?',
+                           (key, row['id']))
+                migrated += 1
+            except Exception as e:
+                failed += 1
+                errors.append(f"external_rental id={row['id']}: {e}")
+        db.commit()
+
+    finally:
+        db.close()
+
+    return jsonify({'success': failed == 0, 'migrated': migrated, 'failed': failed, 'errors': errors})
+
 
 @app.route('/admin/audit')
 @admin_required
@@ -4153,7 +4327,7 @@ def public_shows():
 def public_advance_pdf(show_id):
     db = get_db()
     row = db.execute("""
-        SELECT pdf_data FROM export_log
+        SELECT s3_key, pdf_data FROM export_log
         WHERE show_id=? AND export_type='advance'
         ORDER BY exported_at DESC LIMIT 1
     """, (show_id,)).fetchone()
@@ -4161,6 +4335,16 @@ def public_advance_pdf(show_id):
     db.close()
     if not show:
         abort(404)
+    if row and row['s3_key']:
+        try:
+            data = s3_storage.download_file(row['s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 download failed for public advance PDF show_id={show_id}: {e}")
+            abort(503)
+        resp = make_response(data)
+        resp.headers['Content-Type'] = 'application/pdf'
+        resp.headers['Content-Disposition'] = f'inline; filename="Advance_{show_id}.pdf"'
+        return resp
     if row and row['pdf_data']:
         resp = make_response(bytes(row['pdf_data']))
         resp.headers['Content-Type'] = 'application/pdf'
@@ -4173,7 +4357,7 @@ def public_advance_pdf(show_id):
 def public_schedule_pdf(show_id):
     db = get_db()
     row = db.execute("""
-        SELECT pdf_data FROM export_log
+        SELECT s3_key, pdf_data FROM export_log
         WHERE show_id=? AND export_type='schedule'
         ORDER BY exported_at DESC LIMIT 1
     """, (show_id,)).fetchone()
@@ -4181,6 +4365,16 @@ def public_schedule_pdf(show_id):
     db.close()
     if not show:
         abort(404)
+    if row and row['s3_key']:
+        try:
+            data = s3_storage.download_file(row['s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 download failed for public schedule PDF show_id={show_id}: {e}")
+            abort(503)
+        resp = make_response(data)
+        resp.headers['Content-Type'] = 'application/pdf'
+        resp.headers['Content-Disposition'] = f'inline; filename="Schedule_{show_id}.pdf"'
+        return resp
     if row and row['pdf_data']:
         resp = make_response(bytes(row['pdf_data']))
         resp.headers['Content-Type'] = 'application/pdf'
@@ -5470,7 +5664,19 @@ def asset_type_photo_upload(type_id):
     mime = f.mimetype or 'image/jpeg'
     data = f.read()
     db = get_db()
-    db.execute('UPDATE asset_types SET photo=?, photo_mime=? WHERE id=?', (data, mime, type_id))
+    if s3_storage.is_configured():
+        try:
+            s3_key = f"asset-photos/{type_id}"
+            s3_storage.upload_file(s3_key, data, mime)
+            db.execute('UPDATE asset_types SET photo=NULL, photo_s3_key=?, photo_mime=? WHERE id=?',
+                       (s3_key, mime, type_id))
+        except Exception as e:
+            app.logger.warning(f"S3 upload failed for asset photo type_id={type_id}, falling back to DB: {e}")
+            db.execute('UPDATE asset_types SET photo=?, photo_s3_key=NULL, photo_mime=? WHERE id=?',
+                       (data, mime, type_id))
+    else:
+        db.execute('UPDATE asset_types SET photo=?, photo_s3_key=NULL, photo_mime=? WHERE id=?',
+                   (data, mime, type_id))
     db.commit()
     log_audit(db, 'ASSET_TYPE_PHOTO', 'asset_type', type_id)
     db.commit()
@@ -5482,7 +5688,13 @@ def asset_type_photo_upload(type_id):
 @admin_required
 def asset_type_photo_delete(type_id):
     db = get_db()
-    db.execute("UPDATE asset_types SET photo=NULL, photo_mime='' WHERE id=?", (type_id,))
+    row = db.execute('SELECT photo_s3_key FROM asset_types WHERE id=?', (type_id,)).fetchone()
+    if row and row['photo_s3_key']:
+        try:
+            s3_storage.delete_file(row['photo_s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 delete failed for asset photo type_id={type_id}: {e}")
+    db.execute("UPDATE asset_types SET photo=NULL, photo_s3_key=NULL, photo_mime='' WHERE id=?", (type_id,))
     db.commit()
     db.close()
     return jsonify({'success': True})
@@ -5492,11 +5704,19 @@ def asset_type_photo_delete(type_id):
 @login_required
 def asset_type_photo(type_id):
     db = get_db()
-    row = db.execute('SELECT photo, photo_mime FROM asset_types WHERE id=?', (type_id,)).fetchone()
+    row = db.execute('SELECT photo, photo_mime, photo_s3_key FROM asset_types WHERE id=?', (type_id,)).fetchone()
     db.close()
-    if not row or not row['photo']:
+    if not row or (not row['photo_s3_key'] and not row['photo']):
         abort(404)
-    resp = make_response(row['photo'])
+    if row['photo_s3_key']:
+        try:
+            data = s3_storage.download_file(row['photo_s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 download failed for asset photo type_id={type_id}: {e}")
+            abort(503)
+    else:
+        data = bytes(row['photo'])
+    resp = make_response(data)
     resp.headers['Content-Type'] = row['photo_mime'] or 'image/jpeg'
     resp.headers['Cache-Control'] = 'max-age=86400'
     return resp
@@ -6168,24 +6388,39 @@ def external_rental_add(show_id):
     cost = float(request.form.get('cost') or 0)
     if not description:
         return jsonify({'error': 'Description required'}), 400
-    pdf_data = None
+    pdf_bytes = None
     pdf_filename = ''
     f = request.files.get('pdf')
     if f:
-        pdf_data = f.read()
+        pdf_bytes = f.read()
         pdf_filename = secure_filename(f.filename)
     max_order = db.execute('SELECT COALESCE(MAX(sort_order),0) FROM show_external_rentals WHERE show_id=?',
                            (show_id,)).fetchone()[0]
     db.execute("""
         INSERT INTO show_external_rentals (show_id, description, cost, pdf_data, pdf_filename, sort_order)
         VALUES (?,?,?,?,?,?)
-    """, (show_id, description, cost, pdf_data, pdf_filename, max_order + 1))
+    """, (show_id, description, cost, None, pdf_filename, max_order + 1))
     db.commit()
     row = db.execute('SELECT * FROM show_external_rentals ORDER BY id DESC LIMIT 1').fetchone()
-    log_audit(db, 'EXTERNAL_RENTAL_ADD', 'show_external_rental', row['id'], show_id=show_id,
+    er_id = row['id']
+    # Upload PDF to S3 if provided
+    if pdf_bytes:
+        if s3_storage.is_configured():
+            try:
+                s3_key = f"external-rentals/{er_id}/{pdf_filename}"
+                s3_storage.upload_file(s3_key, pdf_bytes, 'application/pdf')
+                db.execute('UPDATE show_external_rentals SET s3_key=? WHERE id=?', (s3_key, er_id))
+            except Exception as e:
+                app.logger.warning(f"S3 upload failed for external rental {er_id}, falling back to DB: {e}")
+                db.execute('UPDATE show_external_rentals SET pdf_data=? WHERE id=?', (pdf_bytes, er_id))
+        else:
+            db.execute('UPDATE show_external_rentals SET pdf_data=? WHERE id=?', (pdf_bytes, er_id))
+        db.commit()
+        row = db.execute('SELECT * FROM show_external_rentals WHERE id=?', (er_id,)).fetchone()
+    log_audit(db, 'EXTERNAL_RENTAL_ADD', 'show_external_rental', er_id, show_id=show_id,
               detail=description)
     db.commit()
-    result = {k: v for k, v in dict(row).items() if k != 'pdf_data'}
+    result = {k: v for k, v in dict(row).items() if k not in ('pdf_data', 's3_key')}
     db.close()
     return jsonify(result), 201
 
@@ -6194,6 +6429,13 @@ def external_rental_add(show_id):
 @content_admin_required
 def external_rental_delete(show_id, er_id):
     db = get_db()
+    row = db.execute('SELECT s3_key FROM show_external_rentals WHERE id=? AND show_id=?',
+                     (er_id, show_id)).fetchone()
+    if row and row['s3_key']:
+        try:
+            s3_storage.delete_file(row['s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 delete failed for external rental {er_id}: {e}")
     db.execute('DELETE FROM show_external_rentals WHERE id=? AND show_id=?', (er_id, show_id))
     db.commit()
     log_audit(db, 'EXTERNAL_RENTAL_DELETE', 'show_external_rental', er_id, show_id=show_id)
@@ -6211,9 +6453,17 @@ def external_rental_pdf(show_id, er_id):
     row = db.execute('SELECT * FROM show_external_rentals WHERE id=? AND show_id=?',
                      (er_id, show_id)).fetchone()
     db.close()
-    if not row or not row['pdf_data']:
+    if not row or (not row['s3_key'] and not row['pdf_data']):
         abort(404)
-    resp = make_response(row['pdf_data'])
+    if row['s3_key']:
+        try:
+            data = s3_storage.download_file(row['s3_key'])
+        except Exception as e:
+            app.logger.error(f"S3 download failed for external rental PDF {er_id}: {e}")
+            abort(503)
+    else:
+        data = bytes(row['pdf_data'])
+    resp = make_response(data)
     resp.headers['Content-Type'] = 'application/pdf'
     resp.headers['Content-Disposition'] = _safe_content_disposition(row['pdf_filename'] or 'rental.pdf')
     return resp
