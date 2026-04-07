@@ -2174,20 +2174,25 @@ def migrate_db_postgres():
     except ImportError:
         return  # psycopg2 not installed — SQLite-only install, nothing to do
 
-    cfg = _read_pg_config(DATABASE)
-    if not cfg.get('pg_host') or not cfg.get('pg_user'):
-        return  # No PostgreSQL config present
-
-    app_schema    = cfg.get('pg_app_schema', '') or 'theater321'
-    shared_schema = cfg.get('pg_shared_schema', '') or 'shared'
+    config_path = os.path.join(os.path.dirname(os.path.abspath(DATABASE)), 'db_config.ini')
+    if not os.path.exists(config_path):
+        return  # No db_config.ini — SQLite-only install
+    cp = configparser.ConfigParser()
+    cp.read(config_path, encoding='utf-8')
+    if 'postgresql' not in cp:
+        return  # No PostgreSQL section
+    sec = cp['postgresql']
+    legacy_schema = sec.get('schema', '')
+    app_schema    = sec.get('app_schema', '') or legacy_schema or 'theater321'
+    shared_schema = sec.get('shared_schema', '') or 'shared'
 
     try:
         conn = psycopg2.connect(
-            host=cfg.get('pg_host', 'localhost'),
-            port=int(cfg.get('pg_port', 5432) or 5432),
-            dbname=cfg.get('pg_dbname', '321theater'),
-            user=cfg.get('pg_user', ''),
-            password=cfg.get('pg_password', ''),
+            host=sec.get('host', 'localhost'),
+            port=int(sec.get('port', 5432) or 5432),
+            dbname=sec.get('dbname', '321theater'),
+            user=sec.get('user', ''),
+            password=sec.get('password', ''),
             connect_timeout=10,
         )
     except Exception as e:
