@@ -6420,7 +6420,7 @@ def external_rental_add(show_id):
                 db.execute('UPDATE show_external_rentals SET s3_key=? WHERE id=?', (s3_key, er_id))
             except Exception as e:
                 app.logger.warning(f"S3 upload failed for external rental {er_id}, falling back to DB: {e}")
-            syslog_logger.warning(f"S3_UPLOAD_FAILED table=show_external_rentals id={er_id} show_id={show_id} error={e}")
+                syslog_logger.warning(f"S3_UPLOAD_FAILED table=show_external_rentals id={er_id} show_id={show_id} error={e}")
                 db.execute('UPDATE show_external_rentals SET pdf_data=? WHERE id=?', (pdf_bytes, er_id))
         else:
             db.execute('UPDATE show_external_rentals SET pdf_data=? WHERE id=?', (pdf_bytes, er_id))

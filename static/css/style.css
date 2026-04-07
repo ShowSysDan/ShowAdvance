@@ -362,7 +362,7 @@ html[data-theme="light"] select.field-input {
 
 /* ── Tab Navigation ──────────────────────────────────────────────── */
 .tab-nav {
-  display: flex; gap: 2px; margin-bottom: 20px;
+  display: flex; flex-wrap: wrap; gap: 2px; margin-bottom: 20px;
   border-bottom: 1px solid var(--border); padding-bottom: 0;
 }
 .tab-btn {
