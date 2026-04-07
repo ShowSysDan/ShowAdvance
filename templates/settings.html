@@ -613,7 +613,10 @@
     <div class="form-section-body" style="gap:20px">
       <p class="text-dim" style="font-size:12px">
         Automatic backups run hourly (keeping last 24) and daily at midnight (keeping last 30).
-        Backup files are stored in <code style="font-family:var(--font-mono);font-size:11px">./backups/</code>.
+        SQLite databases are copied as <code style="font-family:var(--font-mono);font-size:11px">.db</code> files;
+        PostgreSQL databases are dumped as compressed
+        <code style="font-family:var(--font-mono);font-size:11px">.sql.gz</code> files.
+        Click <strong>↓ Download</strong> next to any backup to save it to your local machine.
       </p>
 
       <div>
@@ -1495,7 +1498,7 @@ function switchFieldsTab(name) {
 }
 
 /* ── Settings Tab Switcher ─────────────────────────────────────── */
-const ALL_STABS = ['contacts','users','groups','fields','positions','technicians','syslog','backups','account','files','godmode','database','ai','email'];
+const ALL_STABS = ['contacts','users','groups','fields','positions','technicians','registrations','messages','update','syslog','backups','account','files','godmode','database','ai','email'];
 
 function switchSettingsTab(name) {
   ALL_STABS.forEach(t => {

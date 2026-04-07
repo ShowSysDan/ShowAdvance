@@ -11,6 +11,7 @@ import logging
 import logging.handlers
 import atexit
 import subprocess
+import gzip
 import threading
 import secrets
 import re
@@ -24,7 +25,7 @@ from db_adapter import DBIntegrityError
 import s3_storage
 
 from flask import (Flask, render_template, request, redirect, url_for,
-                   flash, session, jsonify, make_response, abort)
+                   flash, session, jsonify, make_response, abort, send_file)
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 
@@ -535,15 +536,46 @@ def _ensure_backup_dirs():
     os.makedirs(os.path.join(BACKUP_DIR, 'daily'), exist_ok=True)
 
 
+def _run_pg_dump(dest_path, settings):
+    """Run pg_dump and write the compressed SQL dump to dest_path (.sql.gz)."""
+    env = os.environ.copy()
+    env['PGPASSWORD'] = settings.get('pg_password', '')
+    cmd = [
+        'pg_dump',
+        '-h', settings.get('pg_host', 'localhost'),
+        '-p', str(settings.get('pg_port', '5432')),
+        '-U', settings.get('pg_user', ''),
+        '-d', settings.get('pg_dbname', '321theater'),
+    ]
+    result = subprocess.run(cmd, capture_output=True, env=env, timeout=300)
+    if result.returncode != 0:
+        raise RuntimeError(f"pg_dump failed: {result.stderr.decode('utf-8', errors='replace')}")
+    with gzip.open(dest_path, 'wb') as f:
+        f.write(result.stdout)
+
+
+def _backup_file_ext():
+    """Return the expected backup file extension for the active database type."""
+    settings = db_adapter.read_db_settings(DATABASE)
+    return '.sql.gz' if settings.get('db_type') == 'postgres' else '.db'
+
+
 def run_hourly_backup():
     _ensure_backup_dirs()
     ts = datetime.now().strftime('%Y%m%d_%H%M')
-    dest = os.path.join(BACKUP_DIR, 'hourly', f'advance_{ts}.db')
-    shutil.copy2(DATABASE, dest)
-    syslog_logger.info(f'BACKUP_CREATED type=hourly file={dest}')
     hourly_dir = os.path.join(BACKUP_DIR, 'hourly')
+    settings = db_adapter.read_db_settings(DATABASE)
+    if settings.get('db_type') == 'postgres':
+        dest = os.path.join(hourly_dir, f'advance_{ts}.sql.gz')
+        _run_pg_dump(dest, settings)
+        ext = '.sql.gz'
+    else:
+        dest = os.path.join(hourly_dir, f'advance_{ts}.db')
+        shutil.copy2(DATABASE, dest)
+        ext = '.db'
+    syslog_logger.info(f'BACKUP_CREATED type=hourly file={dest}')
     files = sorted(
-        [f for f in os.listdir(hourly_dir) if f.endswith('.db')],
+        [f for f in os.listdir(hourly_dir) if f.endswith(ext)],
         reverse=True
     )
     for old in files[24:]:
@@ -553,12 +585,19 @@ def run_hourly_backup():
 def run_daily_backup():
     _ensure_backup_dirs()
     ts = datetime.now().strftime('%Y%m%d')
-    dest = os.path.join(BACKUP_DIR, 'daily', f'advance_{ts}.db')
-    shutil.copy2(DATABASE, dest)
-    syslog_logger.info(f'BACKUP_CREATED type=daily file={dest}')
     daily_dir = os.path.join(BACKUP_DIR, 'daily')
+    settings = db_adapter.read_db_settings(DATABASE)
+    if settings.get('db_type') == 'postgres':
+        dest = os.path.join(daily_dir, f'advance_{ts}.sql.gz')
+        _run_pg_dump(dest, settings)
+        ext = '.sql.gz'
+    else:
+        dest = os.path.join(daily_dir, f'advance_{ts}.db')
+        shutil.copy2(DATABASE, dest)
+        ext = '.db'
+    syslog_logger.info(f'BACKUP_CREATED type=daily file={dest}')
     files = sorted(
-        [f for f in os.listdir(daily_dir) if f.endswith('.db')],
+        [f for f in os.listdir(daily_dir) if f.endswith(ext)],
         reverse=True
     )
     for old in files[30:]:
@@ -3890,12 +3929,12 @@ def save_syslog_settings():
 @app.route('/settings/backups')
 @admin_required
 def backup_status():
-    result = {'hourly': [], 'daily': []}
+    result = {'hourly': [], 'daily': [], 'db_type': db_adapter.read_db_settings(DATABASE).get('db_type', 'sqlite')}
     for kind in ('hourly', 'daily'):
         d = os.path.join(BACKUP_DIR, kind)
         if os.path.isdir(d):
             files = sorted(
-                [f for f in os.listdir(d) if f.endswith('.db')],
+                [f for f in os.listdir(d) if f.endswith('.db') or f.endswith('.sql.gz')],
                 reverse=True
             )
             result[kind] = [{
@@ -3917,6 +3956,19 @@ def manual_backup():
     except Exception as e:
         app.logger.error(f'Backup failed: {e}')
         return jsonify({'success': False, 'error': 'Backup failed. Check server logs.'}), 500
+
+
+@app.route('/settings/backups/download/<kind>/<filename>')
+@admin_required
+def download_backup(kind, filename):
+    if kind not in ('hourly', 'daily'):
+        abort(404)
+    if not re.match(r'^advance_[\d_]+\.(db|sql\.gz)$', filename):
+        abort(404)
+    path = os.path.join(BACKUP_DIR, kind, filename)
+    if not os.path.isfile(path):
+        abort(404)
+    return send_file(path, as_attachment=True, download_name=filename)
 
 
 # ─── API ──────────────────────────────────────────────────────────────────────

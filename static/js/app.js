@@ -1367,6 +1367,8 @@ async function loadBackupStatus() {
         <span class="backup-filename">${_esc(f.filename)}</span>
         <span class="backup-size">${_esc(String(f.size_kb))} KB</span>
         <span class="backup-mtime">${_esc(f.mtime)}</span>
+        <a href="/settings/backups/download/${_esc(kind)}/${_esc(f.filename)}"
+           class="btn btn-xs btn-ghost" download style="margin-left:auto">↓ Download</a>
       </div>
     `).join('');
   }
