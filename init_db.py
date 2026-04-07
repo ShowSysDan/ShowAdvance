@@ -2237,6 +2237,8 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".export_log ADD COLUMN IF NOT EXISTS pdf_data BYTEA',
             f"ALTER TABLE \"{app_schema}\".export_log ADD COLUMN IF NOT EXISTS filename TEXT DEFAULT ''",
             f'ALTER TABLE "{app_schema}".export_log ADD COLUMN IF NOT EXISTS s3_key TEXT DEFAULT NULL',
+            # Drop NOT NULL constraints so S3-migrated rows can have NULL file data
+            f'ALTER TABLE "{app_schema}".show_attachments ALTER COLUMN file_data DROP NOT NULL',
             f'ALTER TABLE "{app_schema}".show_attachments ADD COLUMN IF NOT EXISTS s3_key TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".show_external_rentals ADD COLUMN IF NOT EXISTS s3_key TEXT DEFAULT NULL',
             f"ALTER TABLE \"{app_schema}\".asset_types ADD COLUMN IF NOT EXISTS supplier_name TEXT DEFAULT ''",

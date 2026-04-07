@@ -1694,10 +1694,19 @@ async function saveWifiSettings(form) {
 async function uploadLogo(form) {
   const fd = new FormData(form);
   const msg = form.querySelector('.logo-save-msg');
-  const resp = await fetch('/settings/logo', {method:'POST', body: fd});
-  const d = await resp.json();
-  if (msg) { msg.textContent = d.success ? '✓ Logo saved — reload to see.' : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
-  if (d.success) setTimeout(() => location.reload(), 1200);
+  const btn = form.querySelector('button[type=submit], button[onclick]');
+  if (msg) { msg.textContent = 'Uploading…'; msg.style.color = 'var(--text-muted)'; }
+  if (btn) btn.disabled = true;
+  _isUploading = true;
+  try {
+    const resp = await fetch('/settings/logo', {method:'POST', body: fd});
+    const d = await resp.json();
+    if (msg) { msg.textContent = d.success ? '✓ Logo saved — reload to see.' : (d.error || 'Error'); msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)'; }
+    if (d.success) setTimeout(() => location.reload(), 1200);
+  } finally {
+    _isUploading = false;
+    if (btn) btn.disabled = false;
+  }
 }
 
 async function deleteLogo() {

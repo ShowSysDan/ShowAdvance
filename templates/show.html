@@ -896,9 +896,15 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         <label class="field-label">RENTAL PDF (optional)</label>
         <input type="file" id="er-pdf" class="field-input" accept=".pdf">
       </div>
+      <div id="er-progress-wrap" style="display:none;margin-top:12px">
+        <div style="background:var(--bg-hover);border-radius:4px;height:6px;overflow:hidden">
+          <div id="er-progress-bar" style="background:var(--accent);height:100%;width:0%;transition:width 0.2s"></div>
+        </div>
+        <span id="er-progress-label" style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;text-align:center">Uploading…</span>
+      </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
         <button class="btn btn-ghost" onclick="closeExternalRentalModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="submitExternalRental()">Add</button>
+        <button id="er-submit-btn" class="btn btn-primary" onclick="submitExternalRental()">Add</button>
       </div>
     </div>
   </div>
@@ -1182,7 +1188,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     document.getElementById('ext-rental-modal').style.display = 'none';
   };
 
-  window.submitExternalRental = async function() {
+  window.submitExternalRental = function() {
     const desc = document.getElementById('er-description').value.trim();
     const cost = document.getElementById('er-cost').value;
     const pdfFile = document.getElementById('er-pdf').files[0];
@@ -1193,18 +1199,51 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     fd.append('cost', cost);
     if (pdfFile) fd.append('pdf', pdfFile);
 
-    const r = await fetch(`/shows/${SHOW_ID}/external-rentals`, {
-      method: 'POST',
-      headers: {'X-Requested-With':'XMLHttpRequest'},
-      body: fd
-    });
-    if (r.ok) {
-      closeExternalRentalModal();
-      loadAssetsTab();
-    } else {
-      const e = await r.json();
-      alert(e.error || 'Failed to add external rental');
+    const progressWrap  = document.getElementById('er-progress-wrap');
+    const progressBar   = document.getElementById('er-progress-bar');
+    const progressLabel = document.getElementById('er-progress-label');
+    const submitBtn     = document.getElementById('er-submit-btn');
+
+    const xhr = new XMLHttpRequest();
+
+    if (pdfFile) {
+      _isUploading = true;
+      if (progressWrap)  progressWrap.style.display = '';
+      if (progressBar)   progressBar.style.width = '0%';
+      if (progressLabel) progressLabel.textContent = '0%';
+      if (submitBtn)     submitBtn.disabled = true;
+
+      xhr.upload.addEventListener('progress', e => {
+        if (e.lengthComputable && progressBar && progressLabel) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          progressBar.style.width = pct + '%';
+          progressLabel.textContent = pct + '%';
+        }
+      });
     }
+
+    xhr.addEventListener('load', () => {
+      _isUploading = false;
+      if (progressWrap)  progressWrap.style.display = 'none';
+      if (submitBtn)     submitBtn.disabled = false;
+      if (xhr.status >= 200 && xhr.status < 300) {
+        closeExternalRentalModal();
+        loadAssetsTab();
+      } else {
+        try { alert(JSON.parse(xhr.responseText).error || 'Failed to add external rental'); }
+        catch(_) { alert('Failed to add external rental'); }
+      }
+    });
+    xhr.addEventListener('error', () => {
+      _isUploading = false;
+      if (progressWrap)  progressWrap.style.display = 'none';
+      if (submitBtn)     submitBtn.disabled = false;
+      alert('Network error during upload.');
+    });
+
+    xhr.open('POST', `/shows/${SHOW_ID}/external-rentals`);
+    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+    xhr.send(fd);
   };
 
   window.removeExternalRental = async function(erId) {

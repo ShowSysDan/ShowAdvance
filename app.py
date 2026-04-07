@@ -815,6 +815,7 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
             _db_s3.close()
         except Exception as e:
             app.logger.error(f"S3 push failed for email PDF show={show_id} type={pdf_type}: {e}")
+            syslog_logger.error(f"S3_PUSH_FAILED context=email_pdf show_id={show_id} type={pdf_type} error={e}")
 
     if not pdf_bytes:
         return False, 'PDF generation produced no output.', 0
@@ -2159,6 +2160,7 @@ def upload_attachment(show_id):
             db.execute('UPDATE show_attachments SET s3_key=? WHERE id=?', (s3_key, aid))
         except Exception as e:
             app.logger.warning(f"S3 upload failed for attachment {aid}, falling back to DB: {e}")
+            syslog_logger.warning(f"S3_UPLOAD_FAILED table=show_attachments id={aid} show_id={show_id} error={e}")
             db.execute('UPDATE show_attachments SET file_data=? WHERE id=?', (data, aid))
     else:
         db.execute('UPDATE show_attachments SET file_data=? WHERE id=?', (data, aid))
@@ -2233,6 +2235,7 @@ def delete_attachment(show_id, aid):
             s3_storage.delete_file(row['s3_key'])
         except Exception as e:
             app.logger.error(f"S3 delete failed for attachment {aid} key={row['s3_key']}: {e}")
+            syslog_logger.error(f"S3_DELETE_FAILED table=show_attachments id={aid} show_id={show_id} error={e}")
     log_audit(db, 'FILE_DELETE', 'attachment', aid, show_id=show_id,
               detail=row['filename'] if row else str(aid))
     db.execute('DELETE FROM show_attachments WHERE id=?', (aid,))
@@ -2622,6 +2625,7 @@ def export_advance(show_id):
                         db2.close()
                 except Exception as e:
                     app.logger.error(f"S3 push failed for advance PDF log_id={_lid}: {e}")
+                    syslog_logger.error(f"S3_PUSH_FAILED context=advance_export show_id={show_id} log_id={_lid} error={e}")
             threading.Thread(target=_push_advance, daemon=True).start()
         return resp
     # Fallback to HTML if weasyprint failed
@@ -2667,6 +2671,7 @@ def export_schedule(show_id):
                         db2.close()
                 except Exception as e:
                     app.logger.error(f"S3 push failed for schedule PDF log_id={_lid}: {e}")
+                    syslog_logger.error(f"S3_PUSH_FAILED context=schedule_export show_id={show_id} log_id={_lid} error={e}")
             threading.Thread(target=_push_schedule, daemon=True).start()
         return resp
     try:
@@ -5672,6 +5677,7 @@ def asset_type_photo_upload(type_id):
                        (s3_key, mime, type_id))
         except Exception as e:
             app.logger.warning(f"S3 upload failed for asset photo type_id={type_id}, falling back to DB: {e}")
+            syslog_logger.warning(f"S3_UPLOAD_FAILED table=asset_types id={type_id} error={e}")
             db.execute('UPDATE asset_types SET photo=?, photo_s3_key=NULL, photo_mime=? WHERE id=?',
                        (data, mime, type_id))
     else:
@@ -5681,6 +5687,7 @@ def asset_type_photo_upload(type_id):
     log_audit(db, 'ASSET_TYPE_PHOTO', 'asset_type', type_id)
     db.commit()
     db.close()
+    syslog_logger.info(f"ASSET_TYPE_PHOTO type_id={type_id} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -5694,6 +5701,7 @@ def asset_type_photo_delete(type_id):
             s3_storage.delete_file(row['photo_s3_key'])
         except Exception as e:
             app.logger.error(f"S3 delete failed for asset photo type_id={type_id}: {e}")
+            syslog_logger.error(f"S3_DELETE_FAILED table=asset_types id={type_id} error={e}")
     db.execute("UPDATE asset_types SET photo=NULL, photo_s3_key=NULL, photo_mime='' WHERE id=?", (type_id,))
     db.commit()
     db.close()
@@ -6412,6 +6420,7 @@ def external_rental_add(show_id):
                 db.execute('UPDATE show_external_rentals SET s3_key=? WHERE id=?', (s3_key, er_id))
             except Exception as e:
                 app.logger.warning(f"S3 upload failed for external rental {er_id}, falling back to DB: {e}")
+            syslog_logger.warning(f"S3_UPLOAD_FAILED table=show_external_rentals id={er_id} show_id={show_id} error={e}")
                 db.execute('UPDATE show_external_rentals SET pdf_data=? WHERE id=?', (pdf_bytes, er_id))
         else:
             db.execute('UPDATE show_external_rentals SET pdf_data=? WHERE id=?', (pdf_bytes, er_id))
@@ -6422,6 +6431,7 @@ def external_rental_add(show_id):
     db.commit()
     result = {k: v for k, v in dict(row).items() if k not in ('pdf_data', 's3_key')}
     db.close()
+    syslog_logger.info(f"EXTERNAL_RENTAL_ADD show_id={show_id} er_id={er_id} desc={description!r} by={session.get('username')}")
     return jsonify(result), 201
 
 
@@ -6436,11 +6446,13 @@ def external_rental_delete(show_id, er_id):
             s3_storage.delete_file(row['s3_key'])
         except Exception as e:
             app.logger.error(f"S3 delete failed for external rental {er_id}: {e}")
+            syslog_logger.error(f"S3_DELETE_FAILED table=show_external_rentals id={er_id} show_id={show_id} error={e}")
     db.execute('DELETE FROM show_external_rentals WHERE id=? AND show_id=?', (er_id, show_id))
     db.commit()
     log_audit(db, 'EXTERNAL_RENTAL_DELETE', 'show_external_rental', er_id, show_id=show_id)
     db.commit()
     db.close()
+    syslog_logger.info(f"EXTERNAL_RENTAL_DELETE show_id={show_id} er_id={er_id} by={session.get('username')}")
     return jsonify({'success': True})
 
 
