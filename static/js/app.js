@@ -23,6 +23,7 @@ let SHOW_ID = null;
 let activeTab = 'advance';
 let saveTimer = null;
 let _isDirty = false;          // true whenever there are unsaved changes
+let _isUploading = false;      // true while any file upload is in progress
 let _syncSince = '';           // ISO timestamp cursor for advance-field sync
 let _syncInterval = null;      // advance field poll handle (3 s)
 let _heartbeatInterval = null; // presence-only poll handle for other tabs (15 s)
@@ -255,9 +256,9 @@ function initShow(showId, initialTab) {
   // Start real-time sync polling
   _startSync();
 
-  // Warn before leaving page with unsaved changes
+  // Warn before leaving page with unsaved changes or an active upload
   window.addEventListener('beforeunload', e => {
-    if (_isDirty) {
+    if (_isDirty || _isUploading) {
       e.preventDefault();
       e.returnValue = '';
     }
@@ -1766,6 +1767,7 @@ function uploadFile(file) {
   const formData = new FormData();
   formData.append('file', file);
 
+  _isUploading = true;
   if (zone) zone.classList.add('uploading');
   if (progressWrap) progressWrap.style.display = '';
   if (progressBar)  progressBar.style.width = '0%';
@@ -1780,6 +1782,7 @@ function uploadFile(file) {
     }
   });
   xhr.addEventListener('load', () => {
+    _isUploading = false;
     if (zone) zone.classList.remove('uploading');
     if (progressWrap) progressWrap.style.display = 'none';
     try {
@@ -1795,6 +1798,7 @@ function uploadFile(file) {
     }
   });
   xhr.addEventListener('error', () => {
+    _isUploading = false;
     if (zone) zone.classList.remove('uploading');
     if (progressWrap) progressWrap.style.display = 'none';
     alert('Network error during upload.');

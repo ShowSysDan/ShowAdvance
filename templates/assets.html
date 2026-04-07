@@ -216,6 +216,12 @@
           <label class="field-label">PHOTO</label>
           <input type="file" id="type-photo" class="field-input" accept="image/*">
           <div id="type-photo-preview" style="margin-top:6px"></div>
+          <div id="type-photo-progress-wrap" style="display:none;margin-top:6px">
+            <div style="background:var(--bg-hover);border-radius:4px;height:6px;overflow:hidden">
+              <div id="type-photo-progress-bar" style="background:var(--accent);height:100%;width:0%;transition:width 0.2s"></div>
+            </div>
+            <span id="type-photo-progress-label" style="font-size:11px;color:var(--text-muted);margin-top:4px;display:block;text-align:center">Uploading photo…</span>
+          </div>
         </div>
       </div>
       <div style="display:flex;justify-content:space-between;align-items:center;margin-top:16px">
@@ -1614,9 +1620,29 @@ window.saveType = async function() {
   const photoFile = document.getElementById('type-photo').files[0];
   const savedId = id || data.id;
   if (photoFile && savedId) {
-    const fd = new FormData();
-    fd.append('photo', photoFile);
-    await fetch(`/settings/asset-types/${savedId}/photo`, {method:'POST', headers:{'X-Requested-With':'XMLHttpRequest'}, body: fd});
+    await new Promise((resolve) => {
+      const progressWrap  = document.getElementById('type-photo-progress-wrap');
+      const progressBar   = document.getElementById('type-photo-progress-bar');
+      const progressLabel = document.getElementById('type-photo-progress-label');
+      const fd = new FormData();
+      fd.append('photo', photoFile);
+      _isUploading = true;
+      if (progressWrap)  progressWrap.style.display = '';
+      if (progressBar)   progressBar.style.width = '0%';
+      const xhr = new XMLHttpRequest();
+      xhr.upload.addEventListener('progress', e => {
+        if (e.lengthComputable && progressBar && progressLabel) {
+          const pct = Math.round(e.loaded / e.total * 100);
+          progressBar.style.width = pct + '%';
+          progressLabel.textContent = pct + '%';
+        }
+      });
+      xhr.addEventListener('load', () => { _isUploading = false; if (progressWrap) progressWrap.style.display = 'none'; resolve(); });
+      xhr.addEventListener('error', () => { _isUploading = false; if (progressWrap) progressWrap.style.display = 'none'; resolve(); });
+      xhr.open('POST', `/settings/asset-types/${savedId}/photo`);
+      xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+      xhr.send(fd);
+    });
   }
   closeTypeModal();
   await loadTypes();
