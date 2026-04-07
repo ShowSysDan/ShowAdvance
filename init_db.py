@@ -114,7 +114,8 @@ CREATE TABLE IF NOT EXISTS export_log (
     exported_by INTEGER REFERENCES users(id),
     exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     filename TEXT DEFAULT '',
-    pdf_data BLOB
+    pdf_data BLOB,
+    s3_key TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS form_sections (
@@ -200,8 +201,9 @@ CREATE TABLE IF NOT EXISTS show_attachments (
     uploaded_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
     filename     TEXT NOT NULL,
     mime_type    TEXT DEFAULT 'application/octet-stream',
-    file_data    BLOB NOT NULL,
+    file_data    BLOB,
     file_size    INTEGER DEFAULT 0,
+    s3_key       TEXT DEFAULT NULL,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -341,6 +343,7 @@ CREATE TABLE IF NOT EXISTS asset_types (
     model            TEXT DEFAULT '',
     photo            BLOB,
     photo_mime       TEXT DEFAULT '',
+    photo_s3_key     TEXT DEFAULT NULL,
     storage_location TEXT DEFAULT '',
     rental_cost      REAL DEFAULT 0.0,
     weekly_rate      REAL DEFAULT 0.0,
@@ -418,6 +421,7 @@ CREATE TABLE IF NOT EXISTS show_external_rentals (
     cost         REAL DEFAULT 0.0,
     pdf_data     BLOB,
     pdf_filename TEXT DEFAULT '',
+    s3_key       TEXT DEFAULT NULL,
     sort_order   INTEGER DEFAULT 0,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -1036,8 +1040,9 @@ def migrate_db():
             uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
             filename    TEXT NOT NULL,
             mime_type   TEXT DEFAULT 'application/octet-stream',
-            file_data   BLOB NOT NULL,
+            file_data   BLOB,
             file_size   INTEGER DEFAULT 0,
+            s3_key      TEXT DEFAULT NULL,
             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -1059,6 +1064,10 @@ def migrate_db():
         'ALTER TABLE users ADD COLUMN last_login TIMESTAMP',
         'ALTER TABLE export_log ADD COLUMN pdf_data BLOB',
         "ALTER TABLE export_log ADD COLUMN filename TEXT DEFAULT ''",
+        'ALTER TABLE export_log ADD COLUMN s3_key TEXT DEFAULT NULL',
+        'ALTER TABLE show_attachments ADD COLUMN s3_key TEXT DEFAULT NULL',
+        'ALTER TABLE show_external_rentals ADD COLUMN s3_key TEXT DEFAULT NULL',
+        'ALTER TABLE asset_types ADD COLUMN photo_s3_key TEXT DEFAULT NULL',
         'ALTER TABLE form_sections ADD COLUMN default_open INTEGER DEFAULT 1',
         'ALTER TABLE schedule_rows ADD COLUMN perf_id INTEGER DEFAULT NULL',
         'ALTER TABLE form_fields ADD COLUMN ai_hint TEXT DEFAULT NULL',
@@ -1182,6 +1191,7 @@ def migrate_db():
             model            TEXT DEFAULT '',
             photo            BLOB,
             photo_mime       TEXT DEFAULT '',
+            photo_s3_key     TEXT DEFAULT NULL,
             storage_location TEXT DEFAULT '',
             rental_cost      REAL DEFAULT 0.0,
             weekly_rate      REAL DEFAULT 0.0,
@@ -1248,6 +1258,7 @@ def migrate_db():
             cost         REAL DEFAULT 0.0,
             pdf_data     BLOB,
             pdf_filename TEXT DEFAULT '',
+            s3_key       TEXT DEFAULT NULL,
             sort_order   INTEGER DEFAULT 0,
             created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -1597,7 +1608,8 @@ CREATE TABLE IF NOT EXISTS export_log (
     exported_by INTEGER REFERENCES users(id),
     exported_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     filename TEXT DEFAULT '',
-    pdf_data BYTEA
+    pdf_data BYTEA,
+    s3_key TEXT DEFAULT NULL
 );
 
 CREATE TABLE IF NOT EXISTS form_sections (
@@ -1686,8 +1698,9 @@ CREATE TABLE IF NOT EXISTS show_attachments (
     uploaded_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     filename    TEXT NOT NULL,
     mime_type   TEXT DEFAULT 'application/octet-stream',
-    file_data   BYTEA NOT NULL,
+    file_data   BYTEA,
     file_size   INTEGER DEFAULT 0,
+    s3_key      TEXT DEFAULT NULL,
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1833,6 +1846,7 @@ CREATE TABLE IF NOT EXISTS asset_types (
     model            TEXT DEFAULT '',
     photo            BYTEA,
     photo_mime       TEXT DEFAULT '',
+    photo_s3_key     TEXT DEFAULT NULL,
     storage_location TEXT DEFAULT '',
     rental_cost      REAL DEFAULT 0.0,
     weekly_rate      REAL DEFAULT 0.0,
@@ -1911,6 +1925,7 @@ CREATE TABLE IF NOT EXISTS show_external_rentals (
     cost         REAL DEFAULT 0.0,
     pdf_data     BYTEA,
     pdf_filename TEXT DEFAULT '',
+    s3_key       TEXT DEFAULT NULL,
     sort_order   INTEGER DEFAULT 0,
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
