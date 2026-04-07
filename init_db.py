@@ -2156,6 +2156,144 @@ def init_db_postgres(settings, seed=True):
         return False
 
 
+def migrate_db_postgres():
+    """
+    Apply schema migrations to an existing PostgreSQL database.
+
+    Runs on every startup (called from app.py alongside migrate_db()).
+    Uses CREATE TABLE IF NOT EXISTS for new tables and
+    ALTER TABLE ... ADD COLUMN IF NOT EXISTS for new columns — fully
+    idempotent, safe to run repeatedly against any version of the schema.
+
+    Skips silently if PostgreSQL is not configured in db_config.ini.
+    Never raises — on error it prints a warning and returns so the app
+    can still start against the existing schema.
+    """
+    try:
+        import psycopg2
+    except ImportError:
+        return  # psycopg2 not installed — SQLite-only install, nothing to do
+
+    cfg = _read_pg_config(DATABASE)
+    if not cfg.get('pg_host') or not cfg.get('pg_user'):
+        return  # No PostgreSQL config present
+
+    app_schema    = cfg.get('pg_app_schema', '') or 'theater321'
+    shared_schema = cfg.get('pg_shared_schema', '') or 'shared'
+
+    try:
+        conn = psycopg2.connect(
+            host=cfg.get('pg_host', 'localhost'),
+            port=int(cfg.get('pg_port', 5432) or 5432),
+            dbname=cfg.get('pg_dbname', '321theater'),
+            user=cfg.get('pg_user', ''),
+            password=cfg.get('pg_password', ''),
+            connect_timeout=10,
+        )
+    except Exception as e:
+        print(f"[migrate_pg] Cannot connect to PostgreSQL: {e}")
+        return
+
+    try:
+        cur = conn.cursor()
+
+        # ── 1. Ensure all current tables exist (handles new tables added in ──
+        #        any release after initial PG setup)                          ──
+        cur.execute(f'SET search_path TO "{app_schema}", "{shared_schema}"')
+        for stmt in PG_SCHEMA.split(';'):
+            stmt = stmt.strip()
+            if not stmt:
+                continue
+            table = _table_for_stmt(stmt)
+            if table and table in SHARED_TABLES:
+                cur.execute(f'SET search_path TO "{shared_schema}"')
+            else:
+                cur.execute(f'SET search_path TO "{app_schema}", "{shared_schema}"')
+            try:
+                cur.execute(stmt)
+            except Exception:
+                conn.rollback()  # ignore errors on individual table statements
+
+        conn.commit()
+
+        # ── 2. Add any columns that may be missing on older schemas ──────────
+        #   PostgreSQL supports ADD COLUMN IF NOT EXISTS natively (9.6+)
+        #   so no try/except is needed.
+
+        app_alters = [
+            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS last_saved_by INTEGER',
+            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS last_saved_at TIMESTAMP',
+            f"ALTER TABLE \"{app_schema}\".shows ADD COLUMN IF NOT EXISTS performance_company TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS load_in_date DATE DEFAULT NULL',
+            f"ALTER TABLE \"{app_schema}\".shows ADD COLUMN IF NOT EXISTS load_in_time TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS load_out_date DATE DEFAULT NULL',
+            f"ALTER TABLE \"{app_schema}\".shows ADD COLUMN IF NOT EXISTS load_out_time TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".export_log ADD COLUMN IF NOT EXISTS pdf_data BYTEA',
+            f"ALTER TABLE \"{app_schema}\".export_log ADD COLUMN IF NOT EXISTS filename TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".export_log ADD COLUMN IF NOT EXISTS s3_key TEXT DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".show_attachments ADD COLUMN IF NOT EXISTS s3_key TEXT DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".show_external_rentals ADD COLUMN IF NOT EXISTS s3_key TEXT DEFAULT NULL',
+            f"ALTER TABLE \"{app_schema}\".asset_types ADD COLUMN IF NOT EXISTS supplier_name TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".asset_types ADD COLUMN IF NOT EXISTS supplier_contact TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS is_retired INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS retired_at TIMESTAMP DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS weekly_rate REAL DEFAULT 0.0',
+            f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS is_system INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS is_package INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS photo_s3_key TEXT DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".form_sections ADD COLUMN IF NOT EXISTS default_open INTEGER DEFAULT 1',
+            f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS perf_id INTEGER DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS ai_hint TEXT DEFAULT NULL',
+            f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_start TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_end TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".show_comments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP',
+            f'ALTER TABLE "{app_schema}".show_comments ADD COLUMN IF NOT EXISTS deleted_by INTEGER',
+            f'ALTER TABLE "{app_schema}".show_comments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP',
+            f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS report_recipient INTEGER DEFAULT 0',
+            f"ALTER TABLE \"{app_schema}\".asset_items ADD COLUMN IF NOT EXISTS condition TEXT DEFAULT 'good'",
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS year_purchased INTEGER DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS purchase_value REAL DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS depreciation_years INTEGER DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS warranty_expires DATE DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS depreciation_start_date DATE DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS replacement_cost REAL DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS is_container INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS container_item_id INTEGER',
+            f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS system_type_id INTEGER',
+        ]
+
+        shared_alters = [
+            f"ALTER TABLE \"{shared_schema}\".users ADD COLUMN IF NOT EXISTS theme TEXT DEFAULT 'dark'",
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS last_login TIMESTAMP',
+            f"ALTER TABLE \"{shared_schema}\".users ADD COLUMN IF NOT EXISTS email TEXT DEFAULT ''",
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS is_readonly INTEGER DEFAULT 0',
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS email_confirmed INTEGER DEFAULT 1',
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS pending_approval INTEGER DEFAULT 0',
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 0',
+        ]
+
+        n = 0
+        for sql in app_alters + shared_alters:
+            cur.execute(sql)
+            n += 1
+
+        conn.commit()
+        cur.close()
+        print(f"[migrate_pg] Applied {n} column migrations OK")
+
+    except Exception as e:
+        print(f"[migrate_pg] Migration warning: {e}")
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
 def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None):
     """
     Copy all data from a SQLite database to PostgreSQL.

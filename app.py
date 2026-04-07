@@ -7543,8 +7543,9 @@ if os.path.exists(DATABASE):
         pass
     # Auto-run DB migrations on startup (idempotent — safe to run every time)
     try:
-        from init_db import migrate_db
+        from init_db import migrate_db, migrate_db_postgres
         migrate_db()
+        migrate_db_postgres()
     except Exception as _mig_err:
         print(f"[startup] Migration warning: {_mig_err}")
 
