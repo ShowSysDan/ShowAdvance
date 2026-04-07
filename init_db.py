@@ -6,6 +6,7 @@ Usage:
   python init_db.py --force   — destroy and reinitialize
   python init_db.py --migrate — run migrations on existing DB (safe for production)
 """
+import configparser
 import sqlite3
 import os
 import json
