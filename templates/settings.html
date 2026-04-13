@@ -206,6 +206,7 @@
       <p class="text-dim" style="font-size:12px;margin-bottom:12px">
         <strong>all_access</strong> groups can see all shows and edit freely.
         <strong>restricted</strong> group members can only view/export shows explicitly assigned to their group.
+        <strong>scheduler_group</strong> members can use the Labor Scheduler page.
       </p>
 
       {% if groups %}
@@ -1276,6 +1277,7 @@
         <select id="group-type" class="field-input">
           <option value="all_access">All Access — can see all shows</option>
           <option value="restricted">Restricted — assigned shows only (view/export)</option>
+          <option value="scheduler_group">Scheduler — can use Labor Scheduler</option>
         </select>
       </div>
       <div class="field-group">

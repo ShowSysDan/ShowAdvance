@@ -370,6 +370,20 @@ def staff_or_admin_required(f):
     return decorated
 
 
+def scheduler_required(f):
+    """Allow admins, staff, or members of a 'scheduler_group' type group."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('user_role') in ('admin', 'staff'):
+            return f(*args, **kwargs)
+        if session.get('is_labor_scheduler') or session.get('is_content_admin'):
+            return f(*args, **kwargs)
+        abort(403)
+    return decorated
+
+
 @app.before_request
 def _refresh_session_roles():
     """Re-check user role/permissions from DB every 5 minutes to catch demotions."""
@@ -391,6 +405,7 @@ def _refresh_session_roles():
         session['display_name'] = user['display_name'] or session.get('username', '')
         session['is_restricted'] = is_restricted_user(user['id'])
         session['is_content_admin'] = is_content_admin(user['id'])
+        session['is_labor_scheduler'] = is_labor_scheduler(user['id'])
         session['is_readonly'] = bool(user.get('is_readonly', 0))
         session['_role_checked_at'] = now
     except Exception:
@@ -407,6 +422,7 @@ def get_current_user():
             'theme': session.get('theme', 'dark'),
             'is_restricted': session.get('is_restricted', False),
             'is_content_admin': session.get('is_content_admin', False),
+            'is_labor_scheduler': session.get('is_labor_scheduler', False),
         }
     return None
 
@@ -480,6 +496,23 @@ def is_restricted_user(user_id):
         return False
     # Restricted only if ALL groups are 'restricted' (no all_access or admin_group)
     return all(t == 'restricted' for t in group_types)
+
+
+def is_labor_scheduler(user_id):
+    """True if the user can access the Labor Scheduler page.
+
+    System admins and staff always qualify; additionally any user in a group
+    with type 'scheduler_group' or 'admin_group' qualifies.
+    """
+    db = get_db()
+    user = db.execute('SELECT role FROM users WHERE id=?', (user_id,)).fetchone()
+    db.close()
+    if not user:
+        return False
+    if user['role'] in ('admin', 'staff'):
+        return True
+    group_types = _get_user_group_types(user_id)
+    return any(t in ('scheduler_group', 'admin_group') for t in group_types)
 
 
 # ─── Form Fields Helper ───────────────────────────────────────────────────────
@@ -1158,6 +1191,7 @@ def _login_route():
             session['theme']          = user['theme'] or 'dark'
             session['is_restricted']  = is_restricted_user(user['id'])
             session['is_content_admin'] = is_content_admin(user['id'])
+            session['is_labor_scheduler'] = is_labor_scheduler(user['id'])
             session['is_readonly'] = bool(user.get('is_readonly', 0))
             session['_role_checked_at'] = datetime.utcnow().timestamp()
             log_audit(db, 'LOGIN', 'user', user['id'], detail=username)
@@ -1234,18 +1268,24 @@ def admin_view_as():
         session['_real_is_content_admin'] = session.get('is_content_admin', False)
     session['_view_as'] = view_as
     syslog_logger.info(f"ADMIN_VIEW_AS view_as={view_as} by={session.get('username')}")
+    # Save scheduler flag too so we can restore on reset
+    if '_real_is_labor_scheduler' not in session:
+        session['_real_is_labor_scheduler'] = session.get('is_labor_scheduler', False)
     if view_as == 'readonly':
         session['user_role'] = 'user'
         session['is_readonly'] = True
         session['is_content_admin'] = False
+        session['is_labor_scheduler'] = False
     elif view_as == 'user':
         session['user_role'] = 'user'
         session['is_readonly'] = False
         session['is_content_admin'] = False
+        session['is_labor_scheduler'] = False
     elif view_as == 'content_admin':
         session['user_role'] = 'user'
         session['is_readonly'] = False
         session['is_content_admin'] = True
+        session['is_labor_scheduler'] = False
     return jsonify({'success': True, 'view_as': view_as})
 
 
@@ -1258,6 +1298,7 @@ def admin_view_as_reset():
     session['user_role'] = session.pop('_real_role')
     session['is_readonly'] = session.pop('_real_is_readonly', False)
     session['is_content_admin'] = session.pop('_real_is_content_admin', False)
+    session['is_labor_scheduler'] = session.pop('_real_is_labor_scheduler', False)
     session.pop('_view_as', None)
     syslog_logger.info(f"ADMIN_VIEW_AS_RESET by={session.get('username')}")
     return jsonify({'success': True})
@@ -1534,9 +1575,11 @@ def show_page(show_id):
 
     # Labor requests for this show
     labor_rows = db2.execute("""
-        SELECT lr.*, jp.name as position_name
+        SELECT lr.*, jp.name as position_name,
+               cm.name as scheduled_crew_name
         FROM labor_requests lr
         LEFT JOIN job_positions jp ON lr.position_id = jp.id
+        LEFT JOIN crew_members cm ON lr.scheduled_crew_member_id = cm.id
         WHERE lr.show_id = ?
         ORDER BY lr.sort_order, lr.id
     """, (show_id,)).fetchall()
@@ -5141,9 +5184,11 @@ def get_labor_requests(show_id):
         return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
     rows = db.execute("""
-        SELECT lr.*, jp.name as position_name
+        SELECT lr.*, jp.name as position_name,
+               cm.name as scheduled_crew_name
         FROM labor_requests lr
         LEFT JOIN job_positions jp ON lr.position_id = jp.id
+        LEFT JOIN crew_members cm ON lr.scheduled_crew_member_id = cm.id
         WHERE lr.show_id = ?
         ORDER BY lr.sort_order, lr.id
     """, (show_id,)).fetchall()
@@ -5164,10 +5209,11 @@ def add_labor_request(show_id):
         'SELECT MAX(sort_order) FROM labor_requests WHERE show_id=?', (show_id,)
     ).fetchone()[0] or 0
     cur = db.execute("""
-        INSERT INTO labor_requests (show_id, position_id, in_time, out_time, break_start, break_end, requested_name, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO labor_requests (show_id, position_id, work_date, in_time, out_time, break_start, break_end, requested_name, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (show_id,
           data.get('position_id') or None,
+          data.get('work_date') or None,
           data.get('in_time', ''),
           data.get('out_time', ''),
           data.get('break_start', ''),
@@ -5194,9 +5240,10 @@ def update_labor_request(show_id, rid):
     db = get_db()
     db.execute("""
         UPDATE labor_requests
-        SET position_id=?, in_time=?, out_time=?, break_start=?, break_end=?, requested_name=?
+        SET position_id=?, work_date=?, in_time=?, out_time=?, break_start=?, break_end=?, requested_name=?
         WHERE id=? AND show_id=?
     """, (data.get('position_id') or None,
+          data.get('work_date') or None,
           data.get('in_time', ''),
           data.get('out_time', ''),
           data.get('break_start', ''),
@@ -5244,6 +5291,148 @@ def reorder_labor_requests(show_id):
     db.commit()
     db.close()
     return jsonify({'success': True})
+
+
+# ─── Labor Scheduler ─────────────────────────────────────────────────────────
+
+@app.route('/labor-scheduler')
+@scheduler_required
+def labor_scheduler():
+    """Cross-show labor scheduler view."""
+    return render_template('labor_scheduler.html', user=get_current_user())
+
+
+@app.route('/api/labor-scheduler', methods=['GET'])
+@scheduler_required
+def api_labor_scheduler_list():
+    """Return labor requests whose work_date falls in [from, to] (inclusive),
+    grouped by show on the client. Rows with NULL work_date fall back to
+    the show's show_date so legacy rows still appear."""
+    date_from = (request.args.get('from') or '').strip()
+    date_to   = (request.args.get('to') or '').strip()
+    if not date_from or not date_to:
+        return jsonify({'error': 'from and to dates required'}), 400
+
+    db = get_db()
+    accessible = get_accessible_shows(session['user_id'])
+
+    sql = """
+        SELECT lr.id, lr.show_id, lr.position_id, lr.work_date,
+               lr.in_time, lr.out_time, lr.break_start, lr.break_end,
+               lr.requested_name, lr.is_scheduled,
+               lr.scheduled_crew_member_id, lr.sort_order,
+               jp.name as position_name,
+               pc.name as category_name,
+               pc.sort_order as category_sort,
+               cm.name as scheduled_crew_name,
+               s.name as show_name,
+               s.venue as show_venue,
+               s.show_date as show_date,
+               s.status as show_status
+        FROM labor_requests lr
+        JOIN shows s ON lr.show_id = s.id
+        LEFT JOIN job_positions jp ON lr.position_id = jp.id
+        LEFT JOIN position_categories pc ON jp.category_id = pc.id
+        LEFT JOIN crew_members cm ON lr.scheduled_crew_member_id = cm.id
+        WHERE s.status != 'archived'
+          AND COALESCE(lr.work_date, s.show_date) BETWEEN ? AND ?
+    """
+    params = [date_from, date_to]
+    if accessible is not None:
+        if not accessible:
+            db.close()
+            return jsonify({'shows': []})
+        placeholders = ','.join(['?'] * len(accessible))
+        sql += f' AND lr.show_id IN ({placeholders})'
+        params.extend(accessible)
+    sql += ' ORDER BY COALESCE(lr.work_date, s.show_date), s.name, pc.sort_order, jp.sort_order, lr.sort_order, lr.id'
+
+    rows = db.execute(sql, params).fetchall()
+    db.close()
+
+    # Group by show
+    shows = {}
+    order = []
+    for r in rows:
+        rd = dict(r)
+        sid = rd['show_id']
+        if sid not in shows:
+            shows[sid] = {
+                'show_id': sid,
+                'show_name': rd['show_name'],
+                'show_venue': rd['show_venue'],
+                'show_date': rd['show_date'],
+                'show_status': rd['show_status'],
+                'requests': [],
+            }
+            order.append(sid)
+        shows[sid]['requests'].append(rd)
+    return jsonify({'shows': [shows[sid] for sid in order]})
+
+
+@app.route('/api/labor-scheduler/<int:rid>', methods=['PUT'])
+@scheduler_required
+def api_labor_scheduler_update(rid):
+    """Update only the scheduling fields on a labor request."""
+    if session.get('is_readonly'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    row = db.execute(
+        'SELECT show_id FROM labor_requests WHERE id=?', (rid,)
+    ).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    show_id = row['show_id']
+    if not can_access_show(session['user_id'], show_id):
+        db.close()
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+
+    updates = []
+    params = []
+    detail_parts = []
+    if 'is_scheduled' in data:
+        updates.append('is_scheduled=?')
+        params.append(1 if data.get('is_scheduled') else 0)
+        detail_parts.append(f"is_scheduled={1 if data.get('is_scheduled') else 0}")
+    if 'scheduled_crew_member_id' in data:
+        cmid = data.get('scheduled_crew_member_id')
+        cmid = int(cmid) if cmid else None
+        updates.append('scheduled_crew_member_id=?')
+        params.append(cmid)
+        detail_parts.append(f"crew_id={cmid}")
+
+    if not updates:
+        db.close()
+        return jsonify({'success': False, 'error': 'No changes.'}), 400
+
+    updates.append('scheduled_by=?')
+    params.append(session['user_id'])
+    updates.append('scheduled_at=CURRENT_TIMESTAMP')
+
+    params.append(rid)
+    db.execute(
+        f"UPDATE labor_requests SET {', '.join(updates)} WHERE id=?",
+        params,
+    )
+    log_audit(db, 'LABOR_SCHEDULED', 'labor_request', rid, show_id=show_id,
+              detail='; '.join(detail_parts))
+    db.commit()
+
+    # Return the refreshed row so the client can render (esp. scheduled_crew_name)
+    refreshed = db.execute("""
+        SELECT lr.id, lr.is_scheduled, lr.scheduled_crew_member_id,
+               cm.name as scheduled_crew_name
+        FROM labor_requests lr
+        LEFT JOIN crew_members cm ON lr.scheduled_crew_member_id = cm.id
+        WHERE lr.id = ?
+    """, (rid,)).fetchone()
+    db.close()
+    syslog_logger.info(
+        f"LABOR_SCHEDULED id={rid} show_id={show_id} by={session.get('username')}"
+    )
+    return jsonify({'success': True, 'row': dict(refreshed) if refreshed else None})
 
 
 # ─── Crew Members ────────────────────────────────────────────────────────────

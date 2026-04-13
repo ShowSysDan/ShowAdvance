@@ -257,14 +257,21 @@ CREATE TABLE IF NOT EXISTS job_positions (
 );
 
 CREATE TABLE IF NOT EXISTS labor_requests (
-    id             INTEGER PRIMARY KEY AUTOINCREMENT,
-    show_id        INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
-    position_id    INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
-    in_time        TEXT DEFAULT '',
-    out_time       TEXT DEFAULT '',
-    requested_name TEXT DEFAULT '',
-    sort_order     INTEGER DEFAULT 0,
-    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    show_id                   INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    position_id               INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+    work_date                 DATE,
+    in_time                   TEXT DEFAULT '',
+    out_time                  TEXT DEFAULT '',
+    break_start               TEXT DEFAULT '',
+    break_end                 TEXT DEFAULT '',
+    requested_name            TEXT DEFAULT '',
+    is_scheduled              INTEGER DEFAULT 0,
+    scheduled_crew_member_id  INTEGER,
+    scheduled_by              INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    scheduled_at              TIMESTAMP,
+    sort_order                INTEGER DEFAULT 0,
+    created_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS crew_members (
@@ -1074,6 +1081,11 @@ def migrate_db():
         'ALTER TABLE form_fields ADD COLUMN ai_hint TEXT DEFAULT NULL',
         "ALTER TABLE labor_requests ADD COLUMN break_start TEXT DEFAULT ''",
         "ALTER TABLE labor_requests ADD COLUMN break_end TEXT DEFAULT ''",
+        "ALTER TABLE labor_requests ADD COLUMN work_date DATE",
+        "ALTER TABLE labor_requests ADD COLUMN is_scheduled INTEGER DEFAULT 0",
+        "ALTER TABLE labor_requests ADD COLUMN scheduled_crew_member_id INTEGER",
+        "ALTER TABLE labor_requests ADD COLUMN scheduled_by INTEGER",
+        "ALTER TABLE labor_requests ADD COLUMN scheduled_at TIMESTAMP",
         'ALTER TABLE show_comments ADD COLUMN deleted_at TIMESTAMP',
         'ALTER TABLE show_comments ADD COLUMN deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
         'ALTER TABLE show_comments ADD COLUMN edited_at TIMESTAMP',
@@ -1101,14 +1113,21 @@ def migrate_db():
         );
 
         CREATE TABLE IF NOT EXISTS labor_requests (
-            id             INTEGER PRIMARY KEY AUTOINCREMENT,
-            show_id        INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
-            position_id    INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
-            in_time        TEXT DEFAULT '',
-            out_time       TEXT DEFAULT '',
-            requested_name TEXT DEFAULT '',
-            sort_order     INTEGER DEFAULT 0,
-            created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+            show_id                   INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+            position_id               INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+            work_date                 DATE,
+            in_time                   TEXT DEFAULT '',
+            out_time                  TEXT DEFAULT '',
+            break_start               TEXT DEFAULT '',
+            break_end                 TEXT DEFAULT '',
+            requested_name            TEXT DEFAULT '',
+            is_scheduled              INTEGER DEFAULT 0,
+            scheduled_crew_member_id  INTEGER,
+            scheduled_by              INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            scheduled_at              TIMESTAMP,
+            sort_order                INTEGER DEFAULT 0,
+            created_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
         CREATE TABLE IF NOT EXISTS crew_members (
@@ -1756,16 +1775,21 @@ CREATE TABLE IF NOT EXISTS job_positions (
 );
 
 CREATE TABLE IF NOT EXISTS labor_requests (
-    id             SERIAL PRIMARY KEY,
-    show_id        INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
-    position_id    INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
-    in_time        TEXT DEFAULT '',
-    out_time       TEXT DEFAULT '',
-    break_start    TEXT DEFAULT '',
-    break_end      TEXT DEFAULT '',
-    requested_name TEXT DEFAULT '',
-    sort_order     INTEGER DEFAULT 0,
-    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id                        SERIAL PRIMARY KEY,
+    show_id                   INTEGER NOT NULL REFERENCES shows(id) ON DELETE CASCADE,
+    position_id               INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+    work_date                 DATE,
+    in_time                   TEXT DEFAULT '',
+    out_time                  TEXT DEFAULT '',
+    break_start               TEXT DEFAULT '',
+    break_end                 TEXT DEFAULT '',
+    requested_name            TEXT DEFAULT '',
+    is_scheduled              INTEGER DEFAULT 0,
+    scheduled_crew_member_id  INTEGER,
+    scheduled_by              INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    scheduled_at              TIMESTAMP,
+    sort_order                INTEGER DEFAULT 0,
+    created_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS crew_members (
@@ -2254,6 +2278,11 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS ai_hint TEXT DEFAULT NULL',
             f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_start TEXT DEFAULT ''",
             f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_end TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".labor_requests ADD COLUMN IF NOT EXISTS work_date DATE',
+            f'ALTER TABLE "{app_schema}".labor_requests ADD COLUMN IF NOT EXISTS is_scheduled INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".labor_requests ADD COLUMN IF NOT EXISTS scheduled_crew_member_id INTEGER',
+            f'ALTER TABLE "{app_schema}".labor_requests ADD COLUMN IF NOT EXISTS scheduled_by INTEGER',
+            f'ALTER TABLE "{app_schema}".labor_requests ADD COLUMN IF NOT EXISTS scheduled_at TIMESTAMP',
             f'ALTER TABLE "{app_schema}".show_comments ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP',
             f'ALTER TABLE "{app_schema}".show_comments ADD COLUMN IF NOT EXISTS deleted_by INTEGER',
             f'ALTER TABLE "{app_schema}".show_comments ADD COLUMN IF NOT EXISTS edited_at TIMESTAMP',
