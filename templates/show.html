@@ -444,7 +444,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
             <option value="">Copy from…</option>
             {% for op in performances %}
             {% if op.id != p.id %}
-            <option value="{{ op.id }}">Day {{ loop.index }}{% if op.perf_date %} ({{ o(p.perf_date|string)[5:] | replace('-','/') }}){% endif %}</option>
+            <option value="{{ op.id }}">Day {{ loop.index }}{% if op.perf_date %} ({{ (op.perf_date|string)[5:] | replace('-','/') }}){% endif %}</option>
             {% endif %}
             {% endfor %}
           </select>
