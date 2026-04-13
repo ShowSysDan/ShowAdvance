@@ -665,15 +665,15 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
         <thead>
           <tr>
             {% if not restricted %}<th style="width:32px;text-align:center"><input type="checkbox" id="labor-select-all" title="Select / deselect all" onchange="toggleAllLaborRows(this)"></th>{% endif %}
-            <th style="width:130px">WORK DATE</th>
-            <th style="width:180px">POSITION</th>
-            <th style="width:80px">IN</th>
-            <th style="width:80px">OUT</th>
-            <th style="width:90px">BREAK START</th>
-            <th style="width:90px">BREAK END</th>
+            <th style="width:150px">WORK DATE</th>
+            <th style="width:190px">POSITION</th>
+            <th style="width:95px">IN</th>
+            <th style="width:95px">OUT</th>
+            <th style="width:115px;white-space:nowrap">BREAK START</th>
+            <th style="width:115px;white-space:nowrap">BREAK END</th>
             <th>TECHNICIAN</th>
-            <th style="width:60px;text-align:center" title="Scheduled by the labor scheduler">SCHED</th>
-            <th style="width:170px">SCHEDULED TECH</th>
+            <th style="width:70px;text-align:center" title="Scheduled by the labor scheduler">SCHED</th>
+            <th style="width:180px;white-space:nowrap">SCHEDULED TECH</th>
             {% if not restricted %}<th style="width:44px"></th>{% endif %}
           </tr>
         </thead>
