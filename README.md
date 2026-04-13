@@ -6,7 +6,7 @@
 
 ## Version Numbering
 
-**Current version: `2.7.0`**
+**Current version: `2.8.0`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -39,6 +39,7 @@ Version history:
 - `2.5.1` — Security patch: XSS fix in Retired Assets JS template literals (esc() helper); rate limiting on /api/search (60/min); max query length guard; log_date ISO format validation; syslog coverage for ADMIN_VIEW_AS, ADMIN_VIEW_AS_RESET, ASSET_LOG_ADD, ASSET_LOG_DELETE
 - `2.6.0` — RentalWorks bulk import script (`import_assets.py`): one-time migration from RentalWorks exports into Asset Manager with full 3-tier hierarchy, container/kit linking, daily+weekly rates, depreciation dates, and replacement costs. Kit/container feature: items can be flagged as containers and linked to their contents. Load-in/load-out dates on shows for smart asset rental pricing (weekly rate applies when load period ≥ 7 days; daily × days otherwise). Sidebar redesign: gradient background, scaled-up nav items, pill-style active state.
 - `2.7.0` — PostgreSQL dual-schema support: user/auth tables live in a `shared` schema (reusable across apps) while theater-specific tables live in an `app` schema (default `theater321`). Database credentials stored in gitignored `db_config.ini`. CLI commands for schema init and SQLite→PostgreSQL data migration. Settings UI simplified to read-only database status. Fixed schema creation bug that prevented PostgreSQL init.
+- `2.8.0` — Labor Scheduler: new cross-show scheduler view (`/labor-scheduler`) aggregates labor requests across every show in a chosen date range, grouped by show. Schedulers tick a per-row checkbox as positions are confirmed (TCO'd) and pick the actual technician from the crew roster (qualified-first dropdown) — stored separately from the PM's originally-requested name. Scheduled status and scheduled tech flow back to each show's Labor Requests tab as read-only columns so PMs can see progress. Per-request `work_date` lets multi-day runs track one labor request per day. New `scheduler_group` user-group type so admins can grant scheduler access without giving full staff privileges. Adds `LABOR_SCHEDULED` audit action with syslog coverage.
 
 ---
 
@@ -54,6 +55,7 @@ Version history:
    - [Production Schedule](#production-schedule)
    - [Post-Show Notes](#post-show-notes)
    - [Labor Requests](#labor-requests)
+   - [Labor Scheduler](#labor-scheduler)
    - [Assets Tab](#assets-tab)
    - [Asset Availability Dashboards](#asset-availability-dashboards)
    - [Comments](#comments)
@@ -202,7 +204,21 @@ Click **Export PDF** to generate a Post-Show Notes PDF.
 
 ### Labor Requests
 
-Track labor needs per show. Add requests with department, position, quantity, date/time, and notes. Drag rows to reorder. Restricted (read-only) users can view but not modify labor requests.
+Track labor needs per show. Add requests with department, position, **work date** (the specific day the position is needed — a multi-day run has one request per day), in/out times, break window, and a requested technician name. Drag rows to reorder. Restricted (read-only) users can view but not modify labor requests.
+
+The **SCHED** and **SCHEDULED TECH** columns are read-only — they are set by the scheduler via the [Labor Scheduler](#labor-scheduler) page. PMs can see who has been confirmed for each position but cannot edit the scheduler's entries.
+
+### Labor Scheduler
+
+Accessible from the sidebar (SYSTEM section) to admins, staff, and anyone in a group of type `scheduler_group`. Pick a **From** and **To** date and the page pulls every labor request whose `work_date` falls in that range, grouped by show.
+
+For each row the scheduler can:
+- Tick the **SCHED ✓** checkbox once the position is confirmed (TCO'd).
+- Pick the **SCHEDULED TECH** from the crew roster. The dropdown is split into "Qualified" and "Others" based on the position and the crew member's qualifications on the Skill Tracker.
+
+All other fields (position, times, break, requested technician) are read-only on this page — the source of truth for those is the show's Labor Requests tab. The SCHED checkbox and scheduled technician flow back to that tab as read-only columns.
+
+Rows with no `work_date` (legacy data) fall back to the show's primary date for range filtering. Scheduling changes write a `LABOR_SCHEDULED` entry to the audit log and syslog.
 
 ### Assets Tab
 
@@ -443,6 +459,7 @@ New users can self-register at `/register`. The flow:
 |------------|-----------|
 | `all_access` | Can see and edit all shows |
 | `restricted` | Can only view/export assigned shows |
+| `scheduler_group` | Can access the Labor Scheduler page to assign technicians and mark positions as scheduled |
 
 1. Create group: Settings → Groups → **+ New Group**
 2. Add members
