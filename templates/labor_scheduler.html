@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% block title %}Labor Scheduler — 3·2·1→Theater{% endblock %}
+
+{% block head %}
+<style>
+  .scheduler-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+    margin-bottom: 16px;
+  }
+  .scheduler-filter .field-group { display: flex; flex-direction: column; gap: 4px; }
+  .scheduler-filter label { font-size: 11px; letter-spacing: .04em; color: var(--text-dim); font-weight: 600; text-transform: uppercase; }
+  .scheduler-filter input[type=date] { min-width: 160px; }
+  .scheduler-show-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .scheduler-show-header .show-link {
+    font-size: 11px;
+    color: var(--text-dim);
+    text-decoration: none;
+  }
+  .scheduler-show-header .show-link:hover { color: var(--accent); text-decoration: underline; }
+  .scheduler-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+  .sched-ro { color: var(--text); }
+  .sched-ro-dim { color: var(--text-dim); }
+  .sched-check-cell { text-align: center; }
+  .sched-check-cell input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; }
+  .scheduled-row { background: rgba(72, 187, 120, 0.08); }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Labor Scheduler</h1>
+    <p class="page-sub">Pick a date range to see all labor requests grouped by show. Check positions as you schedule them and assign the actual technician.</p>
+  </div>
+</div>
+
+<div class="form-section">
+  <div class="form-section-body">
+    <div class="scheduler-filter">
+      <div class="field-group">
+        <label for="sched-from">From</label>
+        <input type="date" id="sched-from" class="field-input">
+      </div>
+      <div class="field-group">
+        <label for="sched-to">To</label>
+        <input type="date" id="sched-to" class="field-input">
+      </div>
+      <button type="button" class="btn btn-primary" onclick="loadScheduler()">Load</button>
+      <span id="sched-status" class="text-dim" style="font-size:12px"></span>
+    </div>
+  </div>
+</div>
+
+<div id="scheduler-results"></div>
+
+<script>
+(function() {
+  let _crewMembers = null;
+
+  function fmtDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function setDefaultRange() {
+    const today = new Date();
+    const twoWeeks = new Date(today.getTime() + 14 * 24 * 60 * 60 * 1000);
+    document.getElementById('sched-from').value = fmtDate(today);
+    document.getElementById('sched-to').value = fmtDate(twoWeeks);
+  }
+
+  async function loadCrew() {
+    if (_crewMembers) return _crewMembers;
+    const r = await fetch('/api/crew-members');
+    _crewMembers = await r.json();
+    return _crewMembers;
+  }
+
+  function buildTechnicianSelect(selectEl, positionId, selectedId) {
+    selectEl.innerHTML = '';
+    const anyOpt = document.createElement('option');
+    anyOpt.value = '';
+    anyOpt.textContent = '— Unassigned —';
+    selectEl.appendChild(anyOpt);
+    if (!_crewMembers || !_crewMembers.length) return;
+    if (positionId) {
+      const qualified = _crewMembers.filter(m => (m.qualifications || []).includes(positionId));
+      const others    = _crewMembers.filter(m => !(m.qualifications || []).includes(positionId));
+      if (qualified.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Qualified';
+        qualified.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.name;
+          if (String(m.id) === String(selectedId)) opt.selected = true;
+          og.appendChild(opt);
+        });
+        selectEl.appendChild(og);
+      }
+      if (others.length) {
+        const og = document.createElement('optgroup');
+        og.label = 'Others';
+        others.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.name;
+          if (String(m.id) === String(selectedId)) opt.selected = true;
+          og.appendChild(opt);
+        });
+        selectEl.appendChild(og);
+      }
+    } else {
+      _crewMembers.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.name;
+        if (String(m.id) === String(selectedId)) opt.selected = true;
+        selectEl.appendChild(opt);
+      });
+    }
+  }
+
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
+  function renderShows(shows) {
+    const container = document.getElementById('scheduler-results');
+    if (!shows.length) {
+      container.innerHTML = '<div class="form-section"><div class="form-section-body"><div class="scheduler-empty">No labor requests found in this date range.</div></div></div>';
+      return;
+    }
+    container.innerHTML = shows.map(show => {
+      const rowsHtml = show.requests.map(lr => {
+        const scheduledClass = lr.is_scheduled ? 'scheduled-row' : '';
+        return `
+          <tr data-rid="${lr.id}" class="${scheduledClass}">
+            <td class="sched-check-cell">
+              <input type="checkbox" class="sched-check" ${lr.is_scheduled ? 'checked' : ''}
+                     onchange="window.__scheduler.onScheduledToggle(this)">
+            </td>
+            <td class="sched-ro">${escapeHtml(lr.work_date || '—')}</td>
+            <td class="sched-ro">${escapeHtml(lr.position_name || '—')}</td>
+            <td class="sched-ro-dim">${escapeHtml(lr.in_time || '')}</td>
+            <td class="sched-ro-dim">${escapeHtml(lr.out_time || '')}</td>
+            <td class="sched-ro-dim">${escapeHtml(lr.break_start || '')}${lr.break_end ? ' – ' + escapeHtml(lr.break_end) : ''}</td>
+            <td class="sched-ro-dim">${escapeHtml(lr.requested_name || '—')}</td>
+            <td>
+              <select class="field-input field-input-sm sched-tech"
+                      data-position-id="${lr.position_id || ''}"
+                      data-selected-id="${lr.scheduled_crew_member_id || ''}"
+                      onchange="window.__scheduler.onCrewChange(this)">
+              </select>
+            </td>
+          </tr>
+        `;
+      }).join('');
+
+      return `
+        <div class="form-section" style="margin-bottom:16px">
+          <div class="form-section-header">
+            <span class="section-icon">◈</span>
+            <div class="scheduler-show-header">
+              <strong style="text-transform:none;letter-spacing:normal;font-size:14px">${escapeHtml(show.show_name)}</strong>
+              <span class="text-dim" style="font-size:11px">
+                ${escapeHtml(show.show_venue || '')}${show.show_date ? ' · ' + escapeHtml(show.show_date) : ''}
+              </span>
+              <a href="/shows/${show.show_id}?tab=staffing" class="show-link" target="_blank" rel="noopener">Open show →</a>
+            </div>
+          </div>
+          <div class="form-section-body no-pad">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th style="width:52px;text-align:center">SCHED ✓</th>
+                  <th style="width:120px">DATE</th>
+                  <th style="width:200px">POSITION</th>
+                  <th style="width:70px">IN</th>
+                  <th style="width:70px">OUT</th>
+                  <th style="width:140px">BREAK</th>
+                  <th style="width:160px">REQUESTED</th>
+                  <th>SCHEDULED TECH</th>
+                </tr>
+              </thead>
+              <tbody>${rowsHtml}</tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    // After injecting HTML, build the crew dropdowns from cached data
+    container.querySelectorAll('.sched-tech').forEach(sel => {
+      const pid = parseInt(sel.dataset.positionId, 10) || null;
+      const sid = sel.dataset.selectedId || '';
+      buildTechnicianSelect(sel, pid, sid);
+    });
+  }
+
+  async function loadScheduler() {
+    const from = document.getElementById('sched-from').value;
+    const to   = document.getElementById('sched-to').value;
+    const status = document.getElementById('sched-status');
+    if (!from || !to) {
+      status.textContent = 'Pick both dates.';
+      return;
+    }
+    status.textContent = 'Loading…';
+    try {
+      await loadCrew();
+      const r = await fetch(`/api/labor-scheduler?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      if (!r.ok) {
+        status.textContent = 'Failed to load.';
+        return;
+      }
+      const data = await r.json();
+      renderShows(data.shows || []);
+      const total = (data.shows || []).reduce((n, s) => n + s.requests.length, 0);
+      status.textContent = `${total} request${total === 1 ? '' : 's'} across ${data.shows.length} show${data.shows.length === 1 ? '' : 's'}.`;
+    } catch (e) {
+      status.textContent = 'Error loading data.';
+      console.error(e);
+    }
+  }
+
+  async function putSchedulerUpdate(rid, payload) {
+    const r = await fetch(`/api/labor-scheduler/${rid}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    if (!r.ok) {
+      alert('Save failed — check your access and try again.');
+      return null;
+    }
+    return await r.json();
+  }
+
+  async function onScheduledToggle(checkbox) {
+    const tr = checkbox.closest('tr');
+    const rid = tr.dataset.rid;
+    const val = checkbox.checked;
+    tr.classList.toggle('scheduled-row', val);
+    const res = await putSchedulerUpdate(rid, { is_scheduled: val });
+    if (!res || !res.success) {
+      checkbox.checked = !val;
+      tr.classList.toggle('scheduled-row', !val);
+    }
+  }
+
+  async function onCrewChange(select) {
+    const tr = select.closest('tr');
+    const rid = tr.dataset.rid;
+    const val = select.value || null;
+    await putSchedulerUpdate(rid, { scheduled_crew_member_id: val });
+  }
+
+  window.__scheduler = { onScheduledToggle, onCrewChange };
+  window.loadScheduler = loadScheduler;
+
+  document.addEventListener('DOMContentLoaded', () => {
+    setDefaultRange();
+    loadScheduler();
+  });
+})();
+</script>
+{% endblock %}
