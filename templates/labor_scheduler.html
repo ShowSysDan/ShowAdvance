@@ -45,6 +45,9 @@
     <h1 class="page-title">Labor Scheduler</h1>
     <p class="page-sub">Pick a date range to see all labor requests grouped by show. Check positions as you schedule them and assign the actual technician.</p>
   </div>
+  <div class="header-actions">
+    <button class="btn btn-primary" onclick="window.__scheduler.saveAll()">Save</button>
+  </div>
 </div>
 
 <div class="form-section">
@@ -276,7 +279,26 @@
     await putSchedulerUpdate(rid, { scheduled_crew_member_id: val });
   }
 
-  window.__scheduler = { onScheduledToggle, onCrewChange };
+  async function saveAll() {
+    const rows = document.querySelectorAll('#scheduler-results tr[data-rid]');
+    if (!rows.length) { showSaveToast('Nothing to save'); return; }
+    let ok = 0, fail = 0;
+    for (const tr of rows) {
+      const rid = tr.dataset.rid;
+      const isScheduled = tr.querySelector('.sched-check')?.checked ? true : false;
+      const crewId = tr.querySelector('.sched-tech')?.value || null;
+      const r = await fetch(`/api/labor-scheduler/${rid}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ is_scheduled: isScheduled, scheduled_crew_member_id: crewId }),
+      });
+      if (r.ok) ok++; else fail++;
+    }
+    if (fail) showSaveToast(`✗ ${fail} failed, ${ok} saved`, 'error');
+    else showSaveToast(`✓ All ${ok} rows saved`);
+  }
+
+  window.__scheduler = { onScheduledToggle, onCrewChange, saveAll };
   window.loadScheduler = loadScheduler;
 
   document.addEventListener('DOMContentLoaded', () => {
