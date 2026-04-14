@@ -517,6 +517,22 @@ def is_labor_scheduler(user_id):
 
 # ─── Form Fields Helper ───────────────────────────────────────────────────────
 
+
+def _normalize_row_dates(d):
+    """Convert any datetime.date / datetime objects in a dict to ISO-format strings.
+
+    psycopg2 returns Python date objects for DATE columns; Flask's default JSON
+    encoder serialises those as HTTP-date ("Tue, 14 Apr 2026 00:00:00 GMT")
+    which breaks ``<input type="date">`` (requires yyyy-MM-dd).  Call this on
+    every dict(row) before passing to templates or jsonify.
+    """
+    for k, v in d.items():
+        if isinstance(v, datetime):
+            d[k] = v.isoformat()
+        elif isinstance(v, date):
+            d[k] = v.isoformat()
+    return d
+
 def get_form_fields_for_template():
     """Returns ordered list of sections, each with a .fields list."""
     db = get_db()
@@ -1583,7 +1599,7 @@ def show_page(show_id):
         WHERE lr.show_id = ?
         ORDER BY lr.sort_order, lr.id
     """, (show_id,)).fetchall()
-    labor_requests_data = [dict(r) for r in labor_rows]
+    labor_requests_data = [_normalize_row_dates(dict(r)) for r in labor_rows]
 
     # Asset categories (for the Assets tab)
     asset_cats = db2.execute('SELECT * FROM asset_categories ORDER BY sort_order, name').fetchall()
@@ -5193,7 +5209,7 @@ def get_labor_requests(show_id):
         ORDER BY lr.sort_order, lr.id
     """, (show_id,)).fetchall()
     db.close()
-    return jsonify([dict(r) for r in rows])
+    return jsonify([_normalize_row_dates(dict(r)) for r in rows])
 
 
 @app.route('/shows/<int:show_id>/labor-requests', methods=['POST'])
@@ -5354,7 +5370,7 @@ def api_labor_scheduler_list():
     shows = {}
     order = []
     for r in rows:
-        rd = dict(r)
+        rd = _normalize_row_dates(dict(r))
         sid = rd['show_id']
         if sid not in shows:
             shows[sid] = {
@@ -5432,7 +5448,7 @@ def api_labor_scheduler_update(rid):
     syslog_logger.info(
         f"LABOR_SCHEDULED id={rid} show_id={show_id} by={session.get('username')}"
     )
-    return jsonify({'success': True, 'row': dict(refreshed) if refreshed else None})
+    return jsonify({'success': True, 'row': _normalize_row_dates(dict(refreshed)) if refreshed else None})
 
 
 # ─── Crew Members ────────────────────────────────────────────────────────────
