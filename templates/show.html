@@ -1590,6 +1590,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     closePerfForm();
     _refreshPerfRow(json.performance, !id);
     _updateHeaderDate();
+    showSaveToast('✓ Saved');
   }
   async function deletePerf(id) {
     if (!confirm('Remove this date?')) return;
@@ -1600,6 +1601,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     if (row) row.remove();
     _checkPerfEmpty();
     _updateHeaderDate();
+    showSaveToast('✓ Saved');
   }
   function _refreshPerfRow(p, isNew) {
     const tbody = document.getElementById('perf-tbody');

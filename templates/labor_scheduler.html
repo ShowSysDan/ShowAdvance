@@ -249,10 +249,12 @@
       body: JSON.stringify(payload),
     });
     if (!r.ok) {
-      alert('Save failed — check your access and try again.');
+      showSaveToast('✗ Save failed', 'error');
       return null;
     }
-    return await r.json();
+    const data = await r.json();
+    showSaveToast('✓ Saved');
+    return data;
   }
 
   async function onScheduledToggle(checkbox) {
