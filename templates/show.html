@@ -2246,6 +2246,32 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     }
   }
 
+  async function saveLaborAll() {
+    const rows = document.querySelectorAll('#labor-days-container tbody tr[data-rid]');
+    if (!rows.length) { showSaveToast('Nothing to save'); return; }
+    let ok = 0, fail = 0;
+    for (const tr of rows) {
+      const rid = tr.dataset.rid;
+      if (!rid) continue;
+      const dayBlock = tr.closest('.labor-day');
+      const work_date = dayBlock?.dataset.workDate || '';
+      const position_id    = tr.querySelector('[data-field="position_id"]')?.value || null;
+      const in_time        = tr.querySelector('[data-field="in_time"]')?.value || '';
+      const out_time       = tr.querySelector('[data-field="out_time"]')?.value || '';
+      const break_start    = tr.querySelector('[data-field="break_start"]')?.value || '';
+      const break_end      = tr.querySelector('[data-field="break_end"]')?.value || '';
+      const requested_name = tr.querySelector('[data-field="requested_name"]')?.value || '';
+      const r = await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({position_id, work_date, in_time, out_time, break_start, break_end, requested_name}),
+      });
+      if (r.ok) ok++; else fail++;
+    }
+    if (fail) showSaveToast(`✗ ${fail} failed, ${ok} saved`, 'error');
+    else showSaveToast(`✓ All ${ok} rows saved`);
+  }
+
   function applyQuickFill(toAll) {
     const inVal  = document.getElementById('qf-in').value.trim();
     const outVal = document.getElementById('qf-out').value.trim();

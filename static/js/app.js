@@ -324,6 +324,7 @@ function saveActive() {
   if (activeTab === 'advance')   saveAdvance();
   if (activeTab === 'schedule')  saveSchedule();
   if (activeTab === 'postnotes') savePostNotes();
+  if (activeTab === 'staffing' && typeof saveLaborAll === 'function') saveLaborAll();
 }
 
 /* ── Advance Form ──────────────────────────────────────────────── */
