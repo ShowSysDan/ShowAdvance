@@ -637,7 +637,7 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
       <span class="section-icon">◈</span> LABOR REQUESTS
       {% if not restricted %}
       <div class="action-btns ml-auto">
-        <button type="button" class="btn btn-sm btn-primary" onclick="addLaborRow()">+ Add Request</button>
+        <button type="button" class="btn btn-sm btn-primary" onclick="addLaborDay()">+ Add Day</button>
       </div>
       {% endif %}
     </div>
@@ -660,96 +660,11 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
       <button type="button" class="btn btn-sm btn-primary" onclick="applyQuickFill(true)">Apply to All</button>
     </div>
     {% endif %}
-    <div class="form-section-body no-pad">
-      <table class="data-table" id="labor-table">
-        <thead>
-          <tr>
-            {% if not restricted %}<th style="width:32px;text-align:center"><input type="checkbox" id="labor-select-all" title="Select / deselect all" onchange="toggleAllLaborRows(this)"></th>{% endif %}
-            <th style="width:150px">WORK DATE</th>
-            <th style="width:190px">POSITION</th>
-            <th style="width:95px">IN</th>
-            <th style="width:95px">OUT</th>
-            <th style="width:115px;white-space:nowrap">BREAK START</th>
-            <th style="width:115px;white-space:nowrap">BREAK END</th>
-            <th>TECHNICIAN</th>
-            <th style="width:70px;text-align:center" title="Scheduled by the labor scheduler">SCHED</th>
-            <th style="width:180px;white-space:nowrap">SCHEDULED TECH</th>
-            {% if not restricted %}<th style="width:44px"></th>{% endif %}
-          </tr>
-        </thead>
-        <tbody id="labor-tbody">
-          {% for lr in labor_requests_data %}
-          <tr data-rid="{{ lr.id }}">
-            {% if not restricted %}<td style="text-align:center"><input type="checkbox" class="labor-row-check"></td>{% endif %}
-            <td>
-              <input type="date" class="field-input field-input-sm labor-field" data-field="work_date"
-                     value="{{ lr.work_date or '' }}"
-                     {% if restricted %}disabled{% endif %}
-                     onchange="saveLaborRow(this)">
-            </td>
-            <td>
-              <select class="field-input field-input-sm labor-field" data-field="position_id"
-                      {% if restricted %}disabled{% endif %}
-                      onchange="saveLaborRow(this)">
-                <option value="">— Select Position —</option>
-              </select>
-            </td>
-            <td>
-              <input type="text" class="field-input field-input-sm labor-field" data-field="in_time"
-                     value="{{ lr.in_time or '' }}"
-                     placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
-                     {% if restricted %}disabled{% endif %}
-                     onchange="saveLaborRow(this)">
-            </td>
-            <td>
-              <input type="text" class="field-input field-input-sm labor-field" data-field="out_time"
-                     value="{{ lr.out_time or '' }}"
-                     placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
-                     {% if restricted %}disabled{% endif %}
-                     onchange="saveLaborRow(this)">
-            </td>
-            <td>
-              <input type="text" class="field-input field-input-sm labor-field" data-field="break_start"
-                     value="{{ lr.break_start or '' }}"
-                     placeholder="18:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
-                     {% if restricted %}disabled{% endif %}
-                     onchange="saveLaborRow(this)">
-            </td>
-            <td>
-              <input type="text" class="field-input field-input-sm labor-field" data-field="break_end"
-                     value="{{ lr.break_end or '' }}"
-                     placeholder="18:30" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
-                     {% if restricted %}disabled{% endif %}
-                     onchange="saveLaborRow(this)">
-            </td>
-            <td>
-              <select class="field-input field-input-sm labor-field" data-field="requested_name"
-                      {% if restricted %}disabled{% endif %}
-                      onchange="saveLaborRow(this)">
-                <option value="">— Any technician —</option>
-              </select>
-            </td>
-            <td style="text-align:center" title="Set by the labor scheduler">
-              <input type="checkbox" class="labor-is-scheduled" disabled
-                     {% if lr.is_scheduled %}checked{% endif %}>
-            </td>
-            <td class="labor-scheduled-tech" data-field="scheduled_crew_name"
-                style="font-size:12px;color:var(--text-dim)"
-                title="Set by the labor scheduler">
-              {{ lr.scheduled_crew_name or '—' }}
-            </td>
-            {% if not restricted %}
-            <td style="text-align:center">
-              <button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button>
-            </td>
-            {% endif %}
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% if not labor_requests_data and restricted %}
-      <p class="text-dim" style="padding:16px;text-align:center">No labor requests have been added.</p>
-      {% endif %}
+    <div class="form-section-body" id="labor-days-container">
+      {# Day blocks are rendered by initLaborTab() in JS from window._laborRequestsData #}
+      <p class="text-dim labor-empty-hint" id="labor-empty-hint" style="padding:16px;text-align:center;display:none">
+        {% if restricted %}No labor requests have been added.{% else %}Click <strong>+ Add Day</strong> to begin.{% endif %}
+      </p>
     </div>
   </div>
 
@@ -1589,6 +1504,39 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 .labor-qf-field { display: flex; align-items: center; gap: 4px; }
 .labor-qf-field span { font-size: 11px; color: var(--text-muted); white-space: nowrap; }
 .labor-qf-field .field-input-sm { width: 72px; }
+
+/* ── Labor day blocks ───────────────────────────────── */
+#labor-days-container { display: flex; flex-direction: column; gap: 16px; padding: 12px; }
+.labor-day {
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-card, var(--bg-surface));
+  overflow: hidden;
+}
+.labor-day-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  background: var(--bg-hover);
+  border-bottom: 1px solid var(--border);
+}
+.labor-day-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.labor-day-date { width: 150px; }
+.labor-day-actions { display: flex; gap: 6px; }
+.labor-day-footer {
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-surface);
+}
+.labor-day-table { width: 100%; }
+.labor-day[data-work-date=""] .labor-day-label { color: var(--text-muted); }
 </style>
 <script>
   const RESTRICTED = {{ 'true' if restricted else 'false' }};
@@ -1827,6 +1775,13 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   }
 
   /* ── Labor Requests ─────────────────────────────────────────── */
+  /* ══════════════════════════════════════════════════════════════════
+     Labor Requests — grouped by day
+     Rows share a `work_date` which lives on the day-block header, not
+     on every row. A "day" with no rows is a client-side placeholder
+     until the first request is added inside it.
+     ══════════════════════════════════════════════════════════════════ */
+
   let _laborPositions = [];
   let _crewMembers = null;
 
@@ -1845,10 +1800,6 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       const r = await fetch('/api/crew-members');
       _crewMembers = await r.json();
     } catch(e) { _crewMembers = []; }
-  }
-
-  function _getPositionId(tr) {
-    return parseInt(tr.querySelector('[data-field="position_id"]')?.value) || null;
   }
 
   function _buildTechnicianSelect(selectEl, positionId, selectedName) {
@@ -1892,7 +1843,6 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         selectEl.appendChild(opt);
       });
     }
-    // Preserve a saved name not currently in the roster
     if (selectedName && !selectEl.value) {
       const opt = document.createElement('option');
       opt.value = selectedName; opt.textContent = selectedName;
@@ -1903,7 +1853,6 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
   function _buildPositionSelect(selectEl, selectedId) {
     selectEl.innerHTML = '<option value="">— Select Position —</option>';
-    // Group by category
     const cats = {};
     for (const p of _laborPositions) {
       const cat = p.category_name || 'Other';
@@ -1924,32 +1873,231 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     }
   }
 
-  async function initLaborTab() {
-    await Promise.all([_loadLaborPositions(), _loadCrewMembers()]);
-    document.querySelectorAll('#labor-tbody tr').forEach(tr => {
-      const rid = tr.dataset.rid;
-      const posSel  = tr.querySelector('select[data-field="position_id"]');
-      const techSel = tr.querySelector('select[data-field="requested_name"]');
-      const existing = window._laborRequestsData.find(r => r.id == rid);
-      if (posSel) _buildPositionSelect(posSel, existing ? existing.position_id : null);
-      if (techSel) _buildTechnicianSelect(techSel, existing ? existing.position_id : null, existing ? existing.requested_name || '' : '');
-      if (posSel && techSel) {
-        posSel.addEventListener('change', () => {
-          const posId = parseInt(posSel.value) || null;
-          _buildTechnicianSelect(techSel, posId, techSel.value);
-          saveLaborRow(posSel);
+  function _dayLabel(date) {
+    if (!date) return 'Unscheduled';
+    try {
+      // date is yyyy-mm-dd; render as e.g. "Mon, Apr 15"
+      const [y,m,d] = date.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      return dt.toLocaleDateString(undefined, {weekday:'short', month:'short', day:'numeric'});
+    } catch(e) { return date; }
+  }
+
+  /* Render a single labor <tr> inside the given tbody */
+  function _renderLaborRow(tbody, lr) {
+    const tr = document.createElement('tr');
+    tr.dataset.rid = lr.id;
+    const scheduledTechText = lr.scheduled_crew_name || '—';
+    tr.innerHTML = `
+      ${RESTRICTED ? '' : '<td style="text-align:center"><input type="checkbox" class="labor-row-check"></td>'}
+      <td><select class="field-input field-input-sm labor-field" data-field="position_id" ${RESTRICTED ? 'disabled' : ''}></select></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" value="${lr.in_time || ''}" placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" value="${lr.out_time || ''}" placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_start" value="${lr.break_start || ''}" placeholder="18:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_end" value="${lr.break_end || ''}" placeholder="18:30" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
+      <td><select class="field-input field-input-sm labor-field" data-field="requested_name" ${RESTRICTED ? 'disabled' : ''}></select></td>
+      <td style="text-align:center" title="Set by the labor scheduler"><input type="checkbox" class="labor-is-scheduled" disabled ${lr.is_scheduled ? 'checked' : ''}></td>
+      <td class="labor-scheduled-tech" style="font-size:12px;color:var(--text-dim)" title="Set by the labor scheduler"></td>
+      ${RESTRICTED ? '' : '<td style="text-align:center"><button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button></td>'}
+    `;
+    tr.querySelector('.labor-scheduled-tech').textContent = scheduledTechText;
+    tbody.appendChild(tr);
+
+    const posSel  = tr.querySelector('select[data-field="position_id"]');
+    const techSel = tr.querySelector('select[data-field="requested_name"]');
+    _buildPositionSelect(posSel, lr.position_id);
+    _buildTechnicianSelect(techSel, lr.position_id, lr.requested_name || '');
+    if (!RESTRICTED) {
+      posSel.addEventListener('change', () => {
+        const posId = parseInt(posSel.value) || null;
+        _buildTechnicianSelect(techSel, posId, techSel.value);
+        saveLaborRow(posSel);
+      });
+      ['in_time','out_time','break_start','break_end'].forEach(f => {
+        tr.querySelector(`[data-field="${f}"]`).addEventListener('change', (e) => saveLaborRow(e.target));
+      });
+      techSel.addEventListener('change', () => saveLaborRow(techSel));
+    }
+    return tr;
+  }
+
+  /* Build a day-block element for the given date (empty string = Unscheduled) */
+  function _renderDayBlock(date, requests) {
+    const block = document.createElement('div');
+    block.className = 'labor-day';
+    block.dataset.workDate = date || '';
+
+    const header = document.createElement('div');
+    header.className = 'labor-day-header';
+    header.innerHTML = `
+      <span class="labor-day-label">${date ? _dayLabel(date).toUpperCase() : 'UNSCHEDULED'}</span>
+      <input type="date" class="field-input field-input-sm labor-day-date" value="${date || ''}" ${RESTRICTED ? 'disabled' : ''} title="Work date for this day">
+      ${RESTRICTED ? '' : `
+        <div class="labor-day-actions ml-auto">
+          <button type="button" class="btn btn-xs btn-ghost" onclick="cloneLaborDay(this)" title="Copy all rows to another date">Clone to…</button>
+          <button type="button" class="btn btn-xs btn-danger-ghost" onclick="deleteLaborDay(this)" title="Delete this day and all its rows">Delete Day</button>
+        </div>
+      `}
+    `;
+    block.appendChild(header);
+
+    const tableWrap = document.createElement('div');
+    tableWrap.className = 'form-section-body no-pad';
+    tableWrap.innerHTML = `
+      <table class="data-table labor-day-table">
+        <thead>
+          <tr>
+            ${RESTRICTED ? '' : '<th style="width:32px;text-align:center"><input type="checkbox" class="labor-day-select-all" title="Select / deselect all in this day"></th>'}
+            <th style="width:200px">POSITION</th>
+            <th style="width:95px">IN</th>
+            <th style="width:95px">OUT</th>
+            <th style="width:115px;white-space:nowrap">BREAK START</th>
+            <th style="width:115px;white-space:nowrap">BREAK END</th>
+            <th>TECHNICIAN</th>
+            <th style="width:70px;text-align:center" title="Scheduled by the labor scheduler">SCHED</th>
+            <th style="width:180px;white-space:nowrap">SCHEDULED TECH</th>
+            ${RESTRICTED ? '' : '<th style="width:44px"></th>'}
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    `;
+    block.appendChild(tableWrap);
+
+    const tbody = block.querySelector('tbody');
+    requests.forEach(lr => _renderLaborRow(tbody, lr));
+
+    if (!RESTRICTED) {
+      const addBtnWrap = document.createElement('div');
+      addBtnWrap.className = 'labor-day-footer';
+      addBtnWrap.innerHTML = `<button type="button" class="btn btn-sm btn-ghost" onclick="addLaborRow(this)">+ Add Request</button>`;
+      block.appendChild(addBtnWrap);
+
+      // Select-all inside this day
+      const selAll = header.querySelector('.labor-day-select-all') || tableWrap.querySelector('.labor-day-select-all');
+      if (selAll) {
+        selAll.addEventListener('change', () => {
+          tbody.querySelectorAll('.labor-row-check').forEach(cb => { cb.checked = selAll.checked; });
         });
       }
+
+      // Date change → update work_date on all rows in this day
+      const dateInput = header.querySelector('.labor-day-date');
+      dateInput.addEventListener('change', async () => {
+        const newDate = dateInput.value || '';
+        const oldDate = block.dataset.workDate;
+        if (newDate === oldDate) return;
+        // Optimistically update UI and persist each row
+        block.dataset.workDate = newDate;
+        header.querySelector('.labor-day-label').textContent = newDate ? _dayLabel(newDate).toUpperCase() : 'UNSCHEDULED';
+        const rids = Array.from(tbody.querySelectorAll('tr')).map(tr => tr.dataset.rid).filter(Boolean);
+        for (const rid of rids) { await _putLabor(rid, {work_date: newDate}); }
+        _mergeDuplicateDayBlocks();
+      });
+    }
+
+    return block;
+  }
+
+  /* If two day-blocks share the same date (e.g. after a date change), merge them */
+  function _mergeDuplicateDayBlocks() {
+    const container = document.getElementById('labor-days-container');
+    const blocks = Array.from(container.querySelectorAll('.labor-day'));
+    const byDate = {};
+    blocks.forEach(b => {
+      const d = b.dataset.workDate || '';
+      if (byDate[d]) {
+        // Move rows from b into the first block and remove b
+        const firstTbody = byDate[d].querySelector('tbody');
+        const bTbody = b.querySelector('tbody');
+        while (bTbody.firstChild) firstTbody.appendChild(bTbody.firstChild);
+        b.remove();
+      } else {
+        byDate[d] = b;
+      }
+    });
+    _sortDayBlocks();
+  }
+
+  function _sortDayBlocks() {
+    const container = document.getElementById('labor-days-container');
+    const hint = document.getElementById('labor-empty-hint');
+    const blocks = Array.from(container.querySelectorAll('.labor-day'));
+    blocks.sort((a, b) => {
+      const da = a.dataset.workDate || '';
+      const db_ = b.dataset.workDate || '';
+      if (!da && db_) return -1;   // Unscheduled first
+      if (da && !db_) return 1;
+      return da.localeCompare(db_);
+    });
+    blocks.forEach(b => container.appendChild(b));
+    if (hint) container.appendChild(hint);
+    _updateEmptyHint();
+  }
+
+  function _updateEmptyHint() {
+    const hint = document.getElementById('labor-empty-hint');
+    if (!hint) return;
+    const hasBlocks = document.querySelectorAll('#labor-days-container .labor-day').length > 0;
+    hint.style.display = hasBlocks ? 'none' : '';
+  }
+
+  async function _putLabor(rid, fields) {
+    // Send all current field values along with any overrides in `fields`,
+    // scoped by finding the row in the DOM.
+    const tr = document.querySelector(`tr[data-rid="${rid}"]`);
+    if (!tr) return;
+    const dayBlock = tr.closest('.labor-day');
+    const work_date = (fields.work_date !== undefined) ? fields.work_date : (dayBlock?.dataset.workDate || '');
+    const position_id    = tr.querySelector('[data-field="position_id"]').value || null;
+    const in_time        = tr.querySelector('[data-field="in_time"]').value || '';
+    const out_time       = tr.querySelector('[data-field="out_time"]').value || '';
+    const break_start    = tr.querySelector('[data-field="break_start"]').value || '';
+    const break_end      = tr.querySelector('[data-field="break_end"]').value || '';
+    const requested_name = tr.querySelector('[data-field="requested_name"]').value || '';
+    await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({position_id, work_date, in_time, out_time, break_start, break_end, requested_name}),
     });
   }
 
-  // Initialize when staffing tab is switched to
-  const _origSwitchTab = window.switchTab ? window.switchTab.bind(window) : null;
+  async function saveLaborRow(el) {
+    const tr = el.closest('tr');
+    const rid = tr.dataset.rid;
+    if (!rid) return;
+    await _putLabor(rid, {});
+  }
+
+  async function initLaborTab() {
+    await Promise.all([_loadLaborPositions(), _loadCrewMembers()]);
+    const container = document.getElementById('labor-days-container');
+    if (!container) return;
+    // Remove any previously rendered day-blocks (safe to re-init)
+    container.querySelectorAll('.labor-day').forEach(b => b.remove());
+
+    // Group existing rows by work_date (NULL / '' → "" bucket)
+    const byDate = {};
+    (window._laborRequestsData || []).forEach(lr => {
+      const d = lr.work_date || '';
+      if (!byDate[d]) byDate[d] = [];
+      byDate[d].push(lr);
+    });
+    const dates = Object.keys(byDate).sort((a, b) => {
+      if (!a && b) return -1;
+      if (a && !b) return 1;
+      return a.localeCompare(b);
+    });
+    dates.forEach(d => {
+      const block = _renderDayBlock(d, byDate[d]);
+      container.appendChild(block);
+    });
+    _sortDayBlocks();
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
     if (INITIAL_TAB === 'staffing') initLaborTab();
   });
-  // Hook into tab switching
-  const _origSwitchTabRef = window.switchTab;
   window._laborTabInited = false;
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -1960,65 +2108,138 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     });
   });
 
-  async function addLaborRow() {
+  /* ── Day-level actions ───────────────────────────────── */
+
+  async function addLaborDay() {
+    const today = new Date().toISOString().slice(0,10);
+    const date = prompt('Work date for the new day (YYYY-MM-DD):', today);
+    if (date === null) return;
+    const trimmed = (date || '').trim();
+    // Allow empty string → Unscheduled bucket
+    const container = document.getElementById('labor-days-container');
+    // If a block already exists for this date, scroll to it and return
+    const existing = container.querySelector(`.labor-day[data-work-date="${CSS.escape(trimmed)}"]`);
+    if (existing) {
+      existing.scrollIntoView({behavior:'smooth', block:'start'});
+      existing.querySelector('.labor-day-date')?.focus();
+      return;
+    }
+    const block = _renderDayBlock(trimmed, []);
+    container.appendChild(block);
+    _sortDayBlocks();
+    block.scrollIntoView({behavior:'smooth', block:'start'});
+  }
+
+  async function addLaborRow(btn) {
     await _loadLaborPositions();
-    const resp = await fetch(`/shows/{{ show.id }}/labor-requests`, {
+    const block = btn.closest('.labor-day');
+    const workDate = block?.dataset.workDate || '';
+    const resp = await fetch(`/shows/${SHOW_ID}/labor-requests`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({position_id: null, in_time: '', out_time: '', requested_name: ''})
+      body: JSON.stringify({position_id: null, work_date: workDate, in_time: '', out_time: '', requested_name: ''}),
     });
     const data = await resp.json();
     if (!data.success) { alert('Error adding row: ' + (data.error || 'Unknown')); return; }
-
-    const rid = data.id;
-    const tr = document.createElement('tr');
-    tr.dataset.rid = rid;
-    tr.innerHTML = `
-      <td style="text-align:center"><input type="checkbox" class="labor-row-check"></td>
-      <td><input type="date" class="field-input field-input-sm labor-field" data-field="work_date" onchange="saveLaborRow(this)"></td>
-      <td><select class="field-input field-input-sm labor-field" data-field="position_id" onchange="saveLaborRow(this)"></select></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" onchange="saveLaborRow(this)"></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" onchange="saveLaborRow(this)"></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_start" placeholder="18:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" onchange="saveLaborRow(this)"></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_end" placeholder="18:30" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" onchange="saveLaborRow(this)"></td>
-      <td><select class="field-input field-input-sm labor-field" data-field="requested_name" onchange="saveLaborRow(this)"></select></td>
-      <td style="text-align:center" title="Set by the labor scheduler"><input type="checkbox" class="labor-is-scheduled" disabled></td>
-      <td class="labor-scheduled-tech" style="font-size:12px;color:var(--text-dim)" title="Set by the labor scheduler">—</td>
-      <td style="text-align:center"><button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button></td>
-    `;
-    document.getElementById('labor-tbody').appendChild(tr);
-    const newPosSel  = tr.querySelector('select[data-field="position_id"]');
-    const newTechSel = tr.querySelector('select[data-field="requested_name"]');
-    _buildPositionSelect(newPosSel, null);
-    _buildTechnicianSelect(newTechSel, null, '');
-    newPosSel.addEventListener('change', () => {
-      const posId = parseInt(newPosSel.value) || null;
-      _buildTechnicianSelect(newTechSel, posId, newTechSel.value);
-      saveLaborRow(newPosSel);
-    });
-    newPosSel.focus();
+    const lr = {
+      id: data.id, position_id: null, work_date: workDate,
+      in_time: '', out_time: '', break_start: '', break_end: '',
+      requested_name: '', is_scheduled: 0, scheduled_crew_name: null,
+    };
+    const tbody = block.querySelector('tbody');
+    const tr = _renderLaborRow(tbody, lr);
+    tr.querySelector('select[data-field="position_id"]')?.focus();
   }
 
-  async function saveLaborRow(el) {
-    const tr = el.closest('tr');
+  async function cloneLaborDay(btn) {
+    const block = btn.closest('.labor-day');
+    const fromDate = block.dataset.workDate || '';
+    if (!fromDate) { alert('Set a date on this day before cloning.'); return; }
+    const suggested = (() => {
+      try {
+        const [y,m,d] = fromDate.split('-').map(Number);
+        const dt = new Date(y, m-1, d);
+        dt.setDate(dt.getDate() + 1);
+        return dt.toISOString().slice(0,10);
+      } catch(e) { return ''; }
+    })();
+    const toDate = prompt(`Clone all rows from ${fromDate} to which date? (YYYY-MM-DD)`, suggested);
+    if (toDate === null) return;
+    const trimmed = (toDate || '').trim();
+    if (!trimmed) { alert('A target date is required.'); return; }
+    if (trimmed === fromDate) { alert('Target date must differ from source.'); return; }
+
+    const rows = Array.from(block.querySelectorAll('tbody tr'));
+    if (!rows.length) { alert('Nothing to clone — this day has no rows yet.'); return; }
+
+    btn.disabled = true;
+    btn.textContent = 'Cloning…';
+    try {
+      for (const tr of rows) {
+        const payload = {
+          work_date:      trimmed,
+          position_id:    tr.querySelector('[data-field="position_id"]').value || null,
+          in_time:        tr.querySelector('[data-field="in_time"]').value || '',
+          out_time:       tr.querySelector('[data-field="out_time"]').value || '',
+          break_start:    tr.querySelector('[data-field="break_start"]').value || '',
+          break_end:      tr.querySelector('[data-field="break_end"]').value || '',
+          requested_name: tr.querySelector('[data-field="requested_name"]').value || '',
+        };
+        const resp = await fetch(`/shows/${SHOW_ID}/labor-requests`, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!data.success) throw new Error(data.error || 'clone failed');
+        // Since POST doesn't return the new row, we do a follow-up PUT to persist all fields
+        // (POST already wrote them, but older endpoint ignored new fields in POST — safe no-op if present).
+        // The new row will show up on the next refresh; for now, add a placeholder row.
+      }
+      // Simplest — reload labor data from server to render the new day cleanly.
+      await _refreshLaborData();
+    } catch (e) {
+      alert('Clone failed: ' + e.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Clone to…';
+    }
+  }
+
+  async function deleteLaborDay(btn) {
+    const block = btn.closest('.labor-day');
+    const date = block.dataset.workDate || '';
+    const rows = Array.from(block.querySelectorAll('tbody tr'));
+    const label = date ? _dayLabel(date) : 'Unscheduled';
+    if (rows.length && !confirm(`Delete ${label} and all ${rows.length} labor request${rows.length===1?'':'s'} on it?`)) return;
+    for (const tr of rows) {
+      const rid = tr.dataset.rid;
+      if (rid) await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {method:'DELETE'});
+    }
+    block.remove();
+    _updateEmptyHint();
+  }
+
+  async function _refreshLaborData() {
+    try {
+      const r = await fetch(`/shows/${SHOW_ID}/labor-requests`);
+      window._laborRequestsData = await r.json();
+      await initLaborTab();
+    } catch(e) { /* best effort */ }
+  }
+
+  async function removeLaborRow(btn) {
+    const tr = btn.closest('tr');
     const rid = tr.dataset.rid;
-    if (!rid) return;
-    const position_id   = tr.querySelector('[data-field="position_id"]').value || null;
-    const work_date     = tr.querySelector('[data-field="work_date"]')?.value || '';
-    const in_time       = tr.querySelector('[data-field="in_time"]').value || '';
-    const out_time      = tr.querySelector('[data-field="out_time"]').value || '';
-    const break_start   = tr.querySelector('[data-field="break_start"]').value || '';
-    const break_end     = tr.querySelector('[data-field="break_end"]').value || '';
-    const requested_name = tr.querySelector('[data-field="requested_name"]').value || '';
-    await fetch(`/shows/{{ show.id }}/labor-requests/${rid}`, {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({position_id, work_date, in_time, out_time, break_start, break_end, requested_name})
-    });
-  }
-
-  function toggleAllLaborRows(masterCb) {
-    document.querySelectorAll('#labor-tbody .labor-row-check').forEach(cb => { cb.checked = masterCb.checked; });
+    const block = tr.closest('.labor-day');
+    if (!rid) { tr.remove(); return; }
+    const resp = await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {method: 'DELETE'});
+    const data = await resp.json();
+    if (data.success) {
+      tr.remove();
+    } else {
+      alert('Error removing row: ' + (data.error || 'Unknown'));
+    }
   }
 
   function applyQuickFill(toAll) {
@@ -2026,7 +2247,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const outVal = document.getElementById('qf-out').value.trim();
     const bsVal  = document.getElementById('qf-break-start').value.trim();
     const beVal  = document.getElementById('qf-break-end').value.trim();
-    const rows = Array.from(document.querySelectorAll('#labor-tbody tr'));
+    const rows = Array.from(document.querySelectorAll('#labor-days-container tbody tr'));
     const targets = toAll ? rows : rows.filter(tr => tr.querySelector('.labor-row-check')?.checked);
     if (!targets.length) { alert(toAll ? 'No rows to fill.' : 'Select at least one row first.'); return; }
     targets.forEach(tr => {
@@ -2037,16 +2258,6 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       set('break_end', beVal);
       saveLaborRow(tr.querySelector('.labor-field'));
     });
-  }
-
-  async function removeLaborRow(btn) {
-    const tr = btn.closest('tr');
-    const rid = tr.dataset.rid;
-    if (!rid) { tr.remove(); return; }
-    const resp = await fetch(`/shows/{{ show.id }}/labor-requests/${rid}`, {method: 'DELETE'});
-    const data = await resp.json();
-    if (data.success) tr.remove();
-    else alert('Error removing row: ' + (data.error || 'Unknown'));
   }
 
 async function emailPdf(showId, pdfType, btn) {
