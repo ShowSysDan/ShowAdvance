@@ -1953,7 +1953,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
             <th style="width:95px">OUT</th>
             <th style="width:115px;white-space:nowrap">BREAK START</th>
             <th style="width:115px;white-space:nowrap">BREAK END</th>
-            <th>TECHNICIAN</th>
+            <th>REQUESTED TECH</th>
             <th style="width:70px;text-align:center" title="Scheduled by the labor scheduler">SCHED</th>
             <th style="width:180px;white-space:nowrap">SCHEDULED TECH</th>
             ${RESTRICTED ? '' : '<th style="width:44px"></th>'}
@@ -2055,11 +2055,13 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const break_start    = tr.querySelector('[data-field="break_start"]').value || '';
     const break_end      = tr.querySelector('[data-field="break_end"]').value || '';
     const requested_name = tr.querySelector('[data-field="requested_name"]').value || '';
-    await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {
+    const resp = await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({position_id, work_date, in_time, out_time, break_start, break_end, requested_name}),
     });
+    if (resp.ok) showSaveToast('✓ Saved');
+    else showSaveToast('✗ Save failed', 'error');
   }
 
   async function saveLaborRow(el) {
