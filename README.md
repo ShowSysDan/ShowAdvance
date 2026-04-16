@@ -6,7 +6,7 @@
 
 ## Version Numbering
 
-**Current version: `2.8.1`**
+**Current version: `2.9.0`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -41,6 +41,7 @@ Version history:
 - `2.7.0` — PostgreSQL dual-schema support: user/auth tables live in a `shared` schema (reusable across apps) while theater-specific tables live in an `app` schema (default `theater321`). Database credentials stored in gitignored `db_config.ini`. CLI commands for schema init and SQLite→PostgreSQL data migration. Settings UI simplified to read-only database status. Fixed schema creation bug that prevented PostgreSQL init.
 - `2.8.0` — Labor Scheduler: new cross-show scheduler view (`/labor-scheduler`) aggregates labor requests across every show in a chosen date range, grouped by show. Schedulers tick a per-row checkbox as positions are confirmed (TCO'd) and pick the actual technician from the crew roster (qualified-first dropdown) — stored separately from the PM's originally-requested name. Scheduled status and scheduled tech flow back to each show's Labor Requests tab as read-only columns so PMs can see progress. Per-request `work_date` lets multi-day runs track one labor request per day. New `scheduler_group` user-group type so admins can grant scheduler access without giving full staff privileges. Adds `LABOR_SCHEDULED` audit action with syslog coverage.
 - `2.8.1` — Labor Requests UX: reorganised the Labor Requests tab so labor is grouped into **day blocks** instead of a wide table with a date column on every row. Each day block has its own date picker in the header that retimes every row under it, **+ Add Request** to append rows inside the day, **Clone to…** to duplicate a fully-populated day to another date (for multi-day runs), and **Delete Day** to drop the day plus its rows. Quick Fill continues to apply across rows in any day. No schema change — rows still carry `work_date` internally; the UI just groups them.
+- `2.9.0` — Nine feature updates and fixes: (1) Per-contact email-type flags (Advance, Production, System) replacing single Recipient toggle — `_send_pdf_email()` selects recipients by type; (2) Pay Rate Levels admin UI in Settings → Technicians, per-technician level assignment, per-position rate override, estimated labor cost summary on Labor Requests tab, combined post-show invoice PDF (assets + external rentals + labor); (3) Job positions nested by venue — venue list in Settings syncs position categories automatically; (4) Registration bug fix — pending registrations shown regardless of email confirmation status; (5) User management edit — name/email/role/readonly editable inline; (6) Hide from PM moved from show add-asset flow to per-asset-type admin setting in Asset Manager; (7) Dashboard nav renamed to Home; (8) Dashboard availability API auth fix (public dashboards no longer error with "unexpected token"); (9) Asset usage report gains venue, asset category, and asset type filters.
 
 ---
 

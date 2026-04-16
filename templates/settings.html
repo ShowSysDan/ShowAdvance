@@ -90,7 +90,7 @@
         </select>
       </div>
       <table class="data-table" id="contacts-table">
-        <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th>EMAIL</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="PDF report recipient">RECIPIENT</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px">ACTIONS</th>{% endif %}</tr></thead>
+        <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th>EMAIL</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="System notification emails">SYSTEM</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
@@ -101,8 +101,20 @@
             <td class="text-sm" data-field="email">{{ c.email or '—' }}</td>
             {% if user.role == 'admin' %}
             <td style="text-align:center">
-              <span class="recipient-indicator recipient-dot {{ 'on' if c.report_recipient else '' }}" data-cid="{{ c.id }}"
-                    title="{% if c.report_recipient %}Included in PDF email sends{% else %}Not a PDF recipient{% endif %}"></span>
+              <span class="recipient-indicator recipient-dot {{ 'on' if c.report_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="report"
+                    title="{% if c.report_recipient %}Included in all email sends{% else %}Not a general recipient{% endif %}"></span>
+            </td>
+            <td style="text-align:center">
+              <span class="recipient-indicator recipient-dot {{ 'on' if c.advance_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="advance"
+                    title="{% if c.advance_recipient %}Receives advance sheet emails{% else %}Not an advance recipient{% endif %}"></span>
+            </td>
+            <td style="text-align:center">
+              <span class="recipient-indicator recipient-dot {{ 'on' if c.production_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="production"
+                    title="{% if c.production_recipient %}Receives production/schedule emails{% else %}Not a production recipient{% endif %}"></span>
+            </td>
+            <td style="text-align:center">
+              <span class="recipient-indicator recipient-dot {{ 'on' if c.system_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="system"
+                    title="{% if c.system_recipient %}Receives system notification emails{% else %}Not a system recipient{% endif %}"></span>
             </td>
             {% endif %}
             {% if user.role == 'admin' or is_content_admin %}
@@ -179,6 +191,7 @@
             <td>
               <div class="action-btns">
                 {% if user.role == 'admin' %}
+                <button class="btn btn-xs btn-ghost" onclick="openEditUser({{ u.id }}, '{{ u.display_name|replace("'","\\'") or u.username }}', '{{ u.email or '' }}', '{{ u.role }}', {{ 1 if u.is_readonly else 0 }})">Edit</button>
                 <button class="btn btn-xs btn-ghost" onclick="resetPassword({{ u.id }})">Reset PW</button>
                 {% if u.id != user.id %}
                 <button class="btn btn-xs btn-danger-ghost" onclick="deleteUser({{ u.id }}, this)">Delete</button>
@@ -549,6 +562,39 @@
     </div>
   </div>
 
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> VENUE LIST</div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">
+        One venue per line. These become top-level categories for job positions and appear in the Skill Tracker.
+        Saving automatically creates matching position categories.
+      </p>
+      <div class="field-group" style="max-width:360px">
+        <label class="field-label">VENUES (one per line)</label>
+        <textarea id="venue-list-input" class="field-input field-textarea" rows="6" placeholder="Judson's Live&#10;Steinmetz Hall&#10;Seneff Arts Education Center"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+        <button class="btn btn-primary" onclick="saveVenueList()">Save Venue List</button>
+        <span id="venue-save-msg" class="field-msg"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> RADIO CHANNELS</div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">One channel per line (e.g. "Ch 1 – Ops", "Ch 2 – Stage").</p>
+      <div class="field-group" style="max-width:360px">
+        <label class="field-label">RADIO CHANNELS (one per line)</label>
+        <textarea id="radio-list-input" class="field-input field-textarea" rows="4" placeholder="Ch 1 – Operations&#10;Ch 2 – Stage"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+        <button class="btn btn-primary" onclick="saveRadioList()">Save Channel List</button>
+        <span id="radio-save-msg" class="field-msg"></span>
+      </div>
+    </div>
+  </div>
+
   <div class="form-section">
     <div class="form-section-header"><span class="section-icon">◈</span> SYSLOG SETTINGS</div>
     <div class="form-section-body">
@@ -873,9 +919,10 @@
         <span class="section-count ml-auto text-dim">{{ position_categories|length }}</span>
       </div>
       <div class="form-section-body" style="border-bottom:1px solid var(--border)">
+        <p class="text-dim" style="font-size:11px;margin-bottom:10px">Venue categories sync from Settings → Syslog → Venue List. Add generic categories here.</p>
         <h3 class="sub-section-label">ADD CATEGORY</h3>
         <div style="display:flex;gap:8px">
-          <input type="text" id="new-cat-name" class="field-input" placeholder="Category name" style="flex:1">
+          <input type="text" id="new-cat-name" class="field-input" placeholder="Generic category name" style="flex:1">
           <button class="btn btn-primary" onclick="addPositionCategory()">Add</button>
         </div>
         <div id="cat-msg" class="field-msg" style="display:none;margin-top:6px"></div>
@@ -885,10 +932,15 @@
           <tbody id="cat-list">
             {% for cat in position_categories %}
             <tr data-cid="{{ cat.id }}">
-              <td id="cat-name-{{ cat.id }}">{{ cat.name }}</td>
+              <td id="cat-name-{{ cat.id }}">
+                {{ cat.name }}
+                {% if cat.is_venue %}<span style="font-size:9px;background:rgba(74,158,255,.15);color:#4A9EFF;border:1px solid rgba(74,158,255,.3);border-radius:99px;padding:1px 5px;margin-left:4px">VENUE</span>{% endif %}
+              </td>
               <td style="width:80px">
                 <div class="action-btns">
+                  {% if not cat.is_venue %}
                   <button class="btn btn-xs btn-ghost" onclick="editCategory(this)">✎</button>
+                  {% endif %}
                   <button class="btn btn-xs btn-danger-ghost" onclick="deleteCategory({{ cat.id }})">×</button>
                 </div>
               </td>
@@ -909,8 +961,8 @@
       </div>
       <div class="form-section-body" style="border-bottom:1px solid var(--border)">
         <h3 class="sub-section-label">ADD POSITION</h3>
-        <div style="display:flex;gap:8px;align-items:flex-end">
-          <div class="field-group" style="flex:1;margin:0">
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <div class="field-group" style="flex:1;min-width:140px;margin:0">
             <label class="field-label">CATEGORY</label>
             <select id="new-pos-cat" class="field-input">
               <option value="">— Uncategorized —</option>
@@ -919,22 +971,27 @@
               {% endfor %}
             </select>
           </div>
-          <div class="field-group" style="flex:2;margin:0">
+          <div class="field-group" style="flex:2;min-width:160px;margin:0">
             <label class="field-label">POSITION NAME</label>
             <input type="text" id="new-pos-name" class="field-input" placeholder="e.g. A1, Lighting Designer...">
           </div>
-          <button class="btn btn-primary" onclick="addPosition()">Add</button>
+          <div class="field-group" style="margin:0">
+            <label class="field-label">RATE OVERRIDE ($/hr)</label>
+            <input type="number" id="new-pos-rate" class="field-input" placeholder="—" step="0.01" min="0" style="width:100px">
+          </div>
+          <button class="btn btn-primary" onclick="addPosition()" style="align-self:flex-end">Add</button>
         </div>
         <div id="pos-msg" class="field-msg" style="display:none;margin-top:6px"></div>
       </div>
       <div class="form-section-body no-pad">
         <table class="data-table" id="positions-table">
-          <thead><tr><th>POSITION NAME</th><th>CATEGORY</th><th style="width:80px">ACTIONS</th></tr></thead>
+          <thead><tr><th>POSITION NAME</th><th>CATEGORY</th><th style="text-align:right">RATE OVERRIDE</th><th style="width:80px">ACTIONS</th></tr></thead>
           <tbody id="positions-tbody">
             {% for pos in job_positions %}
             <tr data-pid="{{ pos.id }}">
               <td id="pos-name-{{ pos.id }}">{{ pos.name }}</td>
               <td class="text-dim" id="pos-cat-{{ pos.id }}" data-cat-id="{{ pos.category_id or '' }}">{{ pos.category_name or '—' }}</td>
+              <td id="pos-rate-{{ pos.id }}" style="text-align:right" class="mono text-dim">{% if pos.override_rate is not none and pos.override_rate != '' %}${{ '%.2f' | format(pos.override_rate) }}/hr{% else %}—{% endif %}</td>
               <td>
                 <div class="action-btns">
                   <button class="btn btn-xs btn-ghost" onclick="editPosition(this)">✎</button>
@@ -943,7 +1000,7 @@
               </td>
             </tr>
             {% else %}
-            <tr id="pos-empty"><td colspan="3" class="text-dim" style="text-align:center;padding:16px">No positions yet. Add a category first, then add positions.</td></tr>
+            <tr id="pos-empty"><td colspan="4" class="text-dim" style="text-align:center;padding:16px">No positions yet. Add a category first, then add positions.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -958,6 +1015,50 @@
 {# ── CREW MEMBERS ──────────────────────────────────────────────────────────── #}
 {% if user.role == 'admin' or is_content_admin %}
 <div id="stab-technicians" class="stab-pane" style="display:none">
+
+  {# ── Pay Rate Levels ───────────────────────────────────────────────────────── #}
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> PAY RATE LEVELS
+      <span class="section-count ml-auto text-dim">{{ pay_rate_levels|length }} levels</span>
+    </div>
+    <div class="form-section-body" style="border-bottom:1px solid var(--border)">
+      <h3 class="sub-section-label">ADD RATE LEVEL</h3>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="new-rate-name" class="field-input" placeholder="Level name (e.g. A2, Loader)" style="max-width:240px">
+        <div style="display:flex;align-items:center;gap:4px">
+          <span style="font-size:12px;color:var(--text-dim)">$</span>
+          <input type="number" id="new-rate-amount" class="field-input" placeholder="0.00" step="0.01" min="0" style="max-width:100px">
+          <span style="font-size:12px;color:var(--text-dim)">/hr</span>
+        </div>
+        <button class="btn btn-primary" onclick="addPayRateLevel()">Add Level</button>
+      </div>
+      <div id="rate-level-msg" class="field-msg" style="display:none;margin-top:6px"></div>
+    </div>
+    <div class="form-section-body no-pad">
+      <table class="data-table">
+        <thead><tr><th>LEVEL NAME</th><th style="text-align:right">HOURLY RATE</th><th style="width:80px">ACTIONS</th></tr></thead>
+        <tbody id="rate-levels-tbody">
+          {% for lvl in pay_rate_levels %}
+          <tr data-lid="{{ lvl.id }}">
+            <td id="rate-level-name-{{ lvl.id }}">{{ lvl.name }}</td>
+            <td id="rate-level-rate-{{ lvl.id }}" style="text-align:right" class="mono">${{ '%.2f' | format(lvl.hourly_rate) }}/hr</td>
+            <td>
+              <div class="action-btns">
+                <button class="btn btn-xs btn-ghost" onclick="editPayRateLevel(this)">✎</button>
+                <button class="btn btn-xs btn-danger-ghost" onclick="deletePayRateLevel({{ lvl.id }})">×</button>
+              </div>
+            </td>
+          </tr>
+          {% else %}
+          <tr id="rate-level-empty"><td colspan="3" class="text-dim" style="text-align:center;padding:16px">No rate levels configured.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# ── Technicians ───────────────────────────────────────────────────────────── #}
   <div class="form-section">
     <div class="form-section-header">
       <span class="section-icon">◈</span> TECHNICIANS
@@ -965,19 +1066,28 @@
     </div>
     <div class="form-section-body" style="border-bottom:1px solid var(--border)">
       <h3 class="sub-section-label">ADD TECHNICIAN</h3>
-      <div style="display:flex;gap:8px">
-        <input type="text" id="new-crew-name" class="field-input" placeholder="Full name" style="max-width:320px">
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input type="text" id="new-crew-name" class="field-input" placeholder="Full name" style="max-width:280px">
+        <select id="new-crew-rate-level" class="field-input" style="max-width:200px">
+          <option value="">No rate level</option>
+          {% for lvl in pay_rate_levels %}
+          <option value="{{ lvl.id }}">{{ lvl.name }} (${{ '%.2f' | format(lvl.hourly_rate) }}/hr)</option>
+          {% endfor %}
+        </select>
         <button class="btn btn-primary" onclick="addCrewMember()">Add</button>
       </div>
       <div id="crew-msg" class="field-msg" style="display:none;margin-top:6px"></div>
     </div>
     <div class="form-section-body no-pad">
       <table class="data-table">
-        <thead><tr><th>NAME</th><th style="width:80px">ACTIONS</th></tr></thead>
+        <thead><tr><th>NAME</th><th>RATE LEVEL</th><th style="width:80px">ACTIONS</th></tr></thead>
         <tbody id="crew-tbody">
           {% for m in crew_members_list %}
-          <tr data-mid="{{ m.id }}">
+          <tr data-mid="{{ m.id }}" data-rate-level-id="{{ m.rate_level_id or '' }}">
             <td id="crew-name-{{ m.id }}">{{ m.name }}</td>
+            <td id="crew-level-{{ m.id }}" class="text-dim">
+              {% if m.level_name %}{{ m.level_name }} <span class="mono" style="font-size:10px">(${{ '%.2f' | format(m.level_rate) }}/hr)</span>{% else %}—{% endif %}
+            </td>
             <td>
               <div class="action-btns">
                 <button class="btn btn-xs btn-ghost" onclick="editCrewMember(this)">✎</button>
@@ -986,7 +1096,7 @@
             </td>
           </tr>
           {% else %}
-          <tr id="crew-empty"><td colspan="2" class="text-dim" style="text-align:center;padding:16px">No technicians yet.</td></tr>
+          <tr id="crew-empty"><td colspan="3" class="text-dim" style="text-align:center;padding:16px">No technicians yet.</td></tr>
           {% endfor %}
         </tbody>
       </table>
@@ -1247,11 +1357,25 @@
       <div class="field-group"><label class="field-label">EMAIL</label><input type="email" id="edit-email" class="field-input"></div>
       {% if user.role == 'admin' %}
       <div class="field-group" style="margin-top:4px">
-        <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-          <input type="checkbox" id="edit-recipient" style="accent-color:var(--accent)">
-          <span class="field-label" style="margin:0">PDF EMAIL RECIPIENT</span>
-        </label>
-        <span class="field-hint">Include this contact in automated PDF email sends</span>
+        <div class="field-label" style="margin-bottom:6px">EMAIL RECIPIENTS</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="edit-recipient" style="accent-color:var(--accent)">
+            <span style="font-size:12px">All emails (general recipient)</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="edit-advance-recipient" style="accent-color:var(--accent)">
+            <span style="font-size:12px">Advance sheet emails</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="edit-production-recipient" style="accent-color:var(--accent)">
+            <span style="font-size:12px">Production / schedule emails</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="edit-system-recipient" style="accent-color:var(--accent)">
+            <span style="font-size:12px">System notification emails</span>
+          </label>
+        </div>
       </div>
       {% endif %}
     </div>
@@ -1485,6 +1609,43 @@
 </div>
 {% endif %}
 
+{# ── EDIT USER MODAL ──────────────────────────────────────────────────────────── #}
+<div id="edit-user-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeEditUser()">
+  <div class="modal-card" style="max-width:420px">
+    <div class="modal-header">Edit User <button onclick="closeEditUser()" class="modal-close">×</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="edit-user-id">
+      <div class="field-group">
+        <label class="field-label">DISPLAY NAME</label>
+        <input type="text" id="edit-user-name" class="field-input" placeholder="Full name">
+      </div>
+      <div class="field-group">
+        <label class="field-label">EMAIL</label>
+        <input type="email" id="edit-user-email" class="field-input" placeholder="user@example.com">
+      </div>
+      <div class="field-group">
+        <label class="field-label">ROLE</label>
+        <select id="edit-user-role" class="field-input">
+          <option value="user">User — view &amp; edit shows</option>
+          <option value="staff">Staff — + manage technicians, contacts &amp; form fields</option>
+          <option value="admin">Admin — full access</option>
+        </select>
+      </div>
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="edit-user-readonly">
+          Read-only (view access only, no edits)
+        </label>
+      </div>
+      <div id="edit-user-msg" style="color:#FC8181;font-size:12px;display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeEditUser()">Cancel</button>
+      <button class="btn btn-primary" onclick="saveEditUser()">Save Changes</button>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -1537,6 +1698,12 @@ function editContact(btn, id) {
   document.getElementById('edit-dept').value  = row.dataset.dept || '';
   const recipientChk = document.getElementById('edit-recipient');
   if (recipientChk) recipientChk.checked = row.dataset.recipient === '1';
+  const advChk  = document.getElementById('edit-advance-recipient');
+  const prodChk = document.getElementById('edit-production-recipient');
+  const sysChk  = document.getElementById('edit-system-recipient');
+  if (advChk)  advChk.checked  = row.querySelector('[data-email-type=advance]')?.classList.contains('on') || false;
+  if (prodChk) prodChk.checked = row.querySelector('[data-email-type=production]')?.classList.contains('on') || false;
+  if (sysChk)  sysChk.checked  = row.querySelector('[data-email-type=system]')?.classList.contains('on') || false;
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -1552,22 +1719,14 @@ async function saveContact() {
     phone: document.getElementById('edit-phone').value,
     email: document.getElementById('edit-email').value,
     report_recipient: recipientChk ? recipientChk.checked : undefined,
+    advance_recipient: document.getElementById('edit-advance-recipient')?.checked || false,
+    production_recipient: document.getElementById('edit-production-recipient')?.checked || false,
+    system_recipient: document.getElementById('edit-system-recipient')?.checked || false,
   };
   const resp = await fetch(`/settings/contacts/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
   });
   if ((await resp.json()).success) {
-    // Sync the table row's recipient state and inline checkbox without a full reload
-    const row = document.querySelector(`#contacts-table tr[data-id="${id}"]`);
-    if (row && recipientChk !== null) {
-      const isRecip = recipientChk && recipientChk.checked;
-      row.dataset.recipient = isRecip ? '1' : '0';
-      const indicator = row.querySelector('.recipient-indicator');
-      if (indicator) {
-        indicator.classList.toggle('on', isRecip);
-        indicator.title = isRecip ? 'Included in PDF email sends' : 'Not a PDF recipient';
-      }
-    }
     closeEditModal();
     location.reload();
   }
@@ -1597,6 +1756,40 @@ async function resetPassword(id) {
   });
   const data = await resp.json();
   alert(data.success ? 'Password reset successfully.' : data.error);
+}
+
+function openEditUser(id, name, email, role, isReadonly) {
+  document.getElementById('edit-user-id').value = id;
+  document.getElementById('edit-user-name').value = name;
+  document.getElementById('edit-user-email').value = email;
+  document.getElementById('edit-user-role').value = role;
+  document.getElementById('edit-user-readonly').checked = !!isReadonly;
+  document.getElementById('edit-user-msg').style.display = 'none';
+  document.getElementById('edit-user-modal').style.display = 'flex';
+}
+function closeEditUser() { document.getElementById('edit-user-modal').style.display = 'none'; }
+
+async function saveEditUser() {
+  const id = document.getElementById('edit-user-id').value;
+  const payload = {
+    display_name: document.getElementById('edit-user-name').value.trim(),
+    email: document.getElementById('edit-user-email').value.trim(),
+    role: document.getElementById('edit-user-role').value,
+    is_readonly: document.getElementById('edit-user-readonly').checked,
+  };
+  const resp = await fetch(`/settings/users/${id}/edit`, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  });
+  const data = await resp.json();
+  if (data.success) {
+    closeEditUser();
+    window.location.reload();
+  } else {
+    const msg = document.getElementById('edit-user-msg');
+    msg.textContent = data.error || 'Error saving user.';
+    msg.style.display = 'block';
+  }
 }
 
 /* ── My Account ────────────────────────────────────────────────── */
@@ -1657,6 +1850,24 @@ async function loadShowOptions() {
 }
 
 /* ── Venue / Radio / WiFi / Logo / Upload ──────────────────────── */
+
+async function loadVenueAndRadioLists() {
+  try {
+    const [vr, rr] = await Promise.all([
+      fetch('/settings/venues'), fetch('/settings/radio-channels')
+    ]);
+    if (vr.ok) {
+      const vd = await vr.json();
+      const el = document.getElementById('venue-list-input');
+      if (el && vd.venue_list) el.value = vd.venue_list.join('\n');
+    }
+    if (rr.ok) {
+      const rd = await rr.json();
+      const el = document.getElementById('radio-list-input');
+      if (el && rd.channel_list) el.value = rd.channel_list.join('\n');
+    }
+  } catch(e) {}
+}
 
 async function saveVenueList() {
   const raw = document.getElementById('venue-list-input').value;
@@ -1990,22 +2201,27 @@ async function addPosition() {
   const category_id = document.getElementById('new-pos-cat').value || null;
   const catSel = document.getElementById('new-pos-cat');
   const catName = catSel.options[catSel.selectedIndex]?.text || '—';
+  const overrideRateVal = document.getElementById('new-pos-rate').value;
+  const override_rate = overrideRateVal !== '' ? parseFloat(overrideRateVal) : null;
   if (!name) return;
   const msg = document.getElementById('pos-msg');
   const r = await fetch('/settings/job-positions/add', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name, category_id})
+    body: JSON.stringify({name, category_id, override_rate})
   });
   const d = await r.json();
   msg.style.display = '';
   if (d.success) {
     msg.className = 'field-msg field-msg-success'; msg.textContent = 'Position added.';
     document.getElementById('new-pos-name').value = '';
+    document.getElementById('new-pos-rate').value = '';
     document.getElementById('pos-empty')?.remove();
     const tbody = document.getElementById('positions-tbody');
+    const rateLabel = override_rate !== null ? `$${override_rate.toFixed(2)}/hr` : '—';
     const tr = document.createElement('tr'); tr.dataset.pid = d.id;
     tr.innerHTML = `<td id="pos-name-${d.id}">${_esc(d.name)}</td>
       <td class="text-dim" id="pos-cat-${d.id}" data-cat-id="${category_id || ''}">${_esc(catName)}</td>
+      <td id="pos-rate-${d.id}" style="text-align:right" class="mono text-dim">${rateLabel}</td>
       <td><div class="action-btns">
         <button class="btn btn-xs btn-ghost" onclick="editPosition(this)">✎</button>
         <button class="btn btn-xs btn-danger-ghost" onclick="deletePosition(${d.id})">×</button>
@@ -2021,15 +2237,17 @@ function editPosition(btn) {
   const pid = tr.dataset.pid;
   const nameEl = document.getElementById('pos-name-' + pid);
   const catEl = document.getElementById('pos-cat-' + pid);
+  const rateEl = document.getElementById('pos-rate-' + pid);
   if (!nameEl || nameEl.querySelector('input')) return;
   const origName = nameEl.textContent.trim();
   const origCatId = catEl?.dataset.catId || '';
   const origCatText = catEl?.textContent.trim() || '—';
+  const origRateText = rateEl?.textContent.trim() || '—';
+  const origRateVal = origRateText !== '—' ? origRateText.replace(/[^0-9.]/g,'') : '';
   nameEl.innerHTML = '';
   const inp = document.createElement('input');
   inp.type = 'text'; inp.value = origName; inp.className = 'field-input field-input-sm';
   inp.style.cssText = 'width:100%;max-width:180px';
-  // Build category select from existing options
   catEl.innerHTML = '';
   const sel = document.createElement('select');
   sel.className = 'field-input field-input-sm';
@@ -2041,34 +2259,40 @@ function editPosition(btn) {
     if (o.value == origCatId) opt.selected = true;
     sel.appendChild(opt);
   });
+  const rateInp = document.createElement('input');
+  rateInp.type = 'number'; rateInp.value = origRateVal; rateInp.placeholder = '—';
+  rateInp.step = '0.01'; rateInp.min = '0';
+  rateInp.className = 'field-input field-input-sm'; rateInp.style.cssText = 'width:80px;text-align:right';
   const save = async () => {
     const name = inp.value.trim();
     const category_id = sel.value || null;
-    if (!name) { nameEl.textContent = origName; catEl.textContent = origCatText; return; }
+    const rateStr = rateInp.value.trim();
+    const override_rate = rateStr !== '' ? parseFloat(rateStr) : null;
+    if (!name) { nameEl.textContent = origName; catEl.textContent = origCatText; rateEl.textContent = origRateText; return; }
     const r = await fetch(`/settings/job-positions/${pid}/edit`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, category_id})
+      body: JSON.stringify({name, category_id, override_rate})
     });
     const d = await r.json();
     if (d.success) {
       nameEl.textContent = name;
       const catName = sel.options[sel.selectedIndex]?.text || '—';
       catEl.textContent = catName; catEl.dataset.catId = category_id || '';
-    } else { nameEl.textContent = origName; catEl.textContent = origCatText; alert(d.error || 'Error updating position.'); }
+      rateEl.textContent = override_rate !== null ? `$${override_rate.toFixed(2)}/hr` : '—';
+    } else { nameEl.textContent = origName; catEl.textContent = origCatText; rateEl.textContent = origRateText; alert(d.error || 'Error updating position.'); }
   };
-  const onKey = e => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') { nameEl.textContent = origName; catEl.textContent = origCatText; } };
-  inp.addEventListener('keydown', onKey); sel.addEventListener('keydown', onKey);
-  // Only save when focus leaves BOTH fields (not when moving between them)
+  const onKey = e => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') { nameEl.textContent = origName; catEl.textContent = origCatText; rateEl.textContent = origRateText; } };
+  inp.addEventListener('keydown', onKey); sel.addEventListener('keydown', onKey); rateInp.addEventListener('keydown', onKey);
   let _saveTimer = null;
   const scheduleSave = () => { _saveTimer = setTimeout(save, 200); };
   const cancelSave  = () => { clearTimeout(_saveTimer); };
-  inp.addEventListener('blur',  scheduleSave);
-  inp.addEventListener('focus', cancelSave);
-  sel.addEventListener('blur',  scheduleSave);
-  sel.addEventListener('focus', cancelSave);
-  // Immediately save + close when user picks a category option
+  inp.addEventListener('blur',  scheduleSave); inp.addEventListener('focus', cancelSave);
+  sel.addEventListener('blur',  scheduleSave); sel.addEventListener('focus', cancelSave);
+  rateInp.addEventListener('blur', scheduleSave); rateInp.addEventListener('focus', cancelSave);
   sel.addEventListener('change', () => { cancelSave(); save(); });
-  nameEl.appendChild(inp); catEl.appendChild(sel); inp.focus(); inp.select();
+  nameEl.appendChild(inp); catEl.appendChild(sel);
+  if (rateEl) { rateEl.innerHTML = ''; rateEl.appendChild(rateInp); }
+  inp.focus(); inp.select();
 }
 
 async function deletePosition(pid) {
@@ -2078,7 +2302,7 @@ async function deletePosition(pid) {
   if (d.success) {
     document.querySelector(`#positions-tbody tr[data-pid="${pid}"]`)?.remove();
     if (!document.querySelector('#positions-tbody tr')) {
-      const td = document.createElement('td'); td.colSpan = 3; td.className = 'text-dim';
+      const td = document.createElement('td'); td.colSpan = 4; td.className = 'text-dim';
       td.style.textAlign = 'center'; td.style.padding = '16px';
       td.textContent = 'No positions yet.';
       const tr = document.createElement('tr'); tr.id = 'pos-empty'; tr.appendChild(td);
@@ -2087,22 +2311,111 @@ async function deletePosition(pid) {
   } else alert(d.error || 'Error deleting position.');
 }
 
+/* ── Pay Rate Levels ──────────────────────────────────────────── */
+async function addPayRateLevel() {
+  const name = document.getElementById('new-rate-name').value.trim();
+  const rate = parseFloat(document.getElementById('new-rate-amount').value) || 0;
+  if (!name) return;
+  const msg = document.getElementById('rate-level-msg');
+  const r = await fetch('/settings/pay-rate-levels/add', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name, hourly_rate: rate})
+  });
+  const d = await r.json();
+  msg.style.display = '';
+  if (d.success) {
+    msg.className = 'field-msg field-msg-success'; msg.textContent = 'Rate level added.';
+    document.getElementById('new-rate-name').value = '';
+    document.getElementById('new-rate-amount').value = '';
+    document.getElementById('rate-level-empty')?.remove();
+    const tr = document.createElement('tr'); tr.dataset.lid = d.id;
+    tr.innerHTML = `<td id="rate-level-name-${d.id}">${_esc(d.name)}</td>
+      <td id="rate-level-rate-${d.id}" style="text-align:right" class="mono">$${parseFloat(d.hourly_rate).toFixed(2)}/hr</td>
+      <td><div class="action-btns">
+        <button class="btn btn-xs btn-ghost" onclick="editPayRateLevel(this)">✎</button>
+        <button class="btn btn-xs btn-danger-ghost" onclick="deletePayRateLevel(${d.id})">×</button>
+      </div></td>`;
+    document.getElementById('rate-levels-tbody').appendChild(tr);
+    _addRateLevelOption(d.id, d.name, d.hourly_rate);
+  } else {
+    msg.className = 'field-msg field-msg-error'; msg.textContent = d.error || 'Error.';
+  }
+}
+
+function _addRateLevelOption(id, name, rate) {
+  const sel = document.getElementById('new-crew-rate-level');
+  if (sel) {
+    const opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = `${name} ($${parseFloat(rate).toFixed(2)}/hr)`;
+    sel.appendChild(opt);
+  }
+}
+
+function editPayRateLevel(btn) {
+  const tr = btn.closest('tr');
+  const lid = tr.dataset.lid;
+  const nameEl = document.getElementById('rate-level-name-' + lid);
+  const rateEl = document.getElementById('rate-level-rate-' + lid);
+  if (!nameEl || nameEl.querySelector('input')) return;
+  const origName = nameEl.textContent.trim();
+  const origRateText = rateEl.textContent.trim().replace(/[^0-9.]/g, '');
+  nameEl.innerHTML = `<input type="text" class="field-input field-input-sm" style="max-width:180px" value="${_esc(origName)}">`;
+  rateEl.innerHTML = `<input type="number" class="field-input field-input-sm" style="max-width:80px;text-align:right" step="0.01" min="0" value="${origRateText}">`;
+  const save = async () => {
+    const newName = nameEl.querySelector('input').value.trim();
+    const newRate = parseFloat(rateEl.querySelector('input').value) || 0;
+    if (!newName) { nameEl.textContent = origName; rateEl.textContent = `$${parseFloat(origRateText).toFixed(2)}/hr`; return; }
+    const r = await fetch(`/settings/pay-rate-levels/${lid}/edit`, {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: newName, hourly_rate: newRate})
+    });
+    const d = await r.json();
+    if (d.success) {
+      nameEl.textContent = newName;
+      rateEl.textContent = `$${newRate.toFixed(2)}/hr`;
+      const opt = document.querySelector(`#new-crew-rate-level option[value="${lid}"]`);
+      if (opt) opt.textContent = `${newName} ($${newRate.toFixed(2)}/hr)`;
+    } else {
+      nameEl.textContent = origName; rateEl.textContent = `$${parseFloat(origRateText).toFixed(2)}/hr`;
+      alert(d.error || 'Error updating rate level.');
+    }
+  };
+  nameEl.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { nameEl.textContent = origName; rateEl.textContent = `$${parseFloat(origRateText).toFixed(2)}/hr`; } });
+  nameEl.querySelector('input').addEventListener('blur', save);
+  nameEl.querySelector('input').focus();
+}
+
+async function deletePayRateLevel(lid) {
+  if (!confirm('Delete this rate level? Technicians assigned to it will lose their rate.')) return;
+  const r = await fetch(`/settings/pay-rate-levels/${lid}/delete`, {method: 'POST'});
+  const d = await r.json();
+  if (d.success) {
+    document.querySelector(`#rate-levels-tbody tr[data-lid="${lid}"]`)?.remove();
+    document.querySelector(`#new-crew-rate-level option[value="${lid}"]`)?.remove();
+  } else alert(d.error || 'Error deleting rate level.');
+}
+
 /* ── Crew Members ────────────────────────────────────────────── */
 async function addCrewMember() {
   const name = document.getElementById('new-crew-name').value.trim();
+  const rateLevelId = document.getElementById('new-crew-rate-level')?.value || '';
   if (!name) return;
   const msg = document.getElementById('crew-msg');
   const r = await fetch('/settings/crew-members/add', {
-    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({name, rate_level_id: rateLevelId || null})
   });
   const d = await r.json();
   msg.style.display = '';
   if (d.success) {
     msg.className = 'field-msg field-msg-success'; msg.textContent = 'Technician added.';
     document.getElementById('new-crew-name').value = '';
+    if (document.getElementById('new-crew-rate-level')) document.getElementById('new-crew-rate-level').value = '';
     document.getElementById('crew-empty')?.remove();
-    const tr = document.createElement('tr'); tr.dataset.mid = d.id;
+    const levelLabel = d.level_name ? `${d.level_name} <span class="mono" style="font-size:10px">($${parseFloat(d.level_rate||0).toFixed(2)}/hr)</span>` : '—';
+    const tr = document.createElement('tr'); tr.dataset.mid = d.id; tr.dataset.rateLevelId = d.rate_level_id || '';
     tr.innerHTML = `<td id="crew-name-${d.id}">${_esc(d.name)}</td>
+      <td id="crew-level-${d.id}" class="text-dim">${levelLabel}</td>
       <td><div class="action-btns">
         <button class="btn btn-xs btn-ghost" onclick="editCrewMember(this)">✎</button>
         <button class="btn btn-xs btn-danger-ghost" onclick="deleteCrewMember(${d.id})">×</button>
@@ -2117,29 +2430,49 @@ function editCrewMember(btn) {
   const tr = btn.closest('tr');
   const mid = tr.dataset.mid;
   const nameEl = document.getElementById('crew-name-' + mid);
-  if (!nameEl || nameEl.querySelector('input')) return; // already editing
-  const orig = nameEl.textContent.trim();
+  const levelEl = document.getElementById('crew-level-' + mid);
+  if (!nameEl || nameEl.querySelector('input')) return;
+  const origName = nameEl.textContent.trim();
+  const origLevelId = tr.dataset.rateLevelId || '';
+  const origLevelText = levelEl.innerHTML;
+
+  const rateSel = document.createElement('select');
+  rateSel.className = 'field-input field-input-sm';
+  rateSel.style.maxWidth = '200px';
+  const src = document.getElementById('new-crew-rate-level');
+  if (src) {
+    rateSel.innerHTML = src.innerHTML;
+    rateSel.value = origLevelId;
+  }
+
   nameEl.innerHTML = '';
   const inp = document.createElement('input');
-  inp.type = 'text';
-  inp.value = orig;
-  inp.className = 'field-input field-input-sm';
-  inp.style.cssText = 'width:100%;max-width:260px';
+  inp.type = 'text'; inp.value = origName;
+  inp.className = 'field-input field-input-sm'; inp.style.cssText = 'width:100%;max-width:200px';
+  nameEl.appendChild(inp);
+  levelEl.innerHTML = ''; levelEl.appendChild(rateSel);
+
   const save = async () => {
     const name = inp.value.trim();
-    if (!name || name === orig) { nameEl.textContent = orig; return; }
+    const rateLevelId = rateSel.value || null;
+    if (!name) { nameEl.textContent = origName; levelEl.innerHTML = origLevelText; return; }
     const r = await fetch(`/settings/crew-members/${mid}/edit`, {
-      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({name})
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name, rate_level_id: rateLevelId})
     });
     const d = await r.json();
-    if (d.success) { nameEl.textContent = name; }
-    else { nameEl.textContent = orig; alert(d.error || 'Error updating technician.'); }
+    if (d.success) {
+      nameEl.textContent = name;
+      tr.dataset.rateLevelId = rateLevelId || '';
+      levelEl.innerHTML = d.level_name ? `${_esc(d.level_name)} <span class="mono" style="font-size:10px">($${parseFloat(d.level_rate||0).toFixed(2)}/hr)</span>` : '—';
+    } else {
+      nameEl.textContent = origName; levelEl.innerHTML = origLevelText;
+      alert(d.error || 'Error updating technician.');
+    }
   };
-  inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { nameEl.textContent = orig; } });
-  inp.addEventListener('blur', save);
-  nameEl.appendChild(inp);
-  inp.focus();
-  inp.select();
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { nameEl.textContent = origName; levelEl.innerHTML = origLevelText; } });
+  inp.addEventListener('blur', () => setTimeout(save, 150));
+  inp.focus(); inp.select();
 }
 
 async function deleteCrewMember(mid) {
@@ -2516,6 +2849,7 @@ async function pollUpdateStatus() {
     if (name === 'registrations') loadPendingRegs();
     if (name === 'messages')      loadMessages();
     if (name === 'update')        detectService();
+    if (name === 'syslog')        loadVenueAndRadioLists();
   };
 })();
 </script>

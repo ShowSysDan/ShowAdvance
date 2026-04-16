@@ -181,7 +181,7 @@
   <button class="tab-btn {% if tab == 'schedule' %}active{% endif %}" onclick="switchTab('schedule')">Production Schedule</button>
   <button class="tab-btn {% if tab == 'staffing' %}active{% endif %}" onclick="switchTab('staffing')">Labor Requests</button>
   <button class="tab-btn {% if tab == 'assets' %}active{% endif %}" onclick="switchTab('assets')">Assets</button>
-  <button class="tab-btn {% if tab == 'postnotes' %}active{% endif %}" onclick="switchTab('postnotes')">Post-Show Notes</button>
+  <button class="tab-btn {% if tab == 'postnotes' %}active{% endif %}" onclick="switchTab('postnotes')">Post Show</button>
   <button class="tab-btn {% if tab == 'comments' %}active{% endif %}" onclick="switchTab('comments')">
     Comments
     <span id="comments-count-badge" class="tab-badge" hidden></span>
@@ -668,6 +668,37 @@ const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
     </div>
   </div>
 
+  {# Labor cost summary — loaded when tab opens #}
+  <div id="labor-cost-section" style="display:none">
+    <div class="form-section">
+      <div class="form-section-header">
+        <span class="section-icon">◈</span> ESTIMATED LABOR COST
+        <button class="btn btn-sm btn-ghost ml-auto" onclick="loadLaborCost()">Refresh</button>
+      </div>
+      <div class="form-section-body no-pad">
+        <table class="data-table" id="labor-cost-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Position</th>
+              <th>Technician</th>
+              <th style="text-align:right">Hours</th>
+              <th style="text-align:right">Rate</th>
+              <th style="text-align:right">Line Total</th>
+            </tr>
+          </thead>
+          <tbody id="labor-cost-tbody"></tbody>
+          <tfoot>
+            <tr style="font-weight:600;border-top:2px solid var(--border)">
+              <td colspan="5" style="text-align:right;padding:8px 10px">ESTIMATED TOTAL</td>
+              <td style="text-align:right;padding:8px 10px;color:var(--accent)" id="labor-cost-total">—</td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  </div>
+
 </div>{# end tab-staffing #}
 
 {# Seed labor table with existing position_ids for JS to select #}
@@ -791,14 +822,6 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
           <label class="field-label">NOTES</label>
           <input type="text" id="asset-add-notes" class="field-input" placeholder="Optional notes…">
         </div>
-        {% if is_content_admin_user %}
-        <div class="field-group" style="grid-column:span 2">
-          <label class="checkbox-label">
-            <input type="checkbox" id="asset-add-hidden">
-            Hide from production managers (admin only)
-          </label>
-        </div>
-        {% endif %}
       </div>
       <div id="asset-avail-info" style="margin-top:10px;font-size:12px;color:var(--text-dim)"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
@@ -1005,8 +1028,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     document.getElementById('asset-add-title').textContent = label;
     document.getElementById('asset-add-qty').value = 1;
     document.getElementById('asset-add-notes').value = '';
-    if (document.getElementById('asset-add-hidden'))
-      document.getElementById('asset-add-hidden').checked = false;
+
 
     // Default rental dates: prefer load-in/out dates, fall back to performances
     const loadInDate  = document.getElementById('load-in-date')?.value  || '';
@@ -1075,13 +1097,11 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const start = document.getElementById('asset-add-start').value;
     const end   = document.getElementById('asset-add-end').value;
     const notes = document.getElementById('asset-add-notes').value;
-    const hidden = document.getElementById('asset-add-hidden')?.checked || false;
-
     const r = await fetch(`/shows/${SHOW_ID}/assets`, {
       method: 'POST',
       headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
       body: JSON.stringify({asset_type_id: typeId, quantity: qty, locked_price: price,
-                            rental_start: start, rental_end: end, notes, is_hidden: hidden})
+                            rental_start: start, rental_end: end, notes})
     });
     if (r.ok) {
       closeAssetAddModal();
@@ -1203,7 +1223,10 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   <div class="form-section">
     <div class="form-section-header">
       <span class="section-icon">◈</span> POST-SHOW NOTES
-      <a href="{{ url_for('export_postnotes', show_id=show.id) }}" class="btn btn-sm btn-ghost ml-auto" target="_blank">Export PDF</a>
+      <div class="ml-auto" style="display:flex;gap:6px">
+        <a href="/shows/{{ show.id }}/post-show-invoice.pdf" target="_blank" class="btn btn-sm btn-ghost" title="Combined assets + labor invoice">Combined Invoice PDF</a>
+        <a href="{{ url_for('export_postnotes', show_id=show.id) }}" class="btn btn-sm btn-ghost" target="_blank">Export PDF</a>
+      </div>
     </div>
     <div class="form-section-body">
       <div class="show-info-readonly">
@@ -2099,8 +2122,33 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     _sortDayBlocks();
   }
 
+  async function loadLaborCost() {
+    const section = document.getElementById('labor-cost-section');
+    const tbody = document.getElementById('labor-cost-tbody');
+    const totalEl = document.getElementById('labor-cost-total');
+    if (!section) return;
+    try {
+      const r = await fetch(`/shows/{{ show.id }}/labor-cost`);
+      if (!r.ok) return;
+      const d = await r.json();
+      if (!d.lines || !d.lines.length) { section.style.display = 'none'; return; }
+      section.style.display = '';
+      tbody.innerHTML = d.lines.map(l => `
+        <tr style="${l.hourly_rate === 0 && l.is_scheduled ? 'color:var(--text-dim)' : ''}">
+          <td class="text-dim text-sm">${l.work_date || '—'}</td>
+          <td>${l.position_name || '—'}</td>
+          <td>${l.is_scheduled ? (l.tech_name + (l.level_name ? `<br><span class="text-dim" style="font-size:10px">${l.level_name}</span>` : '')) : '<span class="text-dim">Unscheduled</span>'}</td>
+          <td style="text-align:right">${parseFloat(l.hours).toFixed(2)}h</td>
+          <td style="text-align:right" class="mono">$${parseFloat(l.hourly_rate).toFixed(2)}/hr</td>
+          <td style="text-align:right" class="mono">$${parseFloat(l.line_total).toFixed(2)}</td>
+        </tr>
+      `).join('');
+      totalEl.textContent = '$' + parseFloat(d.total).toFixed(2);
+    } catch(e) { /* silently ignore */ }
+  }
+
   document.addEventListener('DOMContentLoaded', () => {
-    if (INITIAL_TAB === 'staffing') initLaborTab();
+    if (INITIAL_TAB === 'staffing') { initLaborTab(); loadLaborCost(); }
   });
   window._laborTabInited = false;
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -2108,6 +2156,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       if (btn.getAttribute('onclick') && btn.getAttribute('onclick').includes('staffing') && !window._laborTabInited) {
         window._laborTabInited = true;
         initLaborTab();
+        loadLaborCost();
       }
     });
   });

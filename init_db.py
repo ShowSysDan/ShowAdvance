@@ -103,7 +103,10 @@ CREATE TABLE IF NOT EXISTS contacts (
     phone TEXT DEFAULT '',
     email TEXT DEFAULT '',
     sort_order INTEGER DEFAULT 0,
-    report_recipient INTEGER DEFAULT 0,
+    report_recipient    INTEGER DEFAULT 0,
+    advance_recipient   INTEGER DEFAULT 0,
+    production_recipient INTEGER DEFAULT 0,
+    system_recipient    INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -246,14 +249,16 @@ CREATE TABLE IF NOT EXISTS schedule_template_rows (
 CREATE TABLE IF NOT EXISTS position_categories (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT NOT NULL,
+    is_venue   INTEGER DEFAULT 0,
     sort_order INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS job_positions (
-    id          INTEGER PRIMARY KEY AUTOINCREMENT,
-    category_id INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
-    name        TEXT NOT NULL,
-    sort_order  INTEGER DEFAULT 0
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    category_id   INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
+    name          TEXT NOT NULL,
+    override_rate REAL DEFAULT NULL,
+    sort_order    INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS labor_requests (
@@ -274,11 +279,20 @@ CREATE TABLE IF NOT EXISTS labor_requests (
     created_at                TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS pay_rate_levels (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    name        TEXT NOT NULL,
+    hourly_rate REAL DEFAULT 0.0,
+    sort_order  INTEGER DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS crew_members (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT NOT NULL,
-    sort_order INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    name           TEXT NOT NULL,
+    rate_level_id  INTEGER REFERENCES pay_rate_levels(id) ON DELETE SET NULL,
+    sort_order     INTEGER DEFAULT 0,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS crew_qualifications (
@@ -364,6 +378,7 @@ CREATE TABLE IF NOT EXISTS asset_types (
     supplier_contact TEXT DEFAULT '',
     is_retired       INTEGER DEFAULT 0,
     retired_at       TIMESTAMP DEFAULT NULL,
+    hide_from_pm     INTEGER DEFAULT 0,
     sort_order       INTEGER DEFAULT 0,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -1102,14 +1117,24 @@ def migrate_db():
         CREATE TABLE IF NOT EXISTS position_categories (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             name       TEXT NOT NULL,
+            is_venue   INTEGER DEFAULT 0,
             sort_order INTEGER DEFAULT 0
         );
 
-        CREATE TABLE IF NOT EXISTS job_positions (
+        CREATE TABLE IF NOT EXISTS pay_rate_levels (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            category_id INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
             name        TEXT NOT NULL,
-            sort_order  INTEGER DEFAULT 0
+            hourly_rate REAL DEFAULT 0.0,
+            sort_order  INTEGER DEFAULT 0,
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS job_positions (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            category_id   INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
+            name          TEXT NOT NULL,
+            override_rate REAL DEFAULT NULL,
+            sort_order    INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS labor_requests (
@@ -1131,9 +1156,10 @@ def migrate_db():
         );
 
         CREATE TABLE IF NOT EXISTS crew_members (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            name       TEXT NOT NULL,
-            sort_order INTEGER DEFAULT 0,
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            name          TEXT NOT NULL,
+            rate_level_id INTEGER REFERENCES pay_rate_levels(id) ON DELETE SET NULL,
+            sort_order    INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -1224,6 +1250,7 @@ def migrate_db():
             supplier_contact TEXT DEFAULT '',
             is_retired       INTEGER DEFAULT 0,
             retired_at       TIMESTAMP DEFAULT NULL,
+            hide_from_pm     INTEGER DEFAULT 0,
             sort_order       INTEGER DEFAULT 0,
             created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
@@ -1346,6 +1373,26 @@ def migrate_db():
         # Per-item system membership — links each physical unit to its system type
         "ALTER TABLE asset_items ADD COLUMN system_type_id INTEGER REFERENCES asset_types(id) ON DELETE SET NULL",
         "CREATE INDEX IF NOT EXISTS idx_asset_items_sys ON asset_items(system_type_id)",
+        # Asset type default hide-from-PM flag
+        "ALTER TABLE asset_types ADD COLUMN hide_from_pm INTEGER DEFAULT 0",
+        # Per-contact email type recipients
+        "ALTER TABLE contacts ADD COLUMN advance_recipient INTEGER DEFAULT 0",
+        "ALTER TABLE contacts ADD COLUMN production_recipient INTEGER DEFAULT 0",
+        "ALTER TABLE contacts ADD COLUMN system_recipient INTEGER DEFAULT 0",
+        # Venue-linked position categories
+        "ALTER TABLE position_categories ADD COLUMN is_venue INTEGER DEFAULT 0",
+        # Pay rate levels table (new installs get it from schema; existing need migration)
+        """CREATE TABLE IF NOT EXISTS pay_rate_levels (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            hourly_rate REAL DEFAULT 0.0,
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        # Crew member rate level
+        "ALTER TABLE crew_members ADD COLUMN rate_level_id INTEGER REFERENCES pay_rate_levels(id) ON DELETE SET NULL",
+        # Job position override rate
+        "ALTER TABLE job_positions ADD COLUMN override_rate REAL DEFAULT NULL",
     ]:
         try:
             conn.execute(alter_sql)
@@ -1616,7 +1663,10 @@ CREATE TABLE IF NOT EXISTS contacts (
     phone TEXT DEFAULT '',
     email TEXT DEFAULT '',
     sort_order INTEGER DEFAULT 0,
-    report_recipient INTEGER DEFAULT 0,
+    report_recipient     INTEGER DEFAULT 0,
+    advance_recipient    INTEGER DEFAULT 0,
+    production_recipient INTEGER DEFAULT 0,
+    system_recipient     INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1764,14 +1814,24 @@ CREATE TABLE IF NOT EXISTS schedule_template_rows (
 CREATE TABLE IF NOT EXISTS position_categories (
     id         SERIAL PRIMARY KEY,
     name       TEXT NOT NULL,
+    is_venue   INTEGER DEFAULT 0,
     sort_order INTEGER DEFAULT 0
 );
 
-CREATE TABLE IF NOT EXISTS job_positions (
+CREATE TABLE IF NOT EXISTS pay_rate_levels (
     id          SERIAL PRIMARY KEY,
-    category_id INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
     name        TEXT NOT NULL,
-    sort_order  INTEGER DEFAULT 0
+    hourly_rate REAL DEFAULT 0.0,
+    sort_order  INTEGER DEFAULT 0,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS job_positions (
+    id            SERIAL PRIMARY KEY,
+    category_id   INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
+    name          TEXT NOT NULL,
+    override_rate REAL DEFAULT NULL,
+    sort_order    INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS labor_requests (
@@ -1793,10 +1853,11 @@ CREATE TABLE IF NOT EXISTS labor_requests (
 );
 
 CREATE TABLE IF NOT EXISTS crew_members (
-    id         SERIAL PRIMARY KEY,
-    name       TEXT NOT NULL,
-    sort_order INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id            SERIAL PRIMARY KEY,
+    name          TEXT NOT NULL,
+    rate_level_id INTEGER REFERENCES pay_rate_levels(id) ON DELETE SET NULL,
+    sort_order    INTEGER DEFAULT 0,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS crew_qualifications (
@@ -1885,6 +1946,7 @@ CREATE TABLE IF NOT EXISTS asset_types (
     supplier_contact TEXT DEFAULT '',
     is_retired       INTEGER DEFAULT 0,
     retired_at       TIMESTAMP DEFAULT NULL,
+    hide_from_pm     INTEGER DEFAULT 0,
     sort_order       INTEGER DEFAULT 0,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -2273,6 +2335,20 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS is_system INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS is_package INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS photo_s3_key TEXT DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS hide_from_pm INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS advance_recipient INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS production_recipient INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS system_recipient INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".position_categories ADD COLUMN IF NOT EXISTS is_venue INTEGER DEFAULT 0',
+            f'''CREATE TABLE IF NOT EXISTS "{app_schema}".pay_rate_levels (
+                id SERIAL PRIMARY KEY,
+                name TEXT NOT NULL,
+                hourly_rate REAL DEFAULT 0.0,
+                sort_order INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''',
+            f'ALTER TABLE "{app_schema}".crew_members ADD COLUMN IF NOT EXISTS rate_level_id INTEGER',
+            f'ALTER TABLE "{app_schema}".job_positions ADD COLUMN IF NOT EXISTS override_rate REAL DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_sections ADD COLUMN IF NOT EXISTS default_open INTEGER DEFAULT 1',
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS perf_id INTEGER DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS ai_hint TEXT DEFAULT NULL',
