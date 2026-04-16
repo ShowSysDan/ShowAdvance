@@ -7055,7 +7055,46 @@ def assets_retired():
                            user=get_current_user())
 
 
-# ─── Asset Invoice PDF ───────────────────────────────────────────────────────
+def _merge_pdfs(base_pdf_bytes, extra_pdfs):
+    """Append extra PDF byte-strings to base_pdf_bytes using pdfrw. Returns merged bytes."""
+    try:
+        from pdfrw import PdfReader, PdfWriter
+        from io import BytesIO
+        writer = PdfWriter()
+        writer.addpages(PdfReader(fdata=base_pdf_bytes).pages)
+        for extra in extra_pdfs:
+            if extra:
+                try:
+                    writer.addpages(PdfReader(fdata=extra).pages)
+                except Exception as e:
+                    app.logger.warning(f'PDF merge: skipping page set due to error: {e}')
+        buf = BytesIO()
+        writer.write(buf)
+        return buf.getvalue()
+    except Exception as e:
+        app.logger.error(f'PDF merge failed: {e}')
+        return base_pdf_bytes
+
+
+def _fetch_external_rental_pdfs(db, show_id):
+    """Return list of PDF byte-strings for all external rentals that have attached PDFs."""
+    rows = db.execute(
+        'SELECT id, s3_key, pdf_data FROM show_external_rentals WHERE show_id=? ORDER BY sort_order',
+        (show_id,)
+    ).fetchall()
+    result = []
+    for row in rows:
+        if row['s3_key']:
+            try:
+                result.append(s3_storage.download_file(row['s3_key']))
+            except Exception as e:
+                app.logger.warning(f'Could not fetch external rental PDF from S3 (id={row["id"]}): {e}')
+        elif row['pdf_data']:
+            result.append(bytes(row['pdf_data']))
+    return result
+
+
+
 
 @app.route('/shows/<int:show_id>/assets/invoice.pdf')
 @login_required
@@ -7098,7 +7137,6 @@ def show_asset_invoice(show_id):
     assets_subtotal  = sum((a['locked_price'] or 0) * a['quantity'] for a in assets_list)
     external_subtotal = sum(e['cost'] or 0 for e in ext_list)
     grand_total = assets_subtotal + external_subtotal
-    db.close()
 
     html_str = render_template(
         'pdf/asset_invoice_pdf.html',
@@ -7118,6 +7156,12 @@ def show_asset_invoice(show_id):
     except Exception as e:
         app.logger.error(f'WeasyPrint invoice error: {e}')
         return f'PDF generation failed: {e}', 500
+
+    # Append any uploaded external rental PDFs
+    er_pdfs = _fetch_external_rental_pdfs(db, show_id)
+    if er_pdfs:
+        pdf_bytes = _merge_pdfs(pdf_bytes, er_pdfs)
+    db.close()
 
     safe_name = secure_filename(show['name'] or f'show_{show_id}')
     resp = make_response(pdf_bytes)
@@ -7170,6 +7214,7 @@ def show_post_invoice(show_id):
     external_subtotal = sum(e['cost'] or 0 for e in ext_list)
 
     labor_lines, labor_total = _calc_labor_cost_for_show(db, show_id)
+    er_pdfs = _fetch_external_rental_pdfs(db, show_id)
     db.close()
 
     grand_total = assets_subtotal + external_subtotal + labor_total
@@ -7194,6 +7239,9 @@ def show_post_invoice(show_id):
     except Exception as e:
         app.logger.error(f'WeasyPrint post-invoice error: {e}')
         return f'PDF generation failed: {e}', 500
+
+    if er_pdfs:
+        pdf_bytes = _merge_pdfs(pdf_bytes, er_pdfs)
 
     safe_name = secure_filename(show['name'] or f'show_{show_id}')
     resp = make_response(pdf_bytes)
@@ -8021,6 +8069,39 @@ def dashboard_delete(dash_id):
     db.commit()
     db.close()
     return jsonify({'success': True})
+
+
+@app.route('/api/admin/dashboards/<int:dash_id>/make-private', methods=['POST'])
+@admin_required
+def api_admin_dashboard_make_private(dash_id):
+    db = get_db()
+    db.execute('UPDATE asset_dashboards SET is_public=0, public_slug=NULL WHERE id=?', (dash_id,))
+    db.commit()
+    db.close()
+    syslog_logger.info(f"DASHBOARD_MADE_PRIVATE id={dash_id} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/dashboards')
+@admin_required
+def api_admin_dashboards():
+    """Admin: list all dashboards with owner and public URL info."""
+    db = get_db()
+    rows = db.execute("""
+        SELECT d.id, d.name, d.is_public, d.public_slug, d.layout,
+               d.created_at, d.updated_at, u.display_name as owner_name, u.username
+        FROM asset_dashboards d
+        JOIN users u ON u.id = d.user_id
+        ORDER BY d.is_public DESC, d.name
+    """).fetchall()
+    db.close()
+    host = request.host_url.rstrip('/')
+    result = []
+    for r in rows:
+        row = dict(r)
+        row['public_url'] = f"{host}/d/{r['public_slug']}" if r['is_public'] and r['public_slug'] else None
+        result.append(row)
+    return jsonify(result)
 
 
 @app.route('/d/<slug>')

@@ -39,8 +39,13 @@
 <div class="dash-toolbar">
   <div class="dash-search-wrap">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="15" height="15" class="dash-search-icon"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-    <input type="text" id="dash-search" class="dash-search-input" placeholder="Search shows…" oninput="filterDash(this.value)" autocomplete="off">
+    <input type="text" id="dash-search" class="dash-search-input" placeholder="Search active &amp; archived shows…" oninput="filterDash(this.value)" autocomplete="off">
     <button id="dash-clear-btn" class="dash-clear-btn" onclick="clearSearch()" style="display:none" title="Clear">×</button>
+  </div>
+  <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+    <input type="date" id="dash-from" class="field-input field-input-sm" title="Date from" onchange="filterDash(document.getElementById('dash-search').value)" style="width:130px">
+    <span style="color:var(--text-dim);font-size:12px">–</span>
+    <input type="date" id="dash-to" class="field-input field-input-sm" title="Date to" onchange="filterDash(document.getElementById('dash-search').value)" style="width:130px">
   </div>
   <div class="dash-venue-pills" id="dash-venue-pills">
     {% for venue, _ in venue_groups %}
@@ -59,7 +64,7 @@
     </div>
     <div class="venue-col-body">
       {% for s in shows %}
-      <div class="show-card" data-search="{{ s.name|lower }}">
+      <div class="show-card" data-search="{{ (s.name ~ ' ' ~ (s.venue or ''))|lower }}" data-date="{{ s.show_date or '' }}">
         <div class="show-card-top">
           <div class="show-date-badge">
             {% if s.show_date %}
@@ -114,7 +119,7 @@
   </button>
   <div id="archived-list" class="show-grid archived hidden" style="margin-top:12px">
     {% for s in archived_shows %}
-    <div class="show-card archived">
+    <div class="show-card archived" data-search="{{ (s.name ~ ' ' ~ (s.venue or ''))|lower }}" data-date="{{ s.show_date or '' }}">
       <div class="show-card-top">
         <div class="show-date-badge dim">
           {% if s.show_date %}
@@ -153,16 +158,27 @@
 <script>
 const _hiddenVenues = new Set();
 
+function _cardMatchesFilter(card, term, fromDate, toDate) {
+  const nameMatch = !term || (card.dataset.search || '').includes(term);
+  const d = card.dataset.date || '';
+  const dateMatch = (!fromDate || d >= fromDate) && (!toDate || !d || d <= toDate);
+  return nameMatch && dateMatch;
+}
+
 function filterDash(q) {
   const term = (q || '').toLowerCase().trim();
-  document.getElementById('dash-clear-btn').style.display = term ? '' : 'none';
+  const fromDate = document.getElementById('dash-from')?.value || '';
+  const toDate   = document.getElementById('dash-to')?.value   || '';
+  const hasFilter = term || fromDate || toDate;
+  document.getElementById('dash-clear-btn').style.display = hasFilter ? '' : 'none';
 
+  // Active shows (venue columns)
   let totalVisible = 0;
   document.querySelectorAll('.venue-col').forEach(col => {
     if (_hiddenVenues.has(col.dataset.venue)) return;
     let colVisible = 0;
     col.querySelectorAll('.show-card').forEach(card => {
-      const match = !term || card.dataset.search.includes(term);
+      const match = _cardMatchesFilter(card, term, fromDate, toDate);
       card.style.display = match ? '' : 'none';
       if (match) colVisible++;
     });
@@ -171,15 +187,30 @@ function filterDash(q) {
     totalVisible += colVisible;
   });
 
+  // Archived shows
+  let archivedVisible = 0;
+  const archivedList = document.getElementById('archived-list');
+  if (archivedList) {
+    archivedList.querySelectorAll('.show-card.archived').forEach(card => {
+      const match = _cardMatchesFilter(card, term, fromDate, toDate);
+      card.style.display = match ? '' : 'none';
+      if (match) archivedVisible++;
+    });
+    if (hasFilter && archivedVisible > 0) {
+      archivedList.classList.remove('hidden');
+    }
+  }
+
   document.getElementById('dash-no-results').style.display =
-    (totalVisible === 0 && term) ? '' : 'none';
+    (totalVisible + archivedVisible === 0 && hasFilter) ? '' : 'none';
 }
 
 function clearSearch() {
-  const inp = document.getElementById('dash-search');
-  inp.value = '';
+  document.getElementById('dash-search').value = '';
+  const f = document.getElementById('dash-from'); if (f) f.value = '';
+  const t = document.getElementById('dash-to');   if (t) t.value = '';
   filterDash('');
-  inp.focus();
+  document.getElementById('dash-search').focus();
 }
 
 function toggleVenue(btn) {

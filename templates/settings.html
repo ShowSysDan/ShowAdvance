@@ -27,16 +27,10 @@
   <button class="tab-btn" onclick="switchSettingsTab('registrations')">
     Registrations{% if pending_regs %} <span style="background:var(--accent);color:#000;border-radius:99px;font-size:10px;padding:1px 6px;margin-left:4px">{{ pending_regs|length }}</span>{% endif %}
   </button>
-  <button class="tab-btn" onclick="switchSettingsTab('messages')">Messages</button>
-  <button class="tab-btn" onclick="switchSettingsTab('update')">Updates</button>
-  <button class="tab-btn" onclick="switchSettingsTab('syslog')">Syslog</button>
-  <button class="tab-btn" onclick="switchSettingsTab('backups')">Backups</button>
-  <button class="tab-btn" onclick="switchSettingsTab('files')">Files</button>
-  <button class="tab-btn" onclick="switchSettingsTab('database')">Database</button>
-  <button class="tab-btn" onclick="switchSettingsTab('ai')">AI</button>
+  <button class="tab-btn" onclick="switchSettingsTab('system')">System</button>
   <button class="tab-btn" onclick="switchSettingsTab('email')">Email</button>
-  <button class="tab-btn" onclick="switchSettingsTab('godmode')">God Mode</button>
   <a href="{{ url_for('audit_log_view') }}" class="tab-btn">Audit Log</a>
+  <button class="tab-btn" onclick="switchSettingsTab('dashboards')">Dashboards</button>
   {% endif %}
   <button class="tab-btn" onclick="switchSettingsTab('account')">My Account</button>
 </div>
@@ -481,6 +475,22 @@
     </div>
   </div>
 </div>
+
+{# ── SYSTEM TAB WRAPPER (admin only) ──────────────────────────────────────── #}
+{% if user.role == 'admin' %}
+<div id="stab-system" class="stab-pane" style="display:none">
+  <div class="tab-bar" style="margin-bottom:8px;flex-wrap:wrap">
+    <button class="tab-btn system-sub-btn active" data-stab="messages" onclick="switchSystemTab('messages')">Messages</button>
+    <button class="tab-btn system-sub-btn" data-stab="update" onclick="switchSystemTab('update')">Updates</button>
+    <button class="tab-btn system-sub-btn" data-stab="syslog" onclick="switchSystemTab('syslog')">Syslog</button>
+    <button class="tab-btn system-sub-btn" data-stab="backups" onclick="switchSystemTab('backups')">Backups</button>
+    <button class="tab-btn system-sub-btn" data-stab="files" onclick="switchSystemTab('files')">Files</button>
+    <button class="tab-btn system-sub-btn" data-stab="database" onclick="switchSystemTab('database')">Database</button>
+    <button class="tab-btn system-sub-btn" data-stab="ai" onclick="switchSystemTab('ai')">AI</button>
+    <button class="tab-btn system-sub-btn" data-stab="godmode" onclick="switchSystemTab('godmode')">God Mode</button>
+  </div>
+</div>
+{% endif %}
 
 {# ── SYSLOG (admin only) ───────────────────────────────────────────────────── #}
 {% if user.role == 'admin' %}
@@ -1311,6 +1321,23 @@
 </div>
 {% endif %}
 
+{# ── DASHBOARDS ────────────────────────────────────────────────────────────── #}
+{% if user.role == 'admin' %}
+<div id="stab-dashboards" class="stab-pane" style="display:none">
+  <div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> PUBLIC DASHBOARDS
+      <button class="btn btn-sm btn-secondary ml-auto" onclick="loadAdminDashboards()">Load</button>
+    </div>
+    <div class="form-section-body">
+      <div id="dashboards-table-wrap">
+        <p class="text-dim text-sm">Click "Load" to fetch public dashboards.</p>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {# ── MY ACCOUNT ────────────────────────────────────────────────────────────── #}
 <div id="stab-account" class="stab-pane" style="display:none">
   <div class="form-section">
@@ -1661,7 +1688,7 @@ function switchFieldsTab(name) {
 }
 
 /* ── Settings Tab Switcher ─────────────────────────────────────── */
-const ALL_STABS = ['contacts','users','groups','fields','positions','technicians','registrations','messages','update','syslog','backups','account','files','godmode','database','ai','email'];
+const ALL_STABS = ['contacts','users','groups','fields','positions','technicians','registrations','system','messages','update','syslog','backups','account','files','godmode','database','ai','email','dashboards'];
 
 function switchSettingsTab(name) {
   ALL_STABS.forEach(t => {
@@ -2033,7 +2060,7 @@ async function adminDeleteFile(showId, fileId, btn) {
   loadShowOptions();
   // Activate tab from URL hash or server-side default
   const hash = location.hash.replace('#','');
-  const validTabs = ['contacts','users','groups','fields','positions','technicians','syslog','backups','account','files','godmode','database','ai','email'];
+  const validTabs = ['contacts','users','groups','fields','positions','technicians','system','syslog','backups','account','files','godmode','database','ai','email','dashboards','messages','update'];
   const defaultTab = {% if user.role == 'admin' or is_content_admin %}'contacts'{% else %}'users'{% endif %};
   switchSettingsTab(validTabs.includes(hash) ? hash : {% if active_tab %}'{{ active_tab }}'{% else %}defaultTab{% endif %});
 })();
@@ -2841,17 +2868,123 @@ async function pollUpdateStatus() {
   }
 }
 
-// Auto-detect service on update tab open
+/* ── System sub-tab routing ─────────────────────────────────────── */
+const _SYSTEM_SUBS = ['messages','update','syslog','backups','files','database','ai','godmode'];
+let _curSystemSub = 'messages';
+
+function switchSystemTab(name) {
+  if (!_SYSTEM_SUBS.includes(name)) return;
+  _curSystemSub = name;
+  _SYSTEM_SUBS.forEach(t => {
+    const el = document.getElementById('stab-' + t);
+    if (el) el.style.display = 'none';
+  });
+  document.querySelectorAll('.system-sub-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.stab === name);
+  });
+  const el = document.getElementById('stab-' + name);
+  if (el) el.style.display = 'block';
+  history.replaceState({}, '', '#' + name);
+  if (name === 'messages') loadMessages();
+  if (name === 'update')   detectService();
+  if (name === 'syslog')   loadVenueAndRadioLists();
+  if (name === 'backups')  loadBackupStatus();
+  if (name === 'files')    loadFileManager();
+  if (name === 'godmode')  loadGodMode();
+}
+
 (function(){
   const origSwitch = window.switchSettingsTab;
   window.switchSettingsTab = function(name) {
+    if (_SYSTEM_SUBS.includes(name)) {
+      // Hide all system sub-panes, switch to system tab, open sub-tab
+      _SYSTEM_SUBS.forEach(t => {
+        const el = document.getElementById('stab-' + t);
+        if (el) el.style.display = 'none';
+      });
+      origSwitch('system');
+      switchSystemTab(name);
+      return;
+    }
+    // Hide system sub-panes when leaving system tab
+    _SYSTEM_SUBS.forEach(t => {
+      const el = document.getElementById('stab-' + t);
+      if (el) el.style.display = 'none';
+    });
     origSwitch(name);
     if (name === 'registrations') loadPendingRegs();
-    if (name === 'messages')      loadMessages();
-    if (name === 'update')        detectService();
-    if (name === 'syslog')        loadVenueAndRadioLists();
+    if (name === 'dashboards')    loadAdminDashboards();
+    if (name === 'system')        switchSystemTab(_curSystemSub);
   };
 })();
+
+/* ── Admin Dashboards ───────────────────────────────────────────── */
+async function loadAdminDashboards() {
+  const wrap = document.getElementById('dashboards-table-wrap');
+  if (!wrap) return;
+  wrap.innerHTML = '<p class="text-dim text-sm">Loading…</p>';
+  try {
+    const resp = await fetch('/api/admin/dashboards');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const data = await resp.json();
+    const dashboards = data.dashboards || data;
+    if (!Array.isArray(dashboards) || dashboards.length === 0) {
+      wrap.innerHTML = '<p class="text-dim text-sm">No public dashboards found.</p>';
+      return;
+    }
+    const origin = window.location.origin;
+    let html = `<table class="data-table" style="width:100%">
+      <thead><tr>
+        <th>NAME</th>
+        <th>OWNER</th>
+        <th>PUBLIC URL</th>
+        <th>LAYOUT</th>
+        <th>ACTIONS</th>
+      </tr></thead><tbody>`;
+    for (const d of dashboards) {
+      const publicUrl = d.public_url || '';
+      const urlCell = publicUrl
+        ? `<a href="${publicUrl}" target="_blank" rel="noopener" style="word-break:break-all;font-size:11px">${publicUrl}</a>
+           <button class="btn btn-xs btn-ghost" style="margin-left:6px"
+             onclick="navigator.clipboard.writeText(${JSON.stringify(publicUrl)}).then(()=>{this.textContent='Copied!';setTimeout(()=>this.textContent='Copy',2000)},()=>0)"
+           >Copy</button>`
+        : '<span class="text-dim">—</span>';
+      const viewLink = `<a href="/dashboards/${d.id}" class="btn btn-xs btn-ghost" target="_blank">View</a>`;
+      const makePrivateBtn = d.is_public ? `<button class="btn btn-xs btn-danger-ghost" style="margin-left:4px"
+        onclick="adminMakeDashboardPrivate(${d.id}, this)">Make Private</button>` : '';
+      html += `<tr>
+        <td>${escHtml(d.name || '')}</td>
+        <td>${escHtml(d.owner_name || d.username || '')}</td>
+        <td>${urlCell}</td>
+        <td class="text-dim">${escHtml(d.layout || '')}</td>
+        <td><div class="action-btns">${viewLink}${makePrivateBtn}</div></td>
+      </tr>`;
+    }
+    html += '</tbody></table>';
+    wrap.innerHTML = html;
+  } catch(e) {
+    wrap.innerHTML = `<p class="text-dim text-sm" style="color:var(--danger)">Error loading dashboards: ${e.message}</p>`;
+  }
+}
+
+async function adminMakeDashboardPrivate(id, btn) {
+  if (!confirm('Make this dashboard private? The public URL will stop working.')) return;
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+  try {
+    const resp = await fetch(`/api/admin/dashboards/${id}/make-private`, {method:'POST'});
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    loadAdminDashboards();
+  } catch(e) {
+    alert('Error: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Make Private';
+  }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 </script>
 
 <!-- Message Modal -->
