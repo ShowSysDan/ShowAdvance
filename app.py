@@ -191,7 +191,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.8.1'
+APP_VERSION = '2.9.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -864,12 +864,18 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         if not smtp_cfg.get('smtp_host'):
             return False, 'SMTP not configured.', 0
 
-    # Fetch recipients
+    # Fetch recipients based on pdf_type
     db = get_db()
+    if pdf_type == 'advance':
+        recip_col = 'advance_recipient'
+    elif pdf_type == 'schedule':
+        recip_col = 'production_recipient'
+    else:
+        recip_col = 'report_recipient'
     recipients = [
         r['email'] for r in
         db.execute(
-            "SELECT email FROM contacts WHERE report_recipient=1 AND email != '' ORDER BY name"
+            f"SELECT email FROM contacts WHERE ({recip_col}=1 OR report_recipient=1) AND email != '' ORDER BY name"
         ).fetchall()
     ]
     db.close()
@@ -3218,9 +3224,15 @@ def settings():
     ).fetchall() if _is_ca else []
     job_positions = [dict(p) for p in positions_raw]
 
-    # Crew members
+    # Crew members with rate level info
     crew_members_list = [dict(m) for m in db3.execute(
-        'SELECT * FROM crew_members ORDER BY sort_order, name'
+        '''SELECT cm.*, prl.name as level_name, prl.hourly_rate as level_rate
+           FROM crew_members cm
+           LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
+           ORDER BY cm.sort_order, cm.name'''
+    ).fetchall()] if _is_ca else []
+    pay_rate_levels = [dict(r) for r in db3.execute(
+        'SELECT * FROM pay_rate_levels ORDER BY sort_order, name'
     ).fetchall()] if _is_ca else []
     db3.close()
 
@@ -3275,6 +3287,7 @@ def settings():
         pending_regs = [dict(r) for r in db4.execute("""
             SELECT id, username, display_name, email, created_at, email_confirmed
             FROM user_pending_registration
+            WHERE admin_approved=0
             ORDER BY created_at
         """).fetchall()]
         db4.close()
@@ -3294,6 +3307,7 @@ def settings():
                            position_categories=position_categories,
                            job_positions=job_positions,
                            crew_members_list=crew_members_list,
+                           pay_rate_levels=pay_rate_levels,
                            wifi_network=all_settings.get('wifi_network', ''),
                            wifi_password=all_settings.get('wifi_password', ''),
                            upload_max_mb=all_settings.get('upload_max_mb', '20'),
@@ -3312,14 +3326,18 @@ def add_contact():
     db = get_db()
     name = request.form.get('name','').strip()
     cur = db.execute("""
-        INSERT INTO contacts (name, title, department, phone, email, report_recipient)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO contacts (name, title, department, phone, email,
+                              report_recipient, advance_recipient, production_recipient, system_recipient)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (name,
           request.form.get('title','').strip(),
           request.form.get('department','').strip(),
           request.form.get('phone','').strip(),
           request.form.get('email','').strip(),
-          1 if request.form.get('report_recipient') else 0))
+          1 if request.form.get('report_recipient') else 0,
+          1 if request.form.get('advance_recipient') else 0,
+          1 if request.form.get('production_recipient') else 0,
+          1 if request.form.get('system_recipient') else 0))
     cid_new = cur.lastrowid
     log_audit(db, 'CONTACT_ADD', 'contact', cid_new, detail=name)
     db.commit(); db.close()
@@ -3335,11 +3353,15 @@ def edit_contact(cid):
     db = get_db()
     db.execute("""
         UPDATE contacts SET name=?, title=?, department=?, phone=?, email=?,
-                            report_recipient=?
+                            report_recipient=?, advance_recipient=?, production_recipient=?, system_recipient=?
         WHERE id=?
     """, (data.get('name',''), data.get('title',''), data.get('department',''),
           data.get('phone',''), data.get('email',''),
-          1 if data.get('report_recipient') else 0, cid))
+          1 if data.get('report_recipient') else 0,
+          1 if data.get('advance_recipient') else 0,
+          1 if data.get('production_recipient') else 0,
+          1 if data.get('system_recipient') else 0,
+          cid))
     log_audit(db, 'CONTACT_EDIT', 'contact', cid, detail=data.get('name',''))
     db.commit(); db.close()
     syslog_logger.info(f"CONTACT_EDIT id={cid} name={data.get('name','')!r} by={session.get('username')}")
@@ -3397,6 +3419,33 @@ def add_user():
         flash('Username already exists.', 'error')
     db.close()
     return redirect(url_for('settings') + '#users')
+
+
+@app.route('/settings/users/<int:uid>/edit', methods=['POST'])
+@admin_required
+def edit_user(uid):
+    data = request.get_json(force=True) or {}
+    display_name = (data.get('display_name') or '').strip()
+    email = (data.get('email') or '').strip()
+    role = data.get('role', 'user')
+    is_readonly = 1 if data.get('is_readonly') else 0
+    if role not in ('user', 'staff', 'admin'):
+        return jsonify({'success': False, 'error': 'Invalid role'}), 400
+    db = get_db()
+    row = db.execute('SELECT username FROM users WHERE id=?', (uid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'User not found'}), 404
+    db.execute(
+        'UPDATE users SET display_name=?, email=?, role=?, is_readonly=? WHERE id=?',
+        (display_name or row['username'], email, role, is_readonly, uid)
+    )
+    log_audit(db, 'USER_EDIT', 'user', uid,
+              detail=f'role={role} readonly={is_readonly} by={session.get("username")}')
+    db.commit()
+    db.close()
+    syslog_logger.info(f"USER_EDIT user_id={uid} role={role} readonly={is_readonly} by={session.get('username')}")
+    return jsonify({'success': True})
 
 
 @app.route('/settings/users/<int:uid>/delete', methods=['POST'])
@@ -4366,6 +4415,61 @@ def save_wifi_settings():
     return jsonify({'success': True})
 
 
+@app.route('/settings/venues', methods=['GET', 'POST'])
+@admin_required
+def venues_settings():
+    db = get_db()
+    if request.method == 'POST':
+        data = request.get_json(force=True) or {}
+        venue_list = data.get('venue_list', [])
+        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('venue_list', ?)",
+                   (json.dumps(venue_list),))
+        # Sync position categories: ensure each venue has a matching category (is_venue=1)
+        existing = {r['name']: r['id'] for r in db.execute(
+            "SELECT id, name FROM position_categories WHERE is_venue=1"
+        ).fetchall()}
+        max_order = db.execute('SELECT COALESCE(MAX(sort_order), 0) FROM position_categories').fetchone()[0]
+        for i, venue in enumerate(venue_list):
+            if venue not in existing:
+                db.execute(
+                    "INSERT INTO position_categories (name, is_venue, sort_order) VALUES (?,1,?)",
+                    (venue, max_order + (i + 1) * 10)
+                )
+        # Remove orphaned venue categories (no longer in list)
+        for name, cid in existing.items():
+            if name not in venue_list:
+                db.execute("UPDATE position_categories SET is_venue=0 WHERE id=?", (cid,))
+        log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='venue_list')
+        db.commit(); db.close()
+        syslog_logger.info(f"SETTINGS_CHANGE detail=venue_list by={session.get('username')}")
+        return jsonify({'success': True})
+    else:
+        raw = db.execute("SELECT value FROM app_settings WHERE key='venue_list'").fetchone()
+        db.close()
+        venue_list = json.loads(raw['value']) if raw else []
+        return jsonify({'venue_list': venue_list})
+
+
+@app.route('/settings/radio-channels', methods=['GET', 'POST'])
+@admin_required
+def radio_channels_settings():
+    db = get_db()
+    if request.method == 'POST':
+        data = request.get_json(force=True) or {}
+        channel_list = data.get('channel_list', [])
+        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('radio_channel_list', ?)",
+                   (json.dumps(channel_list),))
+        log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='radio_channel_list')
+        db.commit(); db.close()
+        syslog_logger.info(f"SETTINGS_CHANGE detail=radio_channels by={session.get('username')}")
+        return jsonify({'success': True})
+    else:
+        raw = db.execute("SELECT value FROM app_settings WHERE key='radio_channel_list'").fetchone()
+        db.close()
+        channel_list = json.loads(raw['value']) if raw else []
+        return jsonify({'channel_list': channel_list})
+
+
 @app.route('/settings/logo', methods=['POST'])
 @admin_required
 def save_logo():
@@ -4828,13 +4932,17 @@ def save_pdf_email_settings():
 @admin_required
 def toggle_contact_recipient(cid):
     data = request.get_json(force=True) or {}
-    val  = 1 if data.get('recipient') else 0
-    db   = get_db()
-    db.execute('UPDATE contacts SET report_recipient=? WHERE id=?', (val, cid))
+    email_type = data.get('email_type', 'report')
+    val = 1 if data.get('recipient') else 0
+    allowed_cols = {'report': 'report_recipient', 'advance': 'advance_recipient',
+                    'production': 'production_recipient', 'system': 'system_recipient'}
+    col = allowed_cols.get(email_type, 'report_recipient')
+    db = get_db()
+    db.execute(f'UPDATE contacts SET {col}=? WHERE id=?', (val, cid))
     log_audit(db, 'CONTACT_RECIPIENT_TOGGLE', 'contact', cid,
-              detail=f"recipient={'yes' if val else 'no'}")
+              detail=f"type={email_type} recipient={'yes' if val else 'no'}")
     db.commit(); db.close()
-    syslog_logger.info(f"CONTACT_RECIPIENT_TOGGLE id={cid} recipient={'yes' if val else 'no'} by={session.get('username')}")
+    syslog_logger.info(f"CONTACT_RECIPIENT_TOGGLE id={cid} type={email_type} recipient={'yes' if val else 'no'} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -5132,9 +5240,11 @@ def add_job_position():
     category_id = data.get('category_id') or None
     db = get_db()
     max_order = db.execute('SELECT MAX(sort_order) FROM job_positions WHERE category_id IS ?', (category_id,)).fetchone()[0] or 0
+    override_rate = data.get('override_rate')
+    override_rate = float(override_rate) if override_rate not in (None, '') else None
     cur = db.execute(
-        'INSERT INTO job_positions (category_id, name, sort_order) VALUES (?, ?, ?)',
-        (category_id, name, max_order + 10)
+        'INSERT INTO job_positions (category_id, name, override_rate, sort_order) VALUES (?, ?, ?, ?)',
+        (category_id, name, override_rate, max_order + 10)
     )
     pid = cur.lastrowid
     log_audit(db, 'JOB_POSITION_ADD', 'job_position', pid, detail=name)
@@ -5152,10 +5262,12 @@ def edit_job_position(pid):
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     category_id = data.get('category_id') or None
+    override_rate = data.get('override_rate')
+    override_rate = float(override_rate) if override_rate not in (None, '') else None
     db = get_db()
     db.execute(
-        'UPDATE job_positions SET name=?, category_id=? WHERE id=?',
-        (name, category_id, pid)
+        'UPDATE job_positions SET name=?, category_id=?, override_rate=? WHERE id=?',
+        (name, category_id, override_rate, pid)
     )
     log_audit(db, 'JOB_POSITION_EDIT', 'job_position', pid, detail=name)
     db.commit()
@@ -5310,6 +5422,79 @@ def reorder_labor_requests(show_id):
 
 
 # ─── Labor Scheduler ─────────────────────────────────────────────────────────
+
+def _calc_labor_cost_for_show(db, show_id):
+    """Return labor line items and total cost for a show."""
+    rows = db.execute("""
+        SELECT lr.id, lr.work_date, lr.in_time, lr.out_time, lr.break_start, lr.break_end,
+               lr.is_scheduled, lr.scheduled_crew_member_id,
+               jp.name as position_name, jp.override_rate,
+               cm.name as tech_name,
+               prl.hourly_rate as level_rate, prl.name as level_name
+        FROM labor_requests lr
+        LEFT JOIN job_positions jp ON jp.id = lr.position_id
+        LEFT JOIN crew_members cm ON cm.id = lr.scheduled_crew_member_id
+        LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
+        WHERE lr.show_id = ?
+        ORDER BY lr.work_date, lr.sort_order
+    """, (show_id,)).fetchall()
+
+    lines = []
+    total = 0.0
+    for r in rows:
+        hours = _calc_hours(r['in_time'], r['out_time'], r['break_start'], r['break_end'])
+        rate = r['override_rate'] if r['override_rate'] is not None else (r['level_rate'] or 0)
+        cost = round(hours * rate, 2)
+        total += cost
+        lines.append({
+            'id': r['id'],
+            'work_date': r['work_date'],
+            'position_name': r['position_name'] or '',
+            'tech_name': r['tech_name'] or r['scheduled_crew_member_id'] or 'Unassigned',
+            'in_time': r['in_time'],
+            'out_time': r['out_time'],
+            'hours': round(hours, 2),
+            'hourly_rate': rate,
+            'line_total': cost,
+            'level_name': r['level_name'] or '',
+            'is_scheduled': bool(r['is_scheduled']),
+        })
+    return lines, round(total, 2)
+
+
+def _calc_hours(in_time, out_time, break_start=None, break_end=None):
+    """Calculate hours between in/out times, minus break duration."""
+    if not in_time or not out_time:
+        return 0.0
+    try:
+        from datetime import datetime as _dt
+        fmt = '%H:%M'
+        t_in  = _dt.strptime(in_time[:5],  fmt)
+        t_out = _dt.strptime(out_time[:5], fmt)
+        if t_out <= t_in:
+            t_out = t_out.replace(day=t_out.day + 1)
+        hours = (t_out - t_in).total_seconds() / 3600
+        if break_start and break_end:
+            t_bs = _dt.strptime(break_start[:5], fmt)
+            t_be = _dt.strptime(break_end[:5],   fmt)
+            if t_be > t_bs:
+                hours -= (t_be - t_bs).total_seconds() / 3600
+        return max(0.0, hours)
+    except Exception:
+        return 0.0
+
+
+@app.route('/shows/<int:show_id>/labor-cost')
+@login_required
+def show_labor_cost(show_id):
+    """Return labor cost breakdown for a show."""
+    if not can_access_show(session['user_id'], show_id):
+        return jsonify({'error': 'Access denied'}), 403
+    db = get_db()
+    lines, total = _calc_labor_cost_for_show(db, show_id)
+    db.close()
+    return jsonify({'lines': lines, 'total': total})
+
 
 @app.route('/labor-scheduler')
 @scheduler_required
@@ -5504,13 +5689,71 @@ def crew_tracker():
                            user=get_current_user())
 
 
+@app.route('/api/pay-rate-levels')
+@login_required
+def api_pay_rate_levels():
+    db = get_db()
+    levels = db.execute('SELECT * FROM pay_rate_levels ORDER BY sort_order, name').fetchall()
+    db.close()
+    return jsonify([dict(l) for l in levels])
+
+
+@app.route('/settings/pay-rate-levels/add', methods=['POST'])
+@admin_required
+def add_pay_rate_level():
+    data = request.get_json(force=True) or {}
+    name = data.get('name', '').strip()
+    rate = float(data.get('hourly_rate') or 0)
+    if not name:
+        return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    db = get_db()
+    max_order = db.execute('SELECT COALESCE(MAX(sort_order),0) FROM pay_rate_levels').fetchone()[0]
+    cur = db.execute('INSERT INTO pay_rate_levels (name, hourly_rate, sort_order) VALUES (?,?,?)',
+                     (name, rate, max_order + 10))
+    lid = cur.lastrowid
+    log_audit(db, 'PAY_LEVEL_ADD', 'pay_rate_level', lid, detail=f'{name} ${rate}/hr')
+    db.commit(); db.close()
+    syslog_logger.info(f"PAY_LEVEL_ADD id={lid} name={name!r} rate={rate} by={session.get('username')}")
+    return jsonify({'success': True, 'id': lid, 'name': name, 'hourly_rate': rate})
+
+
+@app.route('/settings/pay-rate-levels/<int:lid>/edit', methods=['POST'])
+@admin_required
+def edit_pay_rate_level(lid):
+    data = request.get_json(force=True) or {}
+    name = data.get('name', '').strip()
+    rate = float(data.get('hourly_rate') or 0)
+    if not name:
+        return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    db = get_db()
+    db.execute('UPDATE pay_rate_levels SET name=?, hourly_rate=? WHERE id=?', (name, rate, lid))
+    log_audit(db, 'PAY_LEVEL_EDIT', 'pay_rate_level', lid, detail=f'{name} ${rate}/hr')
+    db.commit(); db.close()
+    syslog_logger.info(f"PAY_LEVEL_EDIT id={lid} name={name!r} rate={rate} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/settings/pay-rate-levels/<int:lid>/delete', methods=['POST'])
+@admin_required
+def delete_pay_rate_level(lid):
+    db = get_db()
+    db.execute('DELETE FROM pay_rate_levels WHERE id=?', (lid,))
+    log_audit(db, 'PAY_LEVEL_DELETE', 'pay_rate_level', lid)
+    db.commit(); db.close()
+    syslog_logger.info(f"PAY_LEVEL_DELETE id={lid} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
 @app.route('/api/crew-members')
 @login_required
 def api_crew_members():
     db = get_db()
-    members = db.execute(
-        'SELECT * FROM crew_members ORDER BY sort_order, name'
-    ).fetchall()
+    members = db.execute("""
+        SELECT cm.*, prl.name as level_name, prl.hourly_rate as level_rate
+        FROM crew_members cm
+        LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
+        ORDER BY cm.sort_order, cm.name
+    """).fetchall()
     quals = db.execute('SELECT crew_member_id, position_id FROM crew_qualifications').fetchall()
     qual_map = {}
     for q in quals:
@@ -5532,18 +5775,27 @@ def add_crew_member():
     name = data.get('name', '').strip()
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
+    rate_level_id = data.get('rate_level_id') or None
     db = get_db()
     max_order = db.execute('SELECT MAX(sort_order) FROM crew_members').fetchone()[0] or 0
     cur = db.execute(
-        'INSERT INTO crew_members (name, sort_order) VALUES (?, ?)',
-        (name, max_order + 10)
+        'INSERT INTO crew_members (name, rate_level_id, sort_order) VALUES (?, ?, ?)',
+        (name, rate_level_id, max_order + 10)
     )
     mid = cur.lastrowid
     log_audit(db, 'CREW_MEMBER_ADD', 'crew_member', mid, detail=name)
     db.commit()
+    level_row = db.execute(
+        'SELECT name, hourly_rate FROM pay_rate_levels WHERE id=?', (rate_level_id,)
+    ).fetchone() if rate_level_id else None
     db.close()
     syslog_logger.info(f"TECHNICIAN_ADD id={mid} name={name!r} by={session.get('username')}")
-    return jsonify({'success': True, 'id': mid, 'name': name})
+    return jsonify({
+        'success': True, 'id': mid, 'name': name,
+        'rate_level_id': rate_level_id,
+        'level_name': level_row['name'] if level_row else None,
+        'level_rate': level_row['hourly_rate'] if level_row else None,
+    })
 
 
 @app.route('/settings/crew-members/<int:mid>/edit', methods=['POST'])
@@ -5554,12 +5806,20 @@ def edit_crew_member(mid):
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     db = get_db()
-    db.execute('UPDATE crew_members SET name=? WHERE id=?', (name, mid))
+    rate_level_id = data.get('rate_level_id') or None
+    db.execute('UPDATE crew_members SET name=?, rate_level_id=? WHERE id=?', (name, rate_level_id, mid))
     log_audit(db, 'CREW_MEMBER_EDIT', 'crew_member', mid, detail=name)
     db.commit()
+    level_row = db.execute(
+        'SELECT name, hourly_rate FROM pay_rate_levels WHERE id=?', (rate_level_id,)
+    ).fetchone() if rate_level_id else None
     db.close()
     syslog_logger.info(f"TECHNICIAN_EDIT id={mid} name={name!r} by={session.get('username')}")
-    return jsonify({'success': True})
+    return jsonify({
+        'success': True,
+        'level_name': level_row['name'] if level_row else None,
+        'level_rate': level_row['hourly_rate'] if level_row else None,
+    })
 
 
 @app.route('/settings/crew-members/<int:mid>/delete', methods=['POST'])
@@ -5824,8 +6084,8 @@ def asset_type_add():
         INSERT INTO asset_types
           (category_id, parent_type_id, name, manufacturer, model,
            storage_location, rental_cost, weekly_rate, reserve_count, is_consumable, track_quantity,
-           supplier_name, supplier_contact, is_system, is_package, sort_order)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+           supplier_name, supplier_contact, is_system, is_package, hide_from_pm, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         category_id,
         data.get('parent_type_id') or None,
@@ -5842,6 +6102,7 @@ def asset_type_add():
         (data.get('supplier_contact') or '').strip(),
         1 if data.get('is_system') else 0,
         1 if data.get('is_package') else 0,
+        1 if data.get('hide_from_pm') else 0,
         max_order + 1,
     ))
     db.commit()
@@ -5868,7 +6129,7 @@ def asset_type_edit(type_id):
           name=?, manufacturer=?, model=?, storage_location=?,
           rental_cost=?, weekly_rate=?, reserve_count=?, is_consumable=?, track_quantity=?,
           supplier_name=?, supplier_contact=?,
-          category_id=?, parent_type_id=?, is_system=?, is_package=?
+          category_id=?, parent_type_id=?, is_system=?, is_package=?, hide_from_pm=?
         WHERE id=?
     """, (
         name,
@@ -5886,6 +6147,7 @@ def asset_type_edit(type_id):
         data.get('parent_type_id') or None,
         1 if data.get('is_system') else 0,
         1 if data.get('is_package') else 0,
+        1 if data.get('hide_from_pm') else 0,
         type_id,
     ))
     db.commit()
@@ -6406,9 +6668,12 @@ def asset_type_availability(type_id):
 
 
 @app.route('/api/assets/availability')
-@login_required
 def assets_availability_bulk():
-    """Return availability summary for all asset types, plus by-show data."""
+    """Return availability summary for all asset types, plus by-show data.
+
+    Accessible without login for public dashboards; access control applied
+    to the by-show section only when a user is logged in.
+    """
     date_from = request.args.get('from')
     date_to   = request.args.get('to')
     db = get_db()
@@ -6424,7 +6689,11 @@ def assets_availability_bulk():
                 'available':   info.get('available'),
             }
 
-    # By-show summary (for 'by_show' layout) — respect access control
+    # By-show summary (for 'by_show' layout) — requires login for access control
+    if not session.get('user_id'):
+        db.close()
+        return jsonify({'by_type': by_type, 'by_show': []})
+
     accessible_ids = get_accessible_shows(session['user_id'])  # None = all, [] = none, list = specific
     params = []
     where  = []
@@ -6523,7 +6792,7 @@ def show_asset_add(show_id):
     rental_end   = data.get('rental_end')   or default_end
 
     # Smart rate: weekly if weekly_rate set and rental >= 7 days, else daily × days
-    type_row = db.execute('SELECT rental_cost, weekly_rate FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
+    type_row = db.execute('SELECT rental_cost, weekly_rate, hide_from_pm FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
     if data.get('locked_price') is not None:
         locked_price = float(data['locked_price'])
     elif type_row:
@@ -6542,7 +6811,8 @@ def show_asset_add(show_id):
     else:
         locked_price = 0.0
 
-    is_hidden = 1 if data.get('is_hidden') else 0
+    # Default is_hidden from the asset type's hide_from_pm flag
+    is_hidden = 1 if (type_row and type_row['hide_from_pm']) else 0
 
     db.execute("""
         INSERT INTO show_assets
@@ -6785,7 +7055,46 @@ def assets_retired():
                            user=get_current_user())
 
 
-# ─── Asset Invoice PDF ───────────────────────────────────────────────────────
+def _merge_pdfs(base_pdf_bytes, extra_pdfs):
+    """Append extra PDF byte-strings to base_pdf_bytes using pdfrw. Returns merged bytes."""
+    try:
+        from pdfrw import PdfReader, PdfWriter
+        from io import BytesIO
+        writer = PdfWriter()
+        writer.addpages(PdfReader(fdata=base_pdf_bytes).pages)
+        for extra in extra_pdfs:
+            if extra:
+                try:
+                    writer.addpages(PdfReader(fdata=extra).pages)
+                except Exception as e:
+                    app.logger.warning(f'PDF merge: skipping page set due to error: {e}')
+        buf = BytesIO()
+        writer.write(buf)
+        return buf.getvalue()
+    except Exception as e:
+        app.logger.error(f'PDF merge failed: {e}')
+        return base_pdf_bytes
+
+
+def _fetch_external_rental_pdfs(db, show_id):
+    """Return list of PDF byte-strings for all external rentals that have attached PDFs."""
+    rows = db.execute(
+        'SELECT id, s3_key, pdf_data FROM show_external_rentals WHERE show_id=? ORDER BY sort_order',
+        (show_id,)
+    ).fetchall()
+    result = []
+    for row in rows:
+        if row['s3_key']:
+            try:
+                result.append(s3_storage.download_file(row['s3_key']))
+            except Exception as e:
+                app.logger.warning(f'Could not fetch external rental PDF from S3 (id={row["id"]}): {e}')
+        elif row['pdf_data']:
+            result.append(bytes(row['pdf_data']))
+    return result
+
+
+
 
 @app.route('/shows/<int:show_id>/assets/invoice.pdf')
 @login_required
@@ -6828,7 +7137,6 @@ def show_asset_invoice(show_id):
     assets_subtotal  = sum((a['locked_price'] or 0) * a['quantity'] for a in assets_list)
     external_subtotal = sum(e['cost'] or 0 for e in ext_list)
     grand_total = assets_subtotal + external_subtotal
-    db.close()
 
     html_str = render_template(
         'pdf/asset_invoice_pdf.html',
@@ -6849,10 +7157,96 @@ def show_asset_invoice(show_id):
         app.logger.error(f'WeasyPrint invoice error: {e}')
         return f'PDF generation failed: {e}', 500
 
+    # Append any uploaded external rental PDFs
+    er_pdfs = _fetch_external_rental_pdfs(db, show_id)
+    if er_pdfs:
+        pdf_bytes = _merge_pdfs(pdf_bytes, er_pdfs)
+    db.close()
+
     safe_name = secure_filename(show['name'] or f'show_{show_id}')
     resp = make_response(pdf_bytes)
     resp.headers['Content-Type'] = 'application/pdf'
     resp.headers['Content-Disposition'] = _safe_content_disposition(f'{safe_name}_invoice.pdf')
+    return resp
+
+
+# ─── Post-Show Combined Invoice PDF ──────────────────────────────────────────
+
+@app.route('/shows/<int:show_id>/post-show-invoice.pdf')
+@login_required
+def show_post_invoice(show_id):
+    """Generate a combined PDF invoice for show assets, external rentals, and labor."""
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    db = get_db()
+    show = db.execute('SELECT * FROM shows WHERE id=?', (show_id,)).fetchone()
+    if not show:
+        db.close()
+        abort(404)
+
+    assets = db.execute("""
+        SELECT sa.quantity, sa.locked_price, sa.rental_start, sa.rental_end, sa.notes,
+               at.name as type_name, at.manufacturer, at.model,
+               ac.name as category_name
+        FROM show_assets sa
+        JOIN asset_types at ON at.id = sa.asset_type_id
+        JOIN asset_categories ac ON ac.id = at.category_id
+        WHERE sa.show_id = ? AND sa.is_hidden = 0
+        ORDER BY ac.sort_order, at.name
+    """, (show_id,)).fetchall()
+
+    external_rentals = db.execute("""
+        SELECT description, cost, pdf_filename
+        FROM show_external_rentals
+        WHERE show_id = ?
+        ORDER BY sort_order
+    """, (show_id,)).fetchall()
+
+    perf_company_row = db.execute(
+        "SELECT field_value FROM advance_data WHERE show_id=? AND field_key='performance_company'",
+        (show_id,)
+    ).fetchone()
+    performance_company = perf_company_row['field_value'] if perf_company_row else ''
+
+    assets_list = [dict(a) for a in assets]
+    ext_list    = [dict(e) for e in external_rentals]
+    assets_subtotal   = sum((a['locked_price'] or 0) * a['quantity'] for a in assets_list)
+    external_subtotal = sum(e['cost'] or 0 for e in ext_list)
+
+    labor_lines, labor_total = _calc_labor_cost_for_show(db, show_id)
+    er_pdfs = _fetch_external_rental_pdfs(db, show_id)
+    db.close()
+
+    grand_total = assets_subtotal + external_subtotal + labor_total
+
+    html_str = render_template(
+        'pdf/post_show_invoice_pdf.html',
+        show=dict(show),
+        assets=assets_list,
+        external_rentals=ext_list,
+        assets_subtotal=assets_subtotal,
+        external_subtotal=external_subtotal,
+        labor_lines=labor_lines,
+        labor_total=labor_total,
+        grand_total=grand_total,
+        performance_company=performance_company,
+        generated_date=date.today().isoformat(),
+    )
+
+    try:
+        from weasyprint import HTML as WP_HTML
+        pdf_bytes = WP_HTML(string=html_str, base_url=request.host_url).write_pdf()
+    except Exception as e:
+        app.logger.error(f'WeasyPrint post-invoice error: {e}')
+        return f'PDF generation failed: {e}', 500
+
+    if er_pdfs:
+        pdf_bytes = _merge_pdfs(pdf_bytes, er_pdfs)
+
+    safe_name = secure_filename(show['name'] or f'show_{show_id}')
+    resp = make_response(pdf_bytes)
+    resp.headers['Content-Type'] = 'application/pdf'
+    resp.headers['Content-Disposition'] = _safe_content_disposition(f'{safe_name}_post_show_invoice.pdf')
     return resp
 
 
@@ -7200,7 +7594,7 @@ def pending_registrations():
     db = get_db()
     rows = db.execute("""
         SELECT * FROM user_pending_registration
-        WHERE email_confirmed=1 AND admin_approved=0
+        WHERE admin_approved=0
         ORDER BY created_at
     """).fetchall()
     db.close()
@@ -7677,6 +8071,39 @@ def dashboard_delete(dash_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/admin/dashboards/<int:dash_id>/make-private', methods=['POST'])
+@admin_required
+def api_admin_dashboard_make_private(dash_id):
+    db = get_db()
+    db.execute('UPDATE asset_dashboards SET is_public=0, public_slug=NULL WHERE id=?', (dash_id,))
+    db.commit()
+    db.close()
+    syslog_logger.info(f"DASHBOARD_MADE_PRIVATE id={dash_id} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/api/admin/dashboards')
+@admin_required
+def api_admin_dashboards():
+    """Admin: list all dashboards with owner and public URL info."""
+    db = get_db()
+    rows = db.execute("""
+        SELECT d.id, d.name, d.is_public, d.public_slug, d.layout,
+               d.created_at, d.updated_at, u.display_name as owner_name, u.username
+        FROM asset_dashboards d
+        JOIN users u ON u.id = d.user_id
+        ORDER BY d.is_public DESC, d.name
+    """).fetchall()
+    db.close()
+    host = request.host_url.rstrip('/')
+    result = []
+    for r in rows:
+        row = dict(r)
+        row['public_url'] = f"{host}/d/{r['public_slug']}" if r['is_public'] and r['public_slug'] else None
+        result.append(row)
+    return jsonify(result)
+
+
 @app.route('/d/<slug>')
 def public_dashboard(slug):
     """Public dashboard — no login required."""
@@ -7717,16 +8144,31 @@ def asset_reports():
         WHERE ad.field_key = 'performance_company' AND ad.field_value != ''
         ORDER BY ad.field_value
     """).fetchall()
+    venues = db.execute("""
+        SELECT DISTINCT venue FROM shows WHERE venue != '' ORDER BY venue
+    """).fetchall()
+    asset_categories = db.execute(
+        'SELECT id, name FROM asset_categories ORDER BY sort_order, name'
+    ).fetchall()
+    asset_types = db.execute(
+        'SELECT id, name, category_id FROM asset_types WHERE is_retired=0 ORDER BY name'
+    ).fetchall()
     db.close()
     return render_template('asset_reports.html',
                            companies=[r['company'] for r in companies],
+                           venues=[r['venue'] for r in venues],
+                           asset_categories=[dict(r) for r in asset_categories],
+                           asset_types=[dict(r) for r in asset_types],
                            user=get_current_user())
 
 
 @app.route('/api/reports/assets')
 @admin_required
 def asset_reports_data():
-    company = request.args.get('company', '')
+    company   = request.args.get('company', '')
+    venue     = request.args.get('venue', '')
+    asset_type_id = request.args.get('asset_type_id', '')
+    asset_category_id = request.args.get('asset_category_id', '')
     date_from = request.args.get('from', '')
     date_to   = request.args.get('to', '')
     db = get_db()
@@ -7743,6 +8185,18 @@ def asset_reports_data():
         """)
         params.append(company)
 
+    if venue:
+        where.append("s.venue = ?")
+        params.append(venue)
+
+    if asset_type_id:
+        where.append("sa.asset_type_id = ?")
+        params.append(int(asset_type_id))
+
+    if asset_category_id:
+        where.append("at.category_id = ?")
+        params.append(int(asset_category_id))
+
     if date_from:
         where.append("COALESCE(s.show_date, '9999') >= ?")
         params.append(date_from)
@@ -7754,9 +8208,9 @@ def asset_reports_data():
 
     rows = db.execute(f"""
         SELECT sa.id, sa.quantity, sa.locked_price, sa.rental_start, sa.rental_end,
-               at.name as type_name, at.manufacturer, at.model,
-               ac.name as category_name,
-               s.id as show_id, s.name as show_name, s.show_date,
+               at.id as asset_type_id, at.name as type_name, at.manufacturer, at.model,
+               ac.id as category_id, ac.name as category_name,
+               s.id as show_id, s.name as show_name, s.show_date, s.venue,
                (sa.quantity * sa.locked_price) as line_total,
                (SELECT field_value FROM advance_data
                 WHERE show_id=s.id AND field_key='performance_company') as performance_company
