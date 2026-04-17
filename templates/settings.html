@@ -134,7 +134,7 @@
     {% if user.role == 'admin' %}
     <div class="form-section-body" style="border-bottom:1px solid var(--border)">
       <h3 class="sub-section-label">ADD USER</h3>
-      <form method="post" action="{{ url_for('add_user') }}" class="form-row align-end" style="flex-wrap:wrap;gap:10px">
+      <form id="add-user-form" method="post" action="{{ url_for('add_user') }}" class="form-row align-end" style="flex-wrap:wrap;gap:10px" onsubmit="return handleAddUserSubmit(this)">
         <div class="field-group" style="min-width:120px;flex:1">
           <label class="field-label">USERNAME *</label>
           <input type="text" name="username" class="field-input" required placeholder="jsmith">
@@ -153,18 +153,14 @@
         </div>
         <div class="field-group" style="min-width:160px;flex:1">
           <label class="field-label">ROLE</label>
-          <select name="role" class="field-input">
+          <select name="role" id="add-user-role" class="field-input">
             <option value="user">User — view &amp; edit shows</option>
             <option value="staff">Staff — + manage technicians, contacts &amp; form fields</option>
             <option value="admin">Admin — full access</option>
+            <option value="readonly">Read-only — view access only, no edits</option>
           </select>
         </div>
-        <div class="field-group" style="min-width:100px;justify-content:flex-end">
-          <label class="field-label" style="visibility:hidden">_</label>
-          <label class="checkbox-label" style="white-space:nowrap">
-            <input type="checkbox" name="is_readonly"> Read-only
-          </label>
-        </div>
+        <input type="hidden" name="is_readonly" id="add-user-is-readonly" value="0">
         <button type="submit" class="btn btn-primary" style="align-self:flex-end">Add User</button>
       </form>
     </div>
@@ -178,8 +174,7 @@
             <td>{{ u.display_name or u.username }}</td>
             <td class="mono text-sm">{{ u.username }}</td>
             <td>
-              <span class="role-badge role-{{ u.role }}">{{ u.role.upper() }}</span>
-              {% if u.is_readonly %}<span style="font-size:9px;background:rgba(148,163,184,.15);color:#94A3B8;border:1px solid rgba(148,163,184,.3);border-radius:99px;padding:2px 6px;margin-left:4px;font-weight:600">READ-ONLY</span>{% endif %}
+              <span class="role-badge role-{{ u.role }}">{% if u.is_readonly %}Read-only{% else %}{{ u.role }}{% endif %}</span>
             </td>
             <td class="text-dim text-sm">{{ (u.created_at|string)[:10] if u.created_at else '—' }}</td>
             <td>
@@ -572,23 +567,7 @@
     </div>
   </div>
 
-  <div class="form-section" style="margin-bottom:16px">
-    <div class="form-section-header"><span class="section-icon">◈</span> VENUE LIST</div>
-    <div class="form-section-body">
-      <p class="text-dim" style="font-size:12px;margin-bottom:12px">
-        One venue per line. These become top-level categories for job positions and appear in the Skill Tracker.
-        Saving automatically creates matching position categories.
-      </p>
-      <div class="field-group" style="max-width:360px">
-        <label class="field-label">VENUES (one per line)</label>
-        <textarea id="venue-list-input" class="field-input field-textarea" rows="6" placeholder="Judson's Live&#10;Steinmetz Hall&#10;Seneff Arts Education Center"></textarea>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
-        <button class="btn btn-primary" onclick="saveVenueList()">Save Venue List</button>
-        <span id="venue-save-msg" class="field-msg"></span>
-      </div>
-    </div>
-  </div>
+  <p class="text-dim text-sm" style="padding:12px 0">Venue list is managed in the <strong>Job Positions</strong> tab.</p>
 
   <div class="form-section" style="margin-bottom:16px">
     <div class="form-section-header"><span class="section-icon">◈</span> RADIO CHANNELS</div>
@@ -920,6 +899,24 @@
 {% if user.role == 'admin' or is_content_admin %}
 <div id="stab-positions" class="stab-pane" style="display:none">
 
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header"><span class="section-icon">◈</span> VENUE LIST</div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">
+        One venue per line. These become top-level categories for job positions and appear in the Skill Tracker.
+        Saving automatically creates matching position categories.
+      </p>
+      <div class="field-group" style="max-width:360px">
+        <label class="field-label">VENUES (one per line)</label>
+        <textarea id="venue-list-input" class="field-input field-textarea" rows="6" placeholder="Judson's Live&#10;Steinmetz Hall&#10;Seneff Arts Education Center"></textarea>
+      </div>
+      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
+        <button class="btn btn-primary" onclick="saveVenueList()">Save Venue List</button>
+        <span id="venue-save-msg" class="field-msg"></span>
+      </div>
+    </div>
+  </div>
+
   <div style="display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start">
 
     {# Left: categories #}
@@ -929,7 +926,7 @@
         <span class="section-count ml-auto text-dim">{{ position_categories|length }}</span>
       </div>
       <div class="form-section-body" style="border-bottom:1px solid var(--border)">
-        <p class="text-dim" style="font-size:11px;margin-bottom:10px">Venue categories sync from Settings → Syslog → Venue List. Add generic categories here.</p>
+        <p class="text-dim" style="font-size:11px;margin-bottom:10px">Venue categories sync from the Venue List above. Add generic categories here.</p>
         <h3 class="sub-section-label">ADD CATEGORY</h3>
         <div style="display:flex;gap:8px">
           <input type="text" id="new-cat-name" class="field-input" placeholder="Generic category name" style="flex:1">
@@ -1656,13 +1653,8 @@
           <option value="user">User — view &amp; edit shows</option>
           <option value="staff">Staff — + manage technicians, contacts &amp; form fields</option>
           <option value="admin">Admin — full access</option>
+          <option value="readonly">Read-only — view access only, no edits</option>
         </select>
-      </div>
-      <div class="field-group">
-        <label class="checkbox-label">
-          <input type="checkbox" id="edit-user-readonly">
-          Read-only (view access only, no edits)
-        </label>
       </div>
       <div id="edit-user-msg" style="color:#FC8181;font-size:12px;display:none"></div>
     </div>
@@ -1789,20 +1781,32 @@ function openEditUser(id, name, email, role, isReadonly) {
   document.getElementById('edit-user-id').value = id;
   document.getElementById('edit-user-name').value = name;
   document.getElementById('edit-user-email').value = email;
-  document.getElementById('edit-user-role').value = role;
-  document.getElementById('edit-user-readonly').checked = !!isReadonly;
+  document.getElementById('edit-user-role').value = isReadonly ? 'readonly' : role;
   document.getElementById('edit-user-msg').style.display = 'none';
   document.getElementById('edit-user-modal').style.display = 'flex';
 }
 function closeEditUser() { document.getElementById('edit-user-modal').style.display = 'none'; }
 
+function handleAddUserSubmit(form) {
+  const roleSelect = document.getElementById('add-user-role');
+  const isReadonlyInput = document.getElementById('add-user-is-readonly');
+  if (roleSelect.value === 'readonly') {
+    roleSelect.value = 'user';
+    isReadonlyInput.value = '1';
+  } else {
+    isReadonlyInput.value = '0';
+  }
+  return true;
+}
+
 async function saveEditUser() {
   const id = document.getElementById('edit-user-id').value;
+  const selectedRole = document.getElementById('edit-user-role').value;
   const payload = {
     display_name: document.getElementById('edit-user-name').value.trim(),
     email: document.getElementById('edit-user-email').value.trim(),
-    role: document.getElementById('edit-user-role').value,
-    is_readonly: document.getElementById('edit-user-readonly').checked,
+    role: selectedRole === 'readonly' ? 'user' : selectedRole,
+    is_readonly: selectedRole === 'readonly',
   };
   const resp = await fetch(`/settings/users/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'},

@@ -2283,6 +2283,7 @@ async function applyAiSuggestions() {
         }
       });
       closeAiExtract();
+      if (typeof syncAdvanceSectionVisibility === 'function') syncAdvanceSectionVisibility();
       const statusEl = document.getElementById('save-status');
       if (statusEl) {
         const count = Object.keys(payload).length;
