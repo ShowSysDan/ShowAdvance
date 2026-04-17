@@ -3247,9 +3247,10 @@ def settings():
         'pg_shared_schema': all_settings.get('pg_shared_schema', 'shared'),
     }
     ai_settings = {
-        'ollama_enabled': all_settings.get('ollama_enabled', '0'),
-        'ollama_url':     all_settings.get('ollama_url', 'http://localhost:11434'),
-        'ollama_model':   all_settings.get('ollama_model', 'llama3.2'),
+        'ollama_enabled':   all_settings.get('ollama_enabled', '0'),
+        'ollama_url':       all_settings.get('ollama_url', 'http://localhost:11434'),
+        'ollama_model':     all_settings.get('ollama_model', 'llama3.2'),
+        'ai_system_prompt': all_settings.get('ai_system_prompt', ''),
     }
     _is_admin = session.get('user_role') == 'admin'
     smtp_settings = {
@@ -4772,7 +4773,7 @@ def _validate_ollama_url(url):
 def save_ai_settings():
     data = request.get_json(force=True) or {}
     db = get_db()
-    for key in ('ollama_enabled', 'ollama_url', 'ollama_model', 'ai_max_sessions'):
+    for key in ('ollama_enabled', 'ollama_url', 'ollama_model', 'ai_max_sessions', 'ai_system_prompt'):
         if key in data:
             db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
                        (key, str(data[key])))
@@ -5084,11 +5085,17 @@ def _ai_extract_impl(show_id):
     field_map = {r['field_key']: {'label': r['label'], 'hint': r['ai_hint']} for r in field_rows}
     field_schema = {k: v['hint'] for k, v in field_map.items()}
 
-    # Build prompt
-    prompt = (
-        'You are extracting information from a document to populate a form. '
+    # Build prompt — custom system prompt prefix overrides the default if set
+    _default_system = (
+        'You are extracting information from a document to populate a show advance form for a live event. '
+        'The document may be a technical rider, production spec sheet, artist contract, or similar. '
         'Return ONLY valid JSON — no explanation, no markdown, just the JSON object. '
-        'Use null for fields where the information is not found in the document. '
+        'Use null for fields where the information is not found in the document.'
+    )
+    _custom_system = get_app_setting('ai_system_prompt', '').strip()
+    system_prefix = _custom_system if _custom_system else _default_system
+    prompt = (
+        f'{system_prefix}\n\n'
         f'Fields to extract (key: description): {json.dumps(field_schema)}\n\n'
         f'Document text:\n{doc_text[:8000]}'
     )
@@ -7089,18 +7096,28 @@ def _merge_pdfs(base_pdf_bytes, extra_pdfs):
 def _fetch_external_rental_pdfs(db, show_id):
     """Return list of PDF byte-strings for all external rentals that have attached PDFs."""
     rows = db.execute(
-        'SELECT id, s3_key, pdf_data FROM show_external_rentals WHERE show_id=? ORDER BY sort_order',
+        'SELECT id, s3_key, pdf_data, pdf_filename FROM show_external_rentals WHERE show_id=? ORDER BY sort_order',
         (show_id,)
     ).fetchall()
     result = []
     for row in rows:
+        if not row['pdf_filename']:
+            continue  # no PDF was ever attached to this rental
         if row['s3_key']:
             try:
                 result.append(s3_storage.download_file(row['s3_key']))
             except Exception as e:
-                app.logger.warning(f'Could not fetch external rental PDF from S3 (id={row["id"]}): {e}')
+                app.logger.error(
+                    f'PDF merge: S3 download failed for external_rental id={row["id"]} '
+                    f'key={row["s3_key"]!r}: {e}'
+                )
         elif row['pdf_data']:
             result.append(bytes(row['pdf_data']))
+        else:
+            app.logger.warning(
+                f'PDF merge: external_rental id={row["id"]} has pdf_filename={row["pdf_filename"]!r} '
+                f'but no s3_key and no pdf_data — PDF was lost (run S3 migration or re-upload)'
+            )
     return result
 
 

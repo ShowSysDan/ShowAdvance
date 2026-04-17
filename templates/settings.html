@@ -792,6 +792,18 @@
       </div>
 
       <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
+      <h3 class="sub-section-label">SYSTEM PROMPT</h3>
+      <p class="field-hint">Instructions sent to the AI before every extraction. Leave blank to use the default. The field list and document text are always appended automatically — don't include them here.</p>
+      <div class="field-group">
+        <label class="field-label">CUSTOM SYSTEM PROMPT</label>
+        <textarea id="ai-system-prompt" class="field-input field-textarea" rows="5"
+          placeholder="You are extracting information from a document to populate a show advance form for a live event. The document may be a technical rider, production spec sheet, artist contract, or similar. Return ONLY valid JSON — no explanation, no markdown, just the JSON object. Use null for fields where the information is not found in the document.">{{ ai_settings.ai_system_prompt or '' }}</textarea>
+      </div>
+      <div style="margin-top:8px">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ai-system-prompt').value=''">Reset to Default</button>
+      </div>
+
+      <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
       <h3 class="sub-section-label">AI SESSION CONCURRENCY</h3>
       <p class="field-hint">Limit how many AI extraction jobs can run simultaneously across all Gunicorn workers. Recommended: 1–2.</p>
       <div class="field-group">
@@ -2125,6 +2137,7 @@ async function saveAiSettings() {
     ollama_enabled: document.getElementById('ollama-enabled').checked ? '1' : '0',
     ollama_url: document.getElementById('ollama-url').value,
     ollama_model: document.getElementById('ollama-model').value,
+    ai_system_prompt: document.getElementById('ai-system-prompt').value,
   };
   try {
     const resp = await fetch('/settings/ai', {
@@ -2640,6 +2653,7 @@ async function saveAiSessions() {
     body: JSON.stringify({ ollama_enabled: document.getElementById('ollama-enabled').checked ? '1':'0',
                            ollama_url: document.getElementById('ollama-url').value.trim(),
                            ollama_model: document.getElementById('ollama-model').value.trim(),
+                           ai_system_prompt: document.getElementById('ai-system-prompt').value,
                            ai_max_sessions: String(val) })
   });
   const d = await resp.json();
