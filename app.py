@@ -3215,6 +3215,10 @@ def settings():
         'SELECT id, name FROM schedule_templates ORDER BY sort_order, name'
     ).fetchall()] if _is_ca else []
 
+    # Sync venue categories from shows before rendering the positions tab
+    if _is_ca:
+        _sync_venue_categories(db3)
+
     # Job positions data for settings tab
     position_categories = [dict(c) for c in db3.execute(
         'SELECT * FROM position_categories ORDER BY sort_order, id'
@@ -4415,39 +4419,35 @@ def save_wifi_settings():
     return jsonify({'success': True})
 
 
+def _sync_venue_categories(db):
+    """Sync is_venue=1 position categories from distinct venues in the shows table."""
+    venues = [r[0] for r in db.execute(
+        "SELECT DISTINCT venue FROM shows WHERE venue IS NOT NULL AND TRIM(venue) != '' ORDER BY venue"
+    ).fetchall()]
+    existing = {r['name']: r['id'] for r in db.execute(
+        "SELECT id, name FROM position_categories WHERE is_venue=1"
+    ).fetchall()}
+    max_order = db.execute('SELECT COALESCE(MAX(sort_order), 0) FROM position_categories').fetchone()[0] or 0
+    for i, venue in enumerate(venues):
+        if venue not in existing:
+            db.execute(
+                "INSERT INTO position_categories (name, is_venue, sort_order) VALUES (?,1,?)",
+                (venue, max_order + (i + 1) * 10)
+            )
+    for name, cid in existing.items():
+        if name not in venues:
+            db.execute("UPDATE position_categories SET is_venue=0 WHERE id=?", (cid,))
+    db.commit()
+    return venues
+
+
 @app.route('/settings/venues', methods=['GET', 'POST'])
 @admin_required
 def venues_settings():
     db = get_db()
-    if request.method == 'POST':
-        data = request.get_json(force=True) or {}
-        venue_list = data.get('venue_list', [])
-        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('venue_list', ?)",
-                   (json.dumps(venue_list),))
-        # Sync position categories: ensure each venue has a matching category (is_venue=1)
-        existing = {r['name']: r['id'] for r in db.execute(
-            "SELECT id, name FROM position_categories WHERE is_venue=1"
-        ).fetchall()}
-        max_order = db.execute('SELECT COALESCE(MAX(sort_order), 0) FROM position_categories').fetchone()[0]
-        for i, venue in enumerate(venue_list):
-            if venue not in existing:
-                db.execute(
-                    "INSERT INTO position_categories (name, is_venue, sort_order) VALUES (?,1,?)",
-                    (venue, max_order + (i + 1) * 10)
-                )
-        # Remove orphaned venue categories (no longer in list)
-        for name, cid in existing.items():
-            if name not in venue_list:
-                db.execute("UPDATE position_categories SET is_venue=0 WHERE id=?", (cid,))
-        log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='venue_list')
-        db.commit(); db.close()
-        syslog_logger.info(f"SETTINGS_CHANGE detail=venue_list by={session.get('username')}")
-        return jsonify({'success': True})
-    else:
-        raw = db.execute("SELECT value FROM app_settings WHERE key='venue_list'").fetchone()
-        db.close()
-        venue_list = json.loads(raw['value']) if raw else []
-        return jsonify({'venue_list': venue_list})
+    venues = _sync_venue_categories(db)
+    db.close()
+    return jsonify({'venues': venues})
 
 
 @app.route('/settings/radio-channels', methods=['GET', 'POST'])

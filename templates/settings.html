@@ -899,24 +899,6 @@
 {% if user.role == 'admin' or is_content_admin %}
 <div id="stab-positions" class="stab-pane" style="display:none">
 
-  <div class="form-section" style="margin-bottom:16px">
-    <div class="form-section-header"><span class="section-icon">◈</span> VENUE LIST</div>
-    <div class="form-section-body">
-      <p class="text-dim" style="font-size:12px;margin-bottom:12px">
-        One venue per line. These become top-level categories for job positions and appear in the Skill Tracker.
-        Saving automatically creates matching position categories.
-      </p>
-      <div class="field-group" style="max-width:360px">
-        <label class="field-label">VENUES (one per line)</label>
-        <textarea id="venue-list-input" class="field-input field-textarea" rows="6" placeholder="Judson's Live&#10;Steinmetz Hall&#10;Seneff Arts Education Center"></textarea>
-      </div>
-      <div style="display:flex;align-items:center;gap:12px;margin-top:8px">
-        <button class="btn btn-primary" onclick="saveVenueList()">Save Venue List</button>
-        <span id="venue-save-msg" class="field-msg"></span>
-      </div>
-    </div>
-  </div>
-
   <div style="display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start">
 
     {# Left: categories #}
@@ -926,7 +908,7 @@
         <span class="section-count ml-auto text-dim">{{ position_categories|length }}</span>
       </div>
       <div class="form-section-body" style="border-bottom:1px solid var(--border)">
-        <p class="text-dim" style="font-size:11px;margin-bottom:10px">Venue categories sync from the Venue List above. Add generic categories here.</p>
+        <p class="text-dim" style="font-size:11px;margin-bottom:10px">Venue categories (marked <strong>VENUE</strong>) auto-sync from your show data. Add generic categories here.</p>
         <h3 class="sub-section-label">ADD CATEGORY</h3>
         <div style="display:flex;gap:8px">
           <input type="text" id="new-cat-name" class="field-input" placeholder="Generic category name" style="flex:1">
@@ -1884,33 +1866,13 @@ async function loadShowOptions() {
 
 async function loadVenueAndRadioLists() {
   try {
-    const [vr, rr] = await Promise.all([
-      fetch('/settings/venues'), fetch('/settings/radio-channels')
-    ]);
-    if (vr.ok) {
-      const vd = await vr.json();
-      const el = document.getElementById('venue-list-input');
-      if (el && vd.venue_list) el.value = vd.venue_list.join('\n');
-    }
+    const rr = await fetch('/settings/radio-channels');
     if (rr.ok) {
       const rd = await rr.json();
       const el = document.getElementById('radio-list-input');
       if (el && rd.channel_list) el.value = rd.channel_list.join('\n');
     }
   } catch(e) {}
-}
-
-async function saveVenueList() {
-  const raw = document.getElementById('venue-list-input').value;
-  const list = raw.split('\n').map(s => s.trim()).filter(Boolean);
-  const msg = document.getElementById('venue-save-msg');
-  const resp = await fetch('/settings/venues', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({venue_list: list})
-  });
-  const d = await resp.json();
-  msg.textContent = d.success ? '✓ Saved' : (d.error || 'Error');
-  msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)';
 }
 
 async function saveRadioList() {
