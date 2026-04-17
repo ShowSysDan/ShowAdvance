@@ -2352,6 +2352,7 @@ def migrate_db_postgres():
             )''',
             f'ALTER TABLE "{app_schema}".crew_members ADD COLUMN IF NOT EXISTS rate_level_id INTEGER',
             f'ALTER TABLE "{app_schema}".job_positions ADD COLUMN IF NOT EXISTS override_rate REAL DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".job_positions ADD COLUMN IF NOT EXISTS venue TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_sections ADD COLUMN IF NOT EXISTS default_open INTEGER DEFAULT 1',
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS perf_id INTEGER DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS ai_hint TEXT DEFAULT NULL',
