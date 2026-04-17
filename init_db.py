@@ -257,6 +257,7 @@ CREATE TABLE IF NOT EXISTS job_positions (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     category_id   INTEGER REFERENCES position_categories(id) ON DELETE SET NULL,
     name          TEXT NOT NULL,
+    venue         TEXT DEFAULT NULL,
     override_rate REAL DEFAULT NULL,
     sort_order    INTEGER DEFAULT 0
 );
@@ -1393,6 +1394,8 @@ def migrate_db():
         "ALTER TABLE crew_members ADD COLUMN rate_level_id INTEGER REFERENCES pay_rate_levels(id) ON DELETE SET NULL",
         # Job position override rate
         "ALTER TABLE job_positions ADD COLUMN override_rate REAL DEFAULT NULL",
+        # Venue field on job positions (replaces is_venue category approach)
+        "ALTER TABLE job_positions ADD COLUMN venue TEXT DEFAULT NULL",
     ]:
         try:
             conn.execute(alter_sql)

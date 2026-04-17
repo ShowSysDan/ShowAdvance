@@ -3215,18 +3215,15 @@ def settings():
         'SELECT id, name FROM schedule_templates ORDER BY sort_order, name'
     ).fetchall()] if _is_ca else []
 
-    # Sync venue categories from shows before rendering the positions tab
-    if _is_ca:
-        _sync_venue_categories(db3)
-
     # Job positions data for settings tab
     position_categories = [dict(c) for c in db3.execute(
-        'SELECT * FROM position_categories ORDER BY sort_order, id'
+        'SELECT * FROM position_categories WHERE is_venue=0 OR is_venue IS NULL ORDER BY sort_order, id'
     ).fetchall()] if _is_ca else []
     positions_raw = db3.execute(
-        'SELECT jp.*, pc.name as category_name FROM job_positions jp LEFT JOIN position_categories pc ON jp.category_id = pc.id ORDER BY pc.sort_order, jp.sort_order, jp.id'
+        'SELECT jp.*, pc.name as category_name FROM job_positions jp LEFT JOIN position_categories pc ON jp.category_id = pc.id ORDER BY jp.venue, pc.sort_order, jp.sort_order, jp.id'
     ).fetchall() if _is_ca else []
     job_positions = [dict(p) for p in positions_raw]
+    distinct_venues = _get_distinct_venues(db3) if _is_ca else []
 
     # Crew members with rate level info
     crew_members_list = [dict(m) for m in db3.execute(
@@ -3310,6 +3307,7 @@ def settings():
                            sched_templates=sched_templates,
                            position_categories=position_categories,
                            job_positions=job_positions,
+                           distinct_venues=distinct_venues,
                            crew_members_list=crew_members_list,
                            pay_rate_levels=pay_rate_levels,
                            wifi_network=all_settings.get('wifi_network', ''),
@@ -4419,33 +4417,24 @@ def save_wifi_settings():
     return jsonify({'success': True})
 
 
-def _sync_venue_categories(db):
-    """Sync is_venue=1 position categories from distinct venues in the shows table."""
-    venues = [r[0] for r in db.execute(
-        "SELECT DISTINCT venue FROM shows WHERE venue IS NOT NULL AND TRIM(venue) != '' ORDER BY venue"
-    ).fetchall()]
-    existing = {r['name']: r['id'] for r in db.execute(
-        "SELECT id, name FROM position_categories WHERE is_venue=1"
-    ).fetchall()}
-    max_order = db.execute('SELECT COALESCE(MAX(sort_order), 0) FROM position_categories').fetchone()[0] or 0
-    for i, venue in enumerate(venues):
-        if venue not in existing:
-            db.execute(
-                "INSERT INTO position_categories (name, is_venue, sort_order) VALUES (?,1,?)",
-                (venue, max_order + (i + 1) * 10)
-            )
-    for name, cid in existing.items():
-        if name not in venues:
-            db.execute("UPDATE position_categories SET is_venue=0 WHERE id=?", (cid,))
-    db.commit()
-    return venues
+def _get_distinct_venues(db):
+    """Return sorted distinct venue names from shows and advance_data."""
+    rows = db.execute("""
+        SELECT DISTINCT v FROM (
+            SELECT venue AS v FROM shows WHERE venue IS NOT NULL AND TRIM(venue) != ''
+            UNION
+            SELECT field_value AS v FROM advance_data
+            WHERE field_key='venue' AND field_value IS NOT NULL AND TRIM(field_value) != ''
+        ) ORDER BY v
+    """).fetchall()
+    return [r[0] for r in rows]
 
 
 @app.route('/settings/venues', methods=['GET', 'POST'])
-@admin_required
+@login_required
 def venues_settings():
     db = get_db()
-    venues = _sync_venue_categories(db)
+    venues = _get_distinct_venues(db)
     db.close()
     return jsonify({'venues': venues})
 
@@ -5159,7 +5148,7 @@ def _ai_extract_impl(show_id):
 def api_job_positions():
     db = get_db()
     rows = db.execute("""
-        SELECT jp.id, jp.category_id, pc.name as category_name, jp.name, jp.sort_order
+        SELECT jp.id, jp.category_id, pc.name as category_name, jp.name, jp.venue, jp.sort_order
         FROM job_positions jp
         LEFT JOIN position_categories pc ON jp.category_id = pc.id
         ORDER BY pc.sort_order, jp.sort_order, jp.id
@@ -5238,13 +5227,14 @@ def add_job_position():
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     category_id = data.get('category_id') or None
+    venue = data.get('venue', '').strip() or None
     db = get_db()
-    max_order = db.execute('SELECT MAX(sort_order) FROM job_positions WHERE category_id IS ?', (category_id,)).fetchone()[0] or 0
+    max_order = db.execute('SELECT MAX(sort_order) FROM job_positions').fetchone()[0] or 0
     override_rate = data.get('override_rate')
     override_rate = float(override_rate) if override_rate not in (None, '') else None
     cur = db.execute(
-        'INSERT INTO job_positions (category_id, name, override_rate, sort_order) VALUES (?, ?, ?, ?)',
-        (category_id, name, override_rate, max_order + 10)
+        'INSERT INTO job_positions (category_id, name, venue, override_rate, sort_order) VALUES (?, ?, ?, ?, ?)',
+        (category_id, name, venue, override_rate, max_order + 10)
     )
     pid = cur.lastrowid
     log_audit(db, 'JOB_POSITION_ADD', 'job_position', pid, detail=name)
@@ -5262,12 +5252,13 @@ def edit_job_position(pid):
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     category_id = data.get('category_id') or None
+    venue = data.get('venue', '').strip() or None
     override_rate = data.get('override_rate')
     override_rate = float(override_rate) if override_rate not in (None, '') else None
     db = get_db()
     db.execute(
-        'UPDATE job_positions SET name=?, category_id=?, override_rate=? WHERE id=?',
-        (name, category_id, override_rate, pid)
+        'UPDATE job_positions SET name=?, category_id=?, venue=?, override_rate=? WHERE id=?',
+        (name, category_id, venue, override_rate, pid)
     )
     log_audit(db, 'JOB_POSITION_EDIT', 'job_position', pid, detail=name)
     db.commit()
