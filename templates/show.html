@@ -1387,7 +1387,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
             <td>{{ e.exporter or '—' }}</td>
             <td class="text-dim">{{ (e.exported_at|string)[:16].replace('T',' ') }}</td>
             <td>
-              {% if e.pdf_data %}
+              {% if e.pdf_data or e.s3_key %}
               <a href="{{ url_for('download_export_history', show_id=show.id, log_id=e.id) }}"
                  class="btn btn-xs btn-ghost" title="Re-download PDF">↓</a>
               {% else %}
@@ -1576,6 +1576,19 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     else if (saved === 'closed') sec.classList.add('collapsed');
     // no saved state → server-rendered default_open class is used as-is
   });
+
+  /* ── Auto-expand sections that have data in them ─────────────── */
+  function syncAdvanceSectionVisibility() {
+    document.querySelectorAll('.form-section[data-key]').forEach(sec => {
+      if (!sec.querySelector('.form-section-header.collapsible')) return;
+      const hasData = Array.from(sec.querySelectorAll('.adv-field')).some(el => {
+        if (el.type === 'checkbox') return el.checked;
+        return (el.value || '').trim() !== '';
+      });
+      if (hasData) sec.classList.remove('collapsed');
+    });
+  }
+  syncAdvanceSectionVisibility();
 
   /* ── Performances (multiple dates/times) ────────────────────── */
   function openPerfForm() {

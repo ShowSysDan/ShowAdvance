@@ -169,6 +169,9 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
           {% endif %}
         </button>
+        <button class="logout-btn" onclick="openHelp()" title="Help" style="color:var(--text-dim)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="18" height="18"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        </button>
         <a href="{{ url_for('logout') }}" class="logout-btn" title="Logout">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </a>
@@ -498,6 +501,106 @@ document.addEventListener('keydown', e => {
   }
 });
 </script>
+{# ── Help Modal ──────────────────────────────────────────────────────────── #}
+<div id="help-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:500;align-items:flex-start;justify-content:flex-end" onclick="if(event.target===this)closeHelp()">
+  <div class="modal-card" style="max-width:420px;width:90vw;max-height:90vh;overflow-y:auto;margin:32px 24px 0 0">
+    <div class="modal-header">
+      <span id="help-modal-title">Help</span>
+      <button onclick="closeHelp()" class="modal-close">×</button>
+    </div>
+    <div class="modal-body" id="help-modal-body" style="font-size:13px;line-height:1.7"></div>
+  </div>
+</div>
+<script>
+const _HELP_PAGES = {
+  '/': {
+    title: 'Home — Shows List',
+    html: `
+      <p><strong>Your show dashboard.</strong> Each column is a venue; cards show upcoming shows.</p>
+      <ul style="padding-left:18px;margin:8px 0">
+        <li><strong>New Show</strong> — create a show with name, venue, date, and time.</li>
+        <li><strong>Advance</strong> — open the full advance sheet for riders, contacts, tech specs.</li>
+        <li><strong>Schedule</strong> — view/edit the day-of production schedule.</li>
+        <li><strong>Export</strong> — generate and email PDF advance sheets or schedules.</li>
+        <li><strong>Archive</strong> — move a finished show out of the active list.</li>
+      </ul>
+      <p>Use the <strong>search bar</strong> to filter by show name or venue. Use <strong>date pickers</strong> to narrow by show date. Click venue pills to toggle columns on/off.</p>
+    `
+  },
+  '/shows': {
+    title: 'Show — Advance Sheet',
+    html: `
+      <p><strong>Advance Sheet</strong> collects all pre-show information in one place.</p>
+      <ul style="padding-left:18px;margin:8px 0">
+        <li>Sections collapse/expand — a section with data is always shown expanded.</li>
+        <li><strong>AI Import</strong> — paste a rider or tech spec; AI extracts fields for you to review before applying.</li>
+        <li>All changes auto-save on blur or can be saved with the Save button.</li>
+        <li><strong>Read receipts</strong> — see which team members have viewed the advance.</li>
+        <li><strong>Comments</strong> — leave notes for your team; supports @mentions.</li>
+      </ul>
+      <p><strong>Schedule tab</strong> — drag-and-drop production schedule with time blocks and departments.<br>
+      <strong>Staffing tab</strong> — labor requests by position and day; tracks scheduled crew.<br>
+      <strong>Assets tab</strong> — track gear rentals and inventory items for the show.<br>
+      <strong>Post-Show tab</strong> — record actual costs, notes, and generate a post-show invoice.</p>
+    `
+  },
+  '/settings': {
+    title: 'Settings',
+    html: `
+      <p>Manage everything site-wide from the Settings page.</p>
+      <ul style="padding-left:18px;margin:8px 0">
+        <li><strong>Profile</strong> — change your display name, email, password, and UI theme.</li>
+        <li><strong>Users</strong> — invite new users, set roles (Admin → Content Admin → Staff → User → Read-only), and reset passwords.</li>
+        <li><strong>Advance Fields</strong> — add, reorder, and configure custom fields for advance sheets.</li>
+        <li><strong>Schedule</strong> — configure schedule templates and departments.</li>
+        <li><strong>Job Positions</strong> — manage labor positions and venue categories. Venue list is also set here.</li>
+        <li><strong>Crew / Tech</strong> — manage your roster with pay rate levels for labor cost tracking.</li>
+        <li><strong>Contacts</strong> — shared contact book available across all shows.</li>
+        <li><strong>Assets</strong> — define asset types and inventory items.</li>
+        <li><strong>Email</strong> — configure SMTP and email distribution lists.</li>
+        <li><strong>Dashboards</strong> — manage publicly-shareable read-only dashboards.</li>
+        <li><strong>System</strong> — messages, updates, syslog, backups, file manager, database, AI, and admin tools.</li>
+      </ul>
+    `
+  },
+  '/dashboards': {
+    title: 'Public Dashboards',
+    html: `
+      <p>Dashboards are <strong>public, read-only views</strong> of show schedules you can share with venues or clients — no login required.</p>
+      <ul style="padding-left:18px;margin:8px 0">
+        <li>Create a dashboard from the Export tab on any show.</li>
+        <li>Share the public URL with anyone — they see a live view of the schedule.</li>
+        <li>Revoke access anytime by making the dashboard private from Settings → Dashboards.</li>
+      </ul>
+    `
+  },
+};
+
+function openHelp() {
+  const modal = document.getElementById('help-modal');
+  const path = window.location.pathname;
+  let page = null;
+  if (path === '/' || path === '/dashboard') page = _HELP_PAGES['/'];
+  else if (path.startsWith('/shows/')) page = _HELP_PAGES['/shows'];
+  else if (path.startsWith('/settings')) page = _HELP_PAGES['/settings'];
+  else if (path.startsWith('/dashboard/')) page = _HELP_PAGES['/dashboards'];
+  if (!page) {
+    page = {
+      title: '3·2·1→Theater Help',
+      html: `<p>Use the sidebar to navigate between Shows, Settings, and more.</p>
+             <p>Press <kbd style="background:var(--bg-surface);border:1px solid var(--border);border-radius:3px;padding:1px 5px;font-size:11px">/</kbd> or <kbd style="background:var(--bg-surface);border:1px solid var(--border);border-radius:3px;padding:1px 5px;font-size:11px">Ctrl+K</kbd> to open global search anywhere.</p>`
+    };
+  }
+  document.getElementById('help-modal-title').textContent = page.title;
+  document.getElementById('help-modal-body').innerHTML = page.html;
+  modal.style.display = 'flex';
+}
+function closeHelp() {
+  document.getElementById('help-modal').style.display = 'none';
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeHelp(); }, true);
+</script>
+
 {% if user %}
 <script>
 // ── Site-wide message banners ─────────────────────────────────────────────────
