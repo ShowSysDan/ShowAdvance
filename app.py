@@ -4418,16 +4418,35 @@ def save_wifi_settings():
 
 
 def _get_distinct_venues(db):
-    """Return sorted distinct venue names from shows and advance_data."""
-    rows = db.execute("""
-        SELECT DISTINCT v FROM (
-            SELECT venue AS v FROM shows WHERE venue IS NOT NULL AND TRIM(venue) != ''
-            UNION
-            SELECT field_value AS v FROM advance_data
-            WHERE field_key='venue' AND field_value IS NOT NULL AND TRIM(field_value) != ''
-        ) ORDER BY v
-    """).fetchall()
-    return [r[0] for r in rows]
+    """Return sorted distinct venue names from the venue field options, shows, and advance_data."""
+    venues = set()
+
+    # Primary source: options defined on the 'venue' form field (dropdown options list)
+    ff = db.execute(
+        "SELECT options_json FROM form_fields WHERE field_key='venue' AND options_json IS NOT NULL"
+    ).fetchone()
+    if ff and ff['options_json']:
+        try:
+            opts = json.loads(ff['options_json'])
+            for o in opts:
+                v = (o or '').strip()
+                if v and v != '—' and v != '-':
+                    venues.add(v)
+        except Exception:
+            pass
+
+    # Secondary sources: values actually saved on shows
+    for row in db.execute(
+        "SELECT DISTINCT venue FROM shows WHERE venue IS NOT NULL AND TRIM(venue) != ''"
+    ).fetchall():
+        venues.add(row[0].strip())
+
+    for row in db.execute(
+        "SELECT DISTINCT field_value FROM advance_data WHERE field_key='venue' AND field_value IS NOT NULL AND TRIM(field_value) != ''"
+    ).fetchall():
+        venues.add(row[0].strip())
+
+    return sorted(venues)
 
 
 @app.route('/settings/venues', methods=['GET', 'POST'])
