@@ -53,11 +53,14 @@
     <label class="field-label">{{ field.label }}</label>
 
     {% if field.field_type == 'yes_no' and field.display_as == 'toggle' %}
-      <div class="yn-toggle-group{% if restricted %} yn-disabled{% endif %}">
-        <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur if cur else '-' }}">
-        <button type="button" class="yn-btn{% if cur in ['-',''] %} active{% endif %}" data-val="-">—</button>
-        <button type="button" class="yn-btn yn-no{% if cur == 'No' %} active{% endif %}" data-val="No">No</button>
-        <button type="button" class="yn-btn yn-yes{% if cur == 'Yes' %} active{% endif %}" data-val="Yes">Yes</button>
+      {% set sv = cur if cur and cur != '' else '-' %}
+      <div class="yn-slider{% if restricted %} yn-disabled{% endif %}">
+        <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ sv }}">
+        <div class="yn-track" data-val="{{ sv }}">
+          <span class="yn-label yn-label-no">NO</span>
+          <div class="yn-thumb"></div>
+          <span class="yn-label yn-label-yes">YES</span>
+        </div>
       </div>
 
     {% elif field.field_type == 'yes_no' %}
@@ -68,12 +71,14 @@
       </select>
 
     {% elif field.field_type == 'select' and field.allow_multi %}
-      <select class="field-input adv-field adv-multi-select" data-key="{{ field.field_key }}"
-              data-cur="{{ cur|e }}" multiple size="4" {% if restricted %}disabled{% endif %}>
+      <div class="multi-check-list{% if restricted %} multi-check-disabled{% endif %}" data-key="{{ field.field_key }}">
+        <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur|e }}">
         {% for opt in field.options %}
-        <option value="{{ opt }}">{{ opt }}</option>
+        <label class="multi-check-item">
+          <input type="checkbox" value="{{ opt }}" {% if restricted %}disabled{% endif %}>{{ opt }}
+        </label>
         {% endfor %}
-      </select>
+      </div>
 
     {% elif field.field_type == 'select' %}
       <select class="field-input adv-field" data-key="{{ field.field_key }}" {% if restricted %}disabled{% endif %}>
