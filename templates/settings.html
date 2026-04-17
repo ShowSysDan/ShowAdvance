@@ -901,45 +901,58 @@
 
   <div style="display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start">
 
-    {# Left: categories #}
-    <div class="form-section">
-      <div class="form-section-header">
-        <span class="section-icon">◈</span> CATEGORIES
-        <span class="section-count ml-auto text-dim">{{ position_categories|length }}</span>
-      </div>
-      <div class="form-section-body" style="border-bottom:1px solid var(--border)">
-        <p class="text-dim" style="font-size:11px;margin-bottom:10px">Venue categories (marked <strong>VENUE</strong>) auto-sync from your show data. Add generic categories here.</p>
-        <h3 class="sub-section-label">ADD CATEGORY</h3>
-        <div style="display:flex;gap:8px">
-          <input type="text" id="new-cat-name" class="field-input" placeholder="Generic category name" style="flex:1">
-          <button class="btn btn-primary" onclick="addPositionCategory()">Add</button>
-        </div>
-        <div id="cat-msg" class="field-msg" style="display:none;margin-top:6px"></div>
-      </div>
-      <div class="form-section-body no-pad">
-        <table class="data-table">
-          <tbody id="cat-list">
-            {% for cat in position_categories %}
-            <tr data-cid="{{ cat.id }}">
-              <td id="cat-name-{{ cat.id }}">
-                {{ cat.name }}
-                {% if cat.is_venue %}<span style="font-size:9px;background:rgba(74,158,255,.15);color:#4A9EFF;border:1px solid rgba(74,158,255,.3);border-radius:99px;padding:1px 5px;margin-left:4px">VENUE</span>{% endif %}
-              </td>
-              <td style="width:80px">
-                <div class="action-btns">
-                  {% if not cat.is_venue %}
-                  <button class="btn btn-xs btn-ghost" onclick="editCategory(this)">✎</button>
-                  {% endif %}
-                  <button class="btn btn-xs btn-danger-ghost" onclick="deleteCategory({{ cat.id }})">×</button>
-                </div>
-              </td>
-            </tr>
+    {# Left: venues (read-only) + categories (editable) #}
+    <div style="display:flex;flex-direction:column;gap:16px">
+
+      <div class="form-section">
+        <div class="form-section-header"><span class="section-icon">◈</span> VENUES</div>
+        <div class="form-section-body no-pad">
+          <p class="text-dim" style="font-size:11px;padding:8px 12px 4px">Auto-synced from show data.</p>
+          <ul style="list-style:none;margin:0;padding:0 0 8px">
+            {% for v in distinct_venues %}
+            <li style="padding:5px 14px;font-size:13px;border-bottom:1px solid var(--border-subtle,var(--border))">{{ v }}</li>
             {% else %}
-            <tr id="cat-empty"><td colspan="2" class="text-dim" style="text-align:center;padding:16px">No categories yet.</td></tr>
+            <li style="padding:12px 14px;font-size:12px;color:var(--text-dim)">No venues found in show data yet.</li>
             {% endfor %}
-          </tbody>
-        </table>
+          </ul>
+        </div>
       </div>
+
+      <div class="form-section">
+        <div class="form-section-header">
+          <span class="section-icon">◈</span> CATEGORIES
+          <span class="section-count ml-auto text-dim">{{ position_categories|length }}</span>
+        </div>
+        <div class="form-section-body" style="border-bottom:1px solid var(--border)">
+          <p class="text-dim" style="font-size:11px;margin-bottom:10px">Skill-based groupings (Audio, Lighting, etc.).</p>
+          <h3 class="sub-section-label">ADD CATEGORY</h3>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="new-cat-name" class="field-input" placeholder="Category name" style="flex:1">
+            <button class="btn btn-primary" onclick="addPositionCategory()">Add</button>
+          </div>
+          <div id="cat-msg" class="field-msg" style="display:none;margin-top:6px"></div>
+        </div>
+        <div class="form-section-body no-pad">
+          <table class="data-table">
+            <tbody id="cat-list">
+              {% for cat in position_categories %}
+              <tr data-cid="{{ cat.id }}">
+                <td id="cat-name-{{ cat.id }}">{{ cat.name }}</td>
+                <td style="width:80px">
+                  <div class="action-btns">
+                    <button class="btn btn-xs btn-ghost" onclick="editCategory(this)">✎</button>
+                    <button class="btn btn-xs btn-danger-ghost" onclick="deleteCategory({{ cat.id }})">×</button>
+                  </div>
+                </td>
+              </tr>
+              {% else %}
+              <tr id="cat-empty"><td colspan="2" class="text-dim" style="text-align:center;padding:16px">No categories yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
     </div>
 
     {# Right: positions #}
@@ -952,6 +965,15 @@
         <h3 class="sub-section-label">ADD POSITION</h3>
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
           <div class="field-group" style="flex:1;min-width:140px;margin:0">
+            <label class="field-label">VENUE</label>
+            <select id="new-pos-venue" class="field-input">
+              <option value="">— All Venues —</option>
+              {% for v in distinct_venues %}
+              <option value="{{ v }}">{{ v }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field-group" style="flex:1;min-width:130px;margin:0">
             <label class="field-label">CATEGORY</label>
             <select id="new-pos-cat" class="field-input">
               <option value="">— Uncategorized —</option>
@@ -965,8 +987,8 @@
             <input type="text" id="new-pos-name" class="field-input" placeholder="e.g. A1, Lighting Designer...">
           </div>
           <div class="field-group" style="margin:0">
-            <label class="field-label">RATE OVERRIDE ($/hr)</label>
-            <input type="number" id="new-pos-rate" class="field-input" placeholder="—" step="0.01" min="0" style="width:100px">
+            <label class="field-label">RATE ($/hr)</label>
+            <input type="number" id="new-pos-rate" class="field-input" placeholder="—" step="0.01" min="0" style="width:90px">
           </div>
           <button class="btn btn-primary" onclick="addPosition()" style="align-self:flex-end">Add</button>
         </div>
@@ -974,11 +996,12 @@
       </div>
       <div class="form-section-body no-pad">
         <table class="data-table" id="positions-table">
-          <thead><tr><th>POSITION NAME</th><th>CATEGORY</th><th style="text-align:right">RATE OVERRIDE</th><th style="width:80px">ACTIONS</th></tr></thead>
+          <thead><tr><th>POSITION NAME</th><th>VENUE</th><th>CATEGORY</th><th style="text-align:right">RATE</th><th style="width:70px">ACTIONS</th></tr></thead>
           <tbody id="positions-tbody">
             {% for pos in job_positions %}
             <tr data-pid="{{ pos.id }}">
               <td id="pos-name-{{ pos.id }}">{{ pos.name }}</td>
+              <td class="text-dim" id="pos-venue-{{ pos.id }}" data-venue="{{ pos.venue or '' }}">{{ pos.venue or '—' }}</td>
               <td class="text-dim" id="pos-cat-{{ pos.id }}" data-cat-id="{{ pos.category_id or '' }}">{{ pos.category_name or '—' }}</td>
               <td id="pos-rate-{{ pos.id }}" style="text-align:right" class="mono text-dim">{% if pos.override_rate is not none and pos.override_rate != '' %}${{ '%.2f' | format(pos.override_rate) }}/hr{% else %}—{% endif %}</td>
               <td>
@@ -989,7 +1012,7 @@
               </td>
             </tr>
             {% else %}
-            <tr id="pos-empty"><td colspan="4" class="text-dim" style="text-align:center;padding:16px">No positions yet. Add a category first, then add positions.</td></tr>
+            <tr id="pos-empty"><td colspan="5" class="text-dim" style="text-align:center;padding:16px">No positions yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -2191,6 +2214,8 @@ async function deleteCategory(cid) {
 /* ── Job Positions ───────────────────────────────────────────── */
 async function addPosition() {
   const name = document.getElementById('new-pos-name').value.trim();
+  const venueSel = document.getElementById('new-pos-venue');
+  const venue = venueSel?.value || '';
   const category_id = document.getElementById('new-pos-cat').value || null;
   const catSel = document.getElementById('new-pos-cat');
   const catName = catSel.options[catSel.selectedIndex]?.text || '—';
@@ -2200,7 +2225,7 @@ async function addPosition() {
   const msg = document.getElementById('pos-msg');
   const r = await fetch('/settings/job-positions/add', {
     method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({name, category_id, override_rate})
+    body: JSON.stringify({name, venue: venue || null, category_id, override_rate})
   });
   const d = await r.json();
   msg.style.display = '';
@@ -2213,6 +2238,7 @@ async function addPosition() {
     const rateLabel = override_rate !== null ? `$${override_rate.toFixed(2)}/hr` : '—';
     const tr = document.createElement('tr'); tr.dataset.pid = d.id;
     tr.innerHTML = `<td id="pos-name-${d.id}">${_esc(d.name)}</td>
+      <td class="text-dim" id="pos-venue-${d.id}" data-venue="${_esc(venue)}">${_esc(venue) || '—'}</td>
       <td class="text-dim" id="pos-cat-${d.id}" data-cat-id="${category_id || ''}">${_esc(catName)}</td>
       <td id="pos-rate-${d.id}" style="text-align:right" class="mono text-dim">${rateLabel}</td>
       <td><div class="action-btns">
@@ -2228,62 +2254,82 @@ async function addPosition() {
 function editPosition(btn) {
   const tr = btn.closest('tr');
   const pid = tr.dataset.pid;
-  const nameEl = document.getElementById('pos-name-' + pid);
-  const catEl = document.getElementById('pos-cat-' + pid);
-  const rateEl = document.getElementById('pos-rate-' + pid);
+  const nameEl  = document.getElementById('pos-name-'  + pid);
+  const venueEl = document.getElementById('pos-venue-' + pid);
+  const catEl   = document.getElementById('pos-cat-'   + pid);
+  const rateEl  = document.getElementById('pos-rate-'  + pid);
   if (!nameEl || nameEl.querySelector('input')) return;
-  const origName = nameEl.textContent.trim();
-  const origCatId = catEl?.dataset.catId || '';
-  const origCatText = catEl?.textContent.trim() || '—';
+  const origName     = nameEl.textContent.trim();
+  const origVenue    = venueEl?.dataset.venue || '';
+  const origVenueText= venueEl?.textContent.trim() || '—';
+  const origCatId    = catEl?.dataset.catId || '';
+  const origCatText  = catEl?.textContent.trim() || '—';
   const origRateText = rateEl?.textContent.trim() || '—';
-  const origRateVal = origRateText !== '—' ? origRateText.replace(/[^0-9.]/g,'') : '';
+  const origRateVal  = origRateText !== '—' ? origRateText.replace(/[^0-9.]/g,'') : '';
+
   nameEl.innerHTML = '';
   const inp = document.createElement('input');
   inp.type = 'text'; inp.value = origName; inp.className = 'field-input field-input-sm';
-  inp.style.cssText = 'width:100%;max-width:180px';
+  inp.style.cssText = 'width:100%;max-width:160px';
+
+  venueEl.innerHTML = '';
+  const vSel = document.createElement('select');
+  vSel.className = 'field-input field-input-sm';
+  vSel.innerHTML = '<option value="">— All —</option>';
+  document.querySelectorAll('#new-pos-venue option').forEach(o => {
+    if (!o.value) return;
+    const opt = document.createElement('option');
+    opt.value = o.value; opt.textContent = o.textContent;
+    if (o.value === origVenue) opt.selected = true;
+    vSel.appendChild(opt);
+  });
+
   catEl.innerHTML = '';
-  const sel = document.createElement('select');
-  sel.className = 'field-input field-input-sm';
-  sel.innerHTML = '<option value="">— Uncategorized —</option>';
+  const cSel = document.createElement('select');
+  cSel.className = 'field-input field-input-sm';
+  cSel.innerHTML = '<option value="">— Uncategorized —</option>';
   document.querySelectorAll('#new-pos-cat option').forEach(o => {
     if (!o.value) return;
     const opt = document.createElement('option');
     opt.value = o.value; opt.textContent = o.textContent;
     if (o.value == origCatId) opt.selected = true;
-    sel.appendChild(opt);
+    cSel.appendChild(opt);
   });
+
   const rateInp = document.createElement('input');
   rateInp.type = 'number'; rateInp.value = origRateVal; rateInp.placeholder = '—';
   rateInp.step = '0.01'; rateInp.min = '0';
-  rateInp.className = 'field-input field-input-sm'; rateInp.style.cssText = 'width:80px;text-align:right';
+  rateInp.className = 'field-input field-input-sm'; rateInp.style.cssText = 'width:70px;text-align:right';
+
+  const restore = () => { nameEl.textContent = origName; venueEl.textContent = origVenueText; venueEl.dataset.venue = origVenue; catEl.textContent = origCatText; catEl.dataset.catId = origCatId; rateEl.textContent = origRateText; };
   const save = async () => {
     const name = inp.value.trim();
-    const category_id = sel.value || null;
+    const venue = vSel.value || null;
+    const category_id = cSel.value || null;
     const rateStr = rateInp.value.trim();
     const override_rate = rateStr !== '' ? parseFloat(rateStr) : null;
-    if (!name) { nameEl.textContent = origName; catEl.textContent = origCatText; rateEl.textContent = origRateText; return; }
+    if (!name) { restore(); return; }
     const r = await fetch(`/settings/job-positions/${pid}/edit`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({name, category_id, override_rate})
+      body: JSON.stringify({name, venue, category_id, override_rate})
     });
     const d = await r.json();
     if (d.success) {
       nameEl.textContent = name;
-      const catName = sel.options[sel.selectedIndex]?.text || '—';
+      venueEl.textContent = venue || '—'; venueEl.dataset.venue = venue || '';
+      const catName = cSel.options[cSel.selectedIndex]?.text || '—';
       catEl.textContent = catName; catEl.dataset.catId = category_id || '';
       rateEl.textContent = override_rate !== null ? `$${override_rate.toFixed(2)}/hr` : '—';
-    } else { nameEl.textContent = origName; catEl.textContent = origCatText; rateEl.textContent = origRateText; alert(d.error || 'Error updating position.'); }
+    } else { restore(); alert(d.error || 'Error updating position.'); }
   };
-  const onKey = e => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') { nameEl.textContent = origName; catEl.textContent = origCatText; rateEl.textContent = origRateText; } };
-  inp.addEventListener('keydown', onKey); sel.addEventListener('keydown', onKey); rateInp.addEventListener('keydown', onKey);
-  let _saveTimer = null;
-  const scheduleSave = () => { _saveTimer = setTimeout(save, 200); };
-  const cancelSave  = () => { clearTimeout(_saveTimer); };
-  inp.addEventListener('blur',  scheduleSave); inp.addEventListener('focus', cancelSave);
-  sel.addEventListener('blur',  scheduleSave); sel.addEventListener('focus', cancelSave);
-  rateInp.addEventListener('blur', scheduleSave); rateInp.addEventListener('focus', cancelSave);
-  sel.addEventListener('change', () => { cancelSave(); save(); });
-  nameEl.appendChild(inp); catEl.appendChild(sel);
+  const onKey = e => { if (e.key === 'Enter') { e.preventDefault(); save(); } if (e.key === 'Escape') restore(); };
+  [inp, vSel, cSel, rateInp].forEach(el => el.addEventListener('keydown', onKey));
+  let _t = null;
+  const sched = () => { _t = setTimeout(save, 200); };
+  const cancel = () => clearTimeout(_t);
+  [inp, vSel, cSel, rateInp].forEach(el => { el.addEventListener('blur', sched); el.addEventListener('focus', cancel); });
+  [vSel, cSel].forEach(el => el.addEventListener('change', () => { cancel(); save(); }));
+  nameEl.appendChild(inp); venueEl.appendChild(vSel); catEl.appendChild(cSel);
   if (rateEl) { rateEl.innerHTML = ''; rateEl.appendChild(rateInp); }
   inp.focus(); inp.select();
 }
@@ -2295,7 +2341,7 @@ async function deletePosition(pid) {
   if (d.success) {
     document.querySelector(`#positions-tbody tr[data-pid="${pid}"]`)?.remove();
     if (!document.querySelector('#positions-tbody tr')) {
-      const td = document.createElement('td'); td.colSpan = 4; td.className = 'text-dim';
+      const td = document.createElement('td'); td.colSpan = 5; td.className = 'text-dim';
       td.style.textAlign = 'center'; td.style.padding = '16px';
       td.textContent = 'No positions yet.';
       const tr = document.createElement('tr'); tr.id = 'pos-empty'; tr.appendChild(td);
