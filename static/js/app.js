@@ -346,31 +346,42 @@ function bindAdvanceForm() {
     });
   });
 
-  // Yes/No toggle button groups
-  form.querySelectorAll('.yn-toggle-group').forEach(group => {
-    if (group.dataset.ynBound) return;
-    group.dataset.ynBound = '1';
-    group.querySelectorAll('.yn-btn').forEach(btn => {
-      btn.addEventListener('click', function() {
-        if (group.classList.contains('yn-disabled')) return;
-        group.querySelectorAll('.yn-btn').forEach(b => b.classList.remove('active'));
-        this.classList.add('active');
-        const hidden = group.querySelector('.adv-field');
-        hidden.value = this.dataset.val;
-        scheduleSave();
-        evaluateAllConditionals();
-      });
+  // Yes/No slider toggles
+  form.querySelectorAll('.yn-slider').forEach(wrap => {
+    if (wrap.dataset.ynBound) return;
+    wrap.dataset.ynBound = '1';
+    const track = wrap.querySelector('.yn-track');
+    const hidden = wrap.querySelector('.adv-field');
+    if (!track || !hidden) return;
+    track.addEventListener('click', function(e) {
+      if (wrap.classList.contains('yn-disabled')) return;
+      const rect = track.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const third = rect.width / 3;
+      const val = x < third ? 'No' : x < third * 2 ? '-' : 'Yes';
+      track.dataset.val = val;
+      hidden.value = val;
+      scheduleSave();
+      evaluateAllConditionals();
     });
   });
 
-  // Multi-select: restore saved selections from JSON
-  form.querySelectorAll('select.adv-multi-select').forEach(sel => {
-    const raw = sel.dataset.cur || '';
+  // Multi-select checkbox lists: restore saved selections from JSON
+  form.querySelectorAll('.multi-check-list').forEach(list => {
+    if (list.dataset.mlBound) return;
+    list.dataset.mlBound = '1';
+    const hidden = list.querySelector('.adv-field');
+    if (!hidden) return;
+    // restore
     let vals = [];
-    try { vals = JSON.parse(raw); } catch(e) { if (raw) vals = [raw]; }
-    for (const opt of sel.options) {
-      opt.selected = vals.includes(opt.value);
-    }
+    try { vals = JSON.parse(hidden.value || '[]'); } catch(e) { if (hidden.value) vals = [hidden.value]; }
+    list.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = vals.includes(cb.value); });
+    // update on change
+    list.addEventListener('change', () => {
+      const selected = Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
+      hidden.value = JSON.stringify(selected);
+      scheduleSave();
+    });
   });
 }
 
@@ -382,8 +393,6 @@ function collectAdvanceData() {
     if (!key) return;
     if (el.type === 'checkbox') {
       data[key] = el.checked ? 'true' : 'false';
-    } else if (el.tagName === 'SELECT' && el.multiple) {
-      data[key] = JSON.stringify(Array.from(el.selectedOptions).map(o => o.value));
     } else if (_timeKeys.has(key) && el.value) {
       data[key] = parseTimeToHHMM(el.value);
       el.value = data[key];
