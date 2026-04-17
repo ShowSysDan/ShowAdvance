@@ -353,12 +353,10 @@ function bindAdvanceForm() {
     const track = wrap.querySelector('.yn-track');
     const hidden = wrap.querySelector('.adv-field');
     if (!track || !hidden) return;
-    track.addEventListener('click', function(e) {
+    track.addEventListener('click', function() {
       if (wrap.classList.contains('yn-disabled')) return;
-      const rect = track.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const third = rect.width / 3;
-      const val = x < third ? 'No' : x < third * 2 ? '-' : 'Yes';
+      const next = { '-': 'Yes', 'Yes': 'No', 'No': '-' };
+      const val = next[track.dataset.val] ?? 'Yes';
       track.dataset.val = val;
       hidden.value = val;
       scheduleSave();
