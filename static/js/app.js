@@ -345,6 +345,33 @@ function bindAdvanceForm() {
       }
     });
   });
+
+  // Yes/No toggle button groups
+  form.querySelectorAll('.yn-toggle-group').forEach(group => {
+    if (group.dataset.ynBound) return;
+    group.dataset.ynBound = '1';
+    group.querySelectorAll('.yn-btn').forEach(btn => {
+      btn.addEventListener('click', function() {
+        if (group.classList.contains('yn-disabled')) return;
+        group.querySelectorAll('.yn-btn').forEach(b => b.classList.remove('active'));
+        this.classList.add('active');
+        const hidden = group.querySelector('.adv-field');
+        hidden.value = this.dataset.val;
+        scheduleSave();
+        evaluateAllConditionals();
+      });
+    });
+  });
+
+  // Multi-select: restore saved selections from JSON
+  form.querySelectorAll('select.adv-multi-select').forEach(sel => {
+    const raw = sel.dataset.cur || '';
+    let vals = [];
+    try { vals = JSON.parse(raw); } catch(e) { if (raw) vals = [raw]; }
+    for (const opt of sel.options) {
+      opt.selected = vals.includes(opt.value);
+    }
+  });
 }
 
 function collectAdvanceData() {
@@ -355,6 +382,8 @@ function collectAdvanceData() {
     if (!key) return;
     if (el.type === 'checkbox') {
       data[key] = el.checked ? 'true' : 'false';
+    } else if (el.tagName === 'SELECT' && el.multiple) {
+      data[key] = JSON.stringify(Array.from(el.selectedOptions).map(o => o.value));
     } else if (_timeKeys.has(key) && el.value) {
       data[key] = parseTimeToHHMM(el.value);
       el.value = data[key];
@@ -1000,8 +1029,10 @@ function _toggleFieldTypeOptions(type) {
   if (!modal) return;
   const optGroup = modal.querySelector('.options-group');
   const deptGroup = modal.querySelector('.contact-dept-group');
+  const ynGroup = modal.querySelector('.yes-no-display-group');
   if (optGroup) optGroup.style.display = (type === 'select') ? '' : 'none';
   if (deptGroup) deptGroup.style.display = (type === 'contact_dropdown') ? '' : 'none';
+  if (ynGroup) ynGroup.style.display = (type === 'yes_no') ? '' : 'none';
 }
 
 function closeFieldModal() {

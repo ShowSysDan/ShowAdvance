@@ -3711,8 +3711,9 @@ def add_form_field():
             INSERT INTO form_fields
             (section_id, field_key, label, field_type, sort_order,
              options_json, contact_dept, conditional_show_when,
-             help_text, placeholder, width_hint, is_notes_field, ai_hint)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+             help_text, placeholder, width_hint, is_notes_field, ai_hint,
+             display_as, allow_multi)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (section_id, field_key, label,
               data.get('field_type','text'), max_order + 10,
               options_json,
@@ -3722,7 +3723,9 @@ def add_form_field():
               data.get('placeholder',''),
               data.get('width_hint','full'),
               1 if data.get('is_notes_field') else 0,
-              data.get('ai_hint') or None))
+              data.get('ai_hint') or None,
+              data.get('display_as') or None,
+              1 if data.get('allow_multi') else 0))
         fid = cur.lastrowid
         log_audit(db, 'FIELD_ADD', 'form_field', fid, detail=field_key)
         db.commit()
@@ -3745,7 +3748,8 @@ def edit_form_field(fid):
         UPDATE form_fields SET
             section_id=?, label=?, field_type=?,
             options_json=?, contact_dept=?, conditional_show_when=?,
-            help_text=?, placeholder=?, width_hint=?, is_notes_field=?, ai_hint=?
+            help_text=?, placeholder=?, width_hint=?, is_notes_field=?, ai_hint=?,
+            display_as=?, allow_multi=?
         WHERE id=?
     """, (data.get('section_id'), data.get('label',''),
           data.get('field_type','text'), options_json,
@@ -3754,6 +3758,8 @@ def edit_form_field(fid):
           data.get('width_hint','full'),
           1 if data.get('is_notes_field') else 0,
           data.get('ai_hint') or None,
+          data.get('display_as') or None,
+          1 if data.get('allow_multi') else 0,
           fid))
     log_audit(db, 'FIELD_EDIT', 'form_field', fid, detail=data.get('label',''))
     db.commit(); db.close()
