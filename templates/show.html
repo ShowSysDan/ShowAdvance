@@ -870,6 +870,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 // ── Assets Tab JS ─────────────────────────────────────────────────────────────
 (function() {
   const SHOW_ID = {{ show.id }};
+  const SHOW_VENUE = {{ show.venue | tojson }};
   const IS_ADMIN = {{ 'true' if is_content_admin_user else 'false' }};
   let _allAssetTypes = null;
   let _currentAssetTypeId = null;
@@ -1891,8 +1892,11 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
   function _buildPositionSelect(selectEl, selectedId) {
     selectEl.innerHTML = '<option value="">— Select Position —</option>';
+    // Filter to positions assigned to this show's venue, or positions with no venue (universal)
+    const venue = SHOW_VENUE || '';
+    const filtered = _laborPositions.filter(p => !p.venue || p.venue === venue);
     const cats = {};
-    for (const p of _laborPositions) {
+    for (const p of filtered) {
       const cat = p.category_name || 'Other';
       if (!cats[cat]) cats[cat] = [];
       cats[cat].push(p);
@@ -1908,6 +1912,17 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         og.appendChild(opt);
       }
       selectEl.appendChild(og);
+    }
+    // If a position is already selected but was filtered out, keep it visible
+    if (selectedId && !selectEl.querySelector(`option[value="${selectedId}"]`)) {
+      const ghost = _laborPositions.find(p => p.id == selectedId);
+      if (ghost) {
+        const opt = document.createElement('option');
+        opt.value = ghost.id;
+        opt.textContent = ghost.name + (ghost.venue ? ` (${ghost.venue})` : '');
+        opt.selected = true;
+        selectEl.appendChild(opt);
+      }
     }
   }
 
