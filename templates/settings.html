@@ -767,24 +767,26 @@
       <p class="field-hint" style="margin-bottom:16px">Enable AI-powered document extraction using a locally-hosted Ollama model. Once enabled, users can upload a PDF on any show and the AI will suggest values for fields that have an AI Hint configured.</p>
       <div class="field-group">
         <label class="checkbox-label">
-          <input type="checkbox" id="ollama-enabled" {% if ai_settings.ollama_enabled == '1' %}checked{% endif %}>
+          <input type="checkbox" id="ollama-enabled" {% if ai_settings.ollama_enabled == '1' %}checked{% endif %}
+            onchange="saveAiSettings()">
           Enable AI extraction
         </label>
       </div>
       <div class="form-row cols-2">
         <div class="field-group">
           <label class="field-label">OLLAMA URL</label>
-          <input type="text" id="ollama-url" class="field-input" value="{{ ai_settings.ollama_url or 'http://localhost:11434' }}" placeholder="http://localhost:11434">
+          <input type="text" id="ollama-url" class="field-input" value="{{ ai_settings.ollama_url or 'http://localhost:11434' }}" placeholder="http://localhost:11434"
+            onblur="_aiAutosave()">
         </div>
         <div class="field-group">
           <label class="field-label">MODEL</label>
-          <input type="text" id="ollama-model" class="field-input" value="{{ ai_settings.ollama_model or 'llama3.2' }}" placeholder="llama3.2">
+          <input type="text" id="ollama-model" class="field-input" value="{{ ai_settings.ollama_model or 'llama3.2' }}" placeholder="llama3.2"
+            onblur="_aiAutosave()">
         </div>
       </div>
       <div id="ai-msg" class="field-msg" style="display:none;margin-top:8px"></div>
       <div style="display:flex;gap:8px;margin-top:12px">
         <button class="btn btn-ghost" onclick="testAiConnection()">Test Connection</button>
-        <button class="btn btn-primary" onclick="saveAiSettings()">Save Settings</button>
       </div>
       <div class="field-hint" style="margin-top:16px">
         <strong>Setup:</strong> Install <a href="https://ollama.com" target="_blank" style="color:var(--accent)">Ollama</a>, then run: <code style="font-family:var(--font-mono);font-size:11px">ollama pull llama3.2</code><br>
@@ -797,10 +799,11 @@
       <div class="field-group">
         <label class="field-label">CUSTOM SYSTEM PROMPT</label>
         <textarea id="ai-system-prompt" class="field-input field-textarea" rows="5"
-          placeholder="You are extracting information from a document to populate a show advance form for a live event. The document may be a technical rider, production spec sheet, artist contract, or similar. Return ONLY valid JSON — no explanation, no markdown, just the JSON object. Use null for fields where the information is not found in the document.">{{ ai_settings.ai_system_prompt or '' }}</textarea>
+          placeholder="You are extracting information from a document to populate a show advance form for a live event. The document may be a technical rider, production spec sheet, artist contract, or similar. Return ONLY valid JSON — no explanation, no markdown, just the JSON object. Use null for fields where the information is not found in the document."
+          onblur="_aiAutosave()">{{ ai_settings.ai_system_prompt or '' }}</textarea>
       </div>
       <div style="margin-top:8px">
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ai-system-prompt').value=''">Reset to Default</button>
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('ai-system-prompt').value='';saveAiSettings()">Reset to Default</button>
       </div>
 
       <hr style="border:none;border-top:1px solid var(--border);margin:20px 0">
@@ -808,12 +811,12 @@
       <p class="field-hint">Limit how many AI extraction jobs can run simultaneously across all Gunicorn workers. Recommended: 1–2.</p>
       <div class="field-group">
         <label class="field-label">MAX CONCURRENT AI SESSIONS</label>
-        <input type="number" id="ai-max-sessions" class="field-input" value="{{ ai_max_sessions }}" min="1" max="10" style="width:80px">
+        <input type="number" id="ai-max-sessions" class="field-input" value="{{ ai_max_sessions }}" min="1" max="10" style="width:80px"
+          onchange="saveAiSessions()">
       </div>
       <div id="ai-slots-msg" class="field-msg" style="display:none;margin-top:4px"></div>
-      <div style="margin-top:8px">
-        <button class="btn btn-primary" onclick="saveAiSessions()">Save Limit</button>
-        <span id="ai-live-status" style="font-size:11px;color:var(--text-dim);margin-left:12px"></span>
+      <div style="margin-top:4px">
+        <span id="ai-live-status" style="font-size:11px;color:var(--text-dim)"></span>
       </div>
     </div>
   </div>
@@ -2109,6 +2112,12 @@ async function runMigration() {
 }
 
 /* ── AI / Ollama Settings ───────────────────────────────────────── */
+let _aiSaveTimer = null;
+function _aiAutosave() {
+  clearTimeout(_aiSaveTimer);
+  _aiSaveTimer = setTimeout(saveAiSettings, 600);
+}
+
 async function testAiConnection() {
   const msg = document.getElementById('ai-msg');
   msg.style.display = '';
@@ -2144,8 +2153,15 @@ async function saveAiSettings() {
       method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload)
     });
     const d = await resp.json();
-    msg.textContent = d.success ? 'AI settings saved.' : (d.error || 'Save failed.');
-    msg.className = 'field-msg ' + (d.success ? 'field-msg-success' : 'field-msg-error');
+    if (d.success) {
+      msg.textContent = '✓ Saved';
+      msg.className = 'field-msg field-msg-success';
+      showSaveToast('✓ AI settings saved');
+      setTimeout(() => { msg.style.display = 'none'; }, 2500);
+    } else {
+      msg.textContent = d.error || 'Save failed.';
+      msg.className = 'field-msg field-msg-error';
+    }
   } catch(e) { msg.textContent = 'Network error'; msg.className = 'field-msg field-msg-error'; }
 }
 
@@ -2650,17 +2666,20 @@ async function saveAiSessions() {
   const val = parseInt(document.getElementById('ai-max-sessions').value) || 2;
   const resp = await fetch('/settings/ai', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ ollama_enabled: document.getElementById('ollama-enabled').checked ? '1':'0',
-                           ollama_url: document.getElementById('ollama-url').value.trim(),
-                           ollama_model: document.getElementById('ollama-model').value.trim(),
-                           ai_system_prompt: document.getElementById('ai-system-prompt').value,
-                           ai_max_sessions: String(val) })
+    body: JSON.stringify({ ai_max_sessions: String(val) })
   });
   const d = await resp.json();
   const msg = document.getElementById('ai-slots-msg');
   msg.style.display = 'block';
-  msg.textContent = d.success ? `✓ Limit set to ${val} session(s).` : '✗ ' + (d.error || 'Error');
-  if (d.success) { showSaveToast('✓ AI session limit saved'); setTimeout(()=>{msg.style.display='none';},3000); }
+  if (d.success) {
+    msg.textContent = `✓ Limit set to ${val}`;
+    msg.className = 'field-msg field-msg-success';
+    showSaveToast('✓ Session limit saved');
+    setTimeout(() => { msg.style.display = 'none'; }, 2500);
+  } else {
+    msg.textContent = '✗ ' + (d.error || 'Error');
+    msg.className = 'field-msg field-msg-error';
+  }
 }
 
 async function pollAiSlots() {
