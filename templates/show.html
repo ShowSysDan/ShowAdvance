@@ -52,11 +52,27 @@
        {% if not field.conditional_show_when %}style="grid-column:{{ span }}"{% endif %}>
     <label class="field-label">{{ field.label }}</label>
 
-    {% if field.field_type == 'yes_no' %}
+    {% if field.field_type == 'yes_no' and field.display_as == 'toggle' %}
+      <div class="yn-toggle-group{% if restricted %} yn-disabled{% endif %}">
+        <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur if cur else '-' }}">
+        <button type="button" class="yn-btn{% if cur in ['-',''] %} active{% endif %}" data-val="-">—</button>
+        <button type="button" class="yn-btn yn-no{% if cur == 'No' %} active{% endif %}" data-val="No">No</button>
+        <button type="button" class="yn-btn yn-yes{% if cur == 'Yes' %} active{% endif %}" data-val="Yes">Yes</button>
+      </div>
+
+    {% elif field.field_type == 'yes_no' %}
       <select class="field-input adv-field" data-key="{{ field.field_key }}" {% if restricted %}disabled{% endif %}>
         <option value="-" {% if cur in ['-',''] %}selected{% endif %}>—</option>
         <option value="Yes" {% if cur == 'Yes' %}selected{% endif %}>Yes</option>
         <option value="No" {% if cur == 'No' %}selected{% endif %}>No</option>
+      </select>
+
+    {% elif field.field_type == 'select' and field.allow_multi %}
+      <select class="field-input adv-field adv-multi-select" data-key="{{ field.field_key }}"
+              data-cur="{{ cur|e }}" multiple size="4" {% if restricted %}disabled{% endif %}>
+        {% for opt in field.options %}
+        <option value="{{ opt }}">{{ opt }}</option>
+        {% endfor %}
       </select>
 
     {% elif field.field_type == 'select' %}

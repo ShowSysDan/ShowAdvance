@@ -350,6 +350,29 @@ html[data-theme="light"] select.field-input {
 .checkbox-label input[type=checkbox] { accent-color: var(--accent); width: 14px; height: 14px; }
 .adv-checkbox { flex-shrink: 0; }
 
+/* Yes/No toggle button group */
+.yn-toggle-group { display: flex; gap: 0; }
+.yn-btn {
+  flex: 1; padding: 7px 0; font-size: 13px; font-family: var(--font-main);
+  background: var(--bg-surface); border: 1px solid var(--border);
+  color: var(--text-muted); cursor: pointer; transition: background 0.12s, color 0.12s;
+}
+.yn-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.yn-btn:last-child  { border-radius: 0 var(--radius) var(--radius) 0; }
+.yn-btn + .yn-btn   { border-left: none; }
+.yn-btn:hover:not(.active) { background: var(--bg-hover, var(--bg-elevated)); color: var(--text); }
+.yn-btn.active      { background: var(--accent); color: #fff; border-color: var(--accent); z-index: 1; position: relative; }
+.yn-btn.yn-yes.active { background: var(--success, #22c55e); border-color: var(--success, #22c55e); }
+.yn-btn.yn-no.active  { background: var(--danger, #ef4444); border-color: var(--danger, #ef4444); }
+.yn-disabled .yn-btn  { cursor: not-allowed; opacity: 0.6; }
+
+/* Multi-select */
+select.adv-multi-select {
+  background-image: none;
+  padding-right: 12px;
+  height: auto;
+}
+
 .conditional-block { padding: 10px 0 0; }
 .show-info-readonly { font-size: 13px; color: var(--text-dim); padding: 8px 10px; background: var(--bg-surface); border-radius: var(--radius); border: 1px solid var(--border); }
 

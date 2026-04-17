@@ -1504,10 +1504,25 @@
           </select>
         </div>
       </div>
+      <div class="yes-no-display-group" style="display:none">
+        <div class="field-group">
+          <label class="field-label">DISPLAY AS</label>
+          <select name="display_as" class="field-input">
+            <option value="">Dropdown (default)</option>
+            <option value="toggle">Button toggle (— / No / Yes)</option>
+          </select>
+        </div>
+      </div>
       <div class="options-group" style="display:none">
         <div class="field-group">
           <label class="field-label">OPTIONS (one per line)</label>
           <textarea name="options_text" class="field-input field-textarea" rows="4" placeholder="-&#10;Option A&#10;Option B"></textarea>
+        </div>
+        <div class="field-group" style="margin-top:4px">
+          <label class="checkbox-label">
+            <input type="checkbox" name="allow_multi">
+            Allow multiple selections
+          </label>
         </div>
       </div>
       <div class="contact-dept-group" style="display:none">

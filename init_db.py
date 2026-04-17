@@ -146,7 +146,9 @@ CREATE TABLE IF NOT EXISTS form_fields (
     placeholder TEXT DEFAULT '',
     width_hint TEXT DEFAULT 'full',
     is_notes_field INTEGER DEFAULT 0,
-    ai_hint TEXT DEFAULT NULL
+    ai_hint TEXT DEFAULT NULL,
+    display_as TEXT DEFAULT NULL,
+    allow_multi INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS form_history (
@@ -991,7 +993,9 @@ def migrate_db():
             placeholder TEXT DEFAULT '',
             width_hint TEXT DEFAULT 'full',
             is_notes_field INTEGER DEFAULT 0,
-            ai_hint TEXT DEFAULT NULL
+            ai_hint TEXT DEFAULT NULL,
+            display_as TEXT DEFAULT NULL,
+            allow_multi INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS form_history (
@@ -1095,6 +1099,8 @@ def migrate_db():
         'ALTER TABLE form_sections ADD COLUMN default_open INTEGER DEFAULT 1',
         'ALTER TABLE schedule_rows ADD COLUMN perf_id INTEGER DEFAULT NULL',
         'ALTER TABLE form_fields ADD COLUMN ai_hint TEXT DEFAULT NULL',
+        'ALTER TABLE form_fields ADD COLUMN display_as TEXT DEFAULT NULL',
+        'ALTER TABLE form_fields ADD COLUMN allow_multi INTEGER DEFAULT 0',
         "ALTER TABLE labor_requests ADD COLUMN break_start TEXT DEFAULT ''",
         "ALTER TABLE labor_requests ADD COLUMN break_end TEXT DEFAULT ''",
         "ALTER TABLE labor_requests ADD COLUMN work_date DATE",
@@ -1709,7 +1715,9 @@ CREATE TABLE IF NOT EXISTS form_fields (
     placeholder TEXT DEFAULT '',
     width_hint TEXT DEFAULT 'full',
     is_notes_field INTEGER DEFAULT 0,
-    ai_hint TEXT DEFAULT NULL
+    ai_hint TEXT DEFAULT NULL,
+    display_as TEXT DEFAULT NULL,
+    allow_multi INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS form_history (
@@ -2356,6 +2364,8 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".form_sections ADD COLUMN IF NOT EXISTS default_open INTEGER DEFAULT 1',
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS perf_id INTEGER DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS ai_hint TEXT DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS display_as TEXT DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS allow_multi INTEGER DEFAULT 0',
             f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_start TEXT DEFAULT ''",
             f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_end TEXT DEFAULT ''",
             f'ALTER TABLE "{app_schema}".labor_requests ADD COLUMN IF NOT EXISTS work_date DATE',
