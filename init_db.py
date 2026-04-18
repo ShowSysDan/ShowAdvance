@@ -316,7 +316,10 @@ CREATE TABLE IF NOT EXISTS audit_log (
     before_json TEXT,
     after_json  TEXT,
     ip_address  TEXT,
-    detail      TEXT
+    detail      TEXT,
+    undone_at   TIMESTAMP,
+    undone_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    undone_by_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS comment_versions (
@@ -1113,6 +1116,9 @@ def migrate_db():
         'ALTER TABLE show_comments ADD COLUMN edited_at TIMESTAMP',
         'ALTER TABLE contacts ADD COLUMN report_recipient INTEGER DEFAULT 0',
         'ALTER TABLE users ADD COLUMN must_change_password INTEGER DEFAULT 0',
+        'ALTER TABLE audit_log ADD COLUMN undone_at TIMESTAMP',
+        'ALTER TABLE audit_log ADD COLUMN undone_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
+        'ALTER TABLE audit_log ADD COLUMN undone_by_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL',
     ]:
         try:
             conn.execute(alter_sql)
@@ -1191,7 +1197,10 @@ def migrate_db():
             before_json TEXT,
             after_json  TEXT,
             ip_address  TEXT,
-            detail      TEXT
+            detail      TEXT,
+            undone_at   TIMESTAMP,
+            undone_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            undone_by_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS comment_versions (
@@ -1891,7 +1900,10 @@ CREATE TABLE IF NOT EXISTS audit_log (
     before_json TEXT,
     after_json  TEXT,
     ip_address  TEXT,
-    detail      TEXT
+    detail      TEXT,
+    undone_at   TIMESTAMP,
+    undone_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    undone_by_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_log_user_id ON audit_log(user_id);
@@ -2387,6 +2399,9 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS is_container INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS container_item_id INTEGER',
             f'ALTER TABLE "{app_schema}".asset_items ADD COLUMN IF NOT EXISTS system_type_id INTEGER',
+            f'ALTER TABLE "{app_schema}".audit_log ADD COLUMN IF NOT EXISTS undone_at TIMESTAMP',
+            f'ALTER TABLE "{app_schema}".audit_log ADD COLUMN IF NOT EXISTS undone_by INTEGER',
+            f'ALTER TABLE "{app_schema}".audit_log ADD COLUMN IF NOT EXISTS undone_by_log_id INTEGER',
         ]
 
         shared_alters = [
