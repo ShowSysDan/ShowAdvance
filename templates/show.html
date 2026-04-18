@@ -355,6 +355,7 @@
 <script>
 const SCHED_PERFORMANCES = {{ performances | tojson }};
 const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
+const SHOW_VENUE = {{ show.venue | tojson }};
 </script>
 
 <div id="tab-schedule" class="tab-pane {% if tab == 'schedule' %}active{% endif %}">
@@ -891,7 +892,6 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 // ── Assets Tab JS ─────────────────────────────────────────────────────────────
 (function() {
   const SHOW_ID = {{ show.id }};
-  const SHOW_VENUE = {{ show.venue | tojson }};
   const IS_ADMIN = {{ 'true' if is_content_admin_user else 'false' }};
   let _allAssetTypes = null;
   let _currentAssetTypeId = null;
