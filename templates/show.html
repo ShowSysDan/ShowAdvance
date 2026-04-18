@@ -23,7 +23,7 @@
 
 {# ─── Dynamic field renderer ─────────────────────────────────────────────── #}
 {% macro render_adv_field(field) %}
-{% set span = 'span 6' if field.width_hint == 'full' else ('span 2' if field.width_hint == 'third' else 'span 3') %}
+{% set span = 'span 12' if field.width_hint == 'full' else ('span 4' if field.width_hint == 'third' else ('span 3' if field.width_hint == 'quarter' else 'span 6')) %}
 {% set cur = adv(field.field_key) %}
 
 {% if field.field_type == 'checkbox' %}
@@ -34,7 +34,7 @@
   </label>
 
 {% elif field.is_notes_field %}
-  <div class="notes-section" style="grid-column:span 6">
+  <div class="notes-section" style="grid-column:span 12">
     <button type="button" class="notes-toggle" onclick="toggleNotes(this)">▸ {{ field.label }}</button>
     <div class="notes-body hidden">
       <textarea class="field-input field-textarea adv-field" data-key="{{ field.field_key }}"

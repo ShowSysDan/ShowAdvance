@@ -33,7 +33,7 @@ from werkzeug.utils import secure_filename
 def _safe_content_disposition(filename):
     """Build a safe Content-Disposition header value, stripping injection chars."""
     safe = secure_filename(filename) or 'download'
-    return f'attachment; filename="{safe}"'
+    return f'inline; filename="{safe}"'
 
 
 # Allowed HTML tags/attributes for user-supplied rich text (message body)
@@ -1185,6 +1185,107 @@ def log_audit(db, action, entity_type, entity_id=None, show_id=None,
         pass
 
 
+# ─── Audit Undo Infrastructure ────────────────────────────────────────────────
+#
+# Maps audit_log.entity_type values to the SQL table that stores the entity,
+# for routes that need to look up or reverse a mutation. Only leaf tables with
+# integer primary keys named `id` are listed — these are the entities we can
+# undo. Entities not in this map (form, setting, system, attachment, etc.)
+# either use a separate restore flow or are not reversibly logged.
+
+UNDO_TABLE_MAP = {
+    'contact':              'contacts',
+    'form_field':           'form_fields',
+    'form_section':         'form_sections',
+    'schedule_template':    'schedule_templates',
+    'position_category':    'position_categories',
+    'job_position':         'job_positions',
+    'labor_request':        'labor_requests',
+    'pay_rate_level':       'pay_rate_levels',
+    'crew_member':          'crew_members',
+    'warehouse_location':   'warehouse_locations',
+    'asset_category':       'asset_categories',
+    'asset_type':           'asset_types',
+    'asset_item':           'asset_items',
+    'show_asset':           'show_assets',
+    'show_external_rental': 'show_external_rentals',
+    'site_message':         'site_messages',
+    'group':                'user_groups',
+    'schedule_meta_field':  'schedule_meta_fields',
+}
+
+# Action suffixes we know how to reverse. Maps suffix → operation kind.
+_UNDO_VERB = {
+    # Creates — reverse with DELETE FROM <table> WHERE id = entity_id
+    'ADD':     'create',
+    'CREATE':  'create',
+    'POST':    'create',
+    'UPLOAD':  'create',
+    # Updates — reverse by UPDATE …SET (cols from before_json) WHERE id = entity_id
+    'EDIT':    'update',
+    'UPDATE':  'update',
+    'RENAME':  'update',
+    # Deletes — reverse by INSERT (cols from before_json) INTO <table>
+    'DELETE':  'delete',
+    'REMOVE':  'delete',
+    'RETIRE':  'delete',
+}
+
+
+def _snapshot_row(db, table, row_id):
+    """Return a dict of all columns for a single row, or None if not found."""
+    try:
+        row = db.execute(f'SELECT * FROM {table} WHERE id = ?', (row_id,)).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def log_audit_change(db, action, entity_type, entity_id, *, show_id=None, detail=None,
+                     before=None, after=None, table=None):
+    """Write an audit row with before/after state captured for undo.
+
+    If `table` is provided and `before`/`after` are None, the wrapper fetches the
+    current row snapshot automatically — useful right *before* a delete or right
+    *after* an insert/update. Most callers should pass explicit `before`/`after`
+    dicts when they already have the data in hand.
+    """
+    if table and before is None and after is None and entity_id is not None:
+        # Default: snapshot current row as `after` (fits create/update patterns)
+        after = _snapshot_row(db, table, entity_id)
+    log_audit(db, action, entity_type, entity_id, show_id=show_id,
+              before=before, after=after, detail=detail)
+
+
+def _classify_undo_action(action):
+    """Return one of 'create' / 'update' / 'delete' / None for an audit action."""
+    if not action:
+        return None
+    # Last word-chunk after the final underscore drives the verb (ASSET_ITEM_ADD -> ADD)
+    suffix = action.rsplit('_', 1)[-1].upper()
+    return _UNDO_VERB.get(suffix)
+
+
+def _can_undo_audit_row(row):
+    """Return (ok, reason) — True if this audit row has the data needed to reverse it."""
+    if not row:
+        return False, 'Audit row not found'
+    if row['entity_type'] not in UNDO_TABLE_MAP:
+        return False, f"Entity type '{row['entity_type']}' is not undoable"
+    kind = _classify_undo_action(row['action'])
+    if kind is None:
+        return False, f"Action '{row['action']}' has no known reverse"
+    if kind == 'create' and not row['entity_id']:
+        return False, 'No entity_id recorded — cannot target the created row'
+    if kind == 'update' and not row['before_json']:
+        return False, 'No before-state recorded — cannot restore prior values'
+    if kind == 'delete' and not row['before_json']:
+        return False, 'No before-state recorded — cannot re-create deleted row'
+    if row.get('undone_at'):
+        return False, 'Already undone'
+    return True, kind
+
+
 # ─── Auth Routes ──────────────────────────────────────────────────────────────
 
 def _login_route():
@@ -1281,7 +1382,7 @@ def admin_view_as():
         return jsonify({'error': 'Forbidden'}), 403
     data = request.get_json() or {}
     view_as = data.get('role', '')
-    if view_as not in ('user', 'readonly', 'content_admin'):
+    if view_as not in ('staff', 'user', 'readonly'):
         return jsonify({'error': 'Invalid role'}), 400
     # Save real values if not already saved
     if '_real_role' not in session:
@@ -1303,10 +1404,10 @@ def admin_view_as():
         session['is_readonly'] = False
         session['is_content_admin'] = False
         session['is_labor_scheduler'] = False
-    elif view_as == 'content_admin':
-        session['user_role'] = 'user'
+    elif view_as == 'staff':
+        session['user_role'] = 'staff'
         session['is_readonly'] = False
-        session['is_content_admin'] = True
+        session['is_content_admin'] = False
         session['is_labor_scheduler'] = False
     return jsonify({'success': True, 'view_as': view_as})
 
@@ -3134,6 +3235,7 @@ def audit_log_view():
         SELECT al.id, al.timestamp, al.username, al.action, al.entity_type,
                al.entity_id, al.show_id, al.before_json, al.after_json,
                al.ip_address, al.detail,
+               al.undone_at, al.undone_by, al.undone_by_log_id,
                s.name as show_name,
                u.display_name as display_name
         FROM audit_log al
@@ -3156,6 +3258,8 @@ def audit_log_view():
     for r in rows:
         entry = dict(r)
         entry['display_name'] = r['display_name'] or r['username']
+        ok, _reason = _can_undo_audit_row(r)
+        entry['undoable'] = ok
         entries.append(entry)
 
     return render_template('audit_log.html',
@@ -3169,6 +3273,115 @@ def audit_log_view():
         filters=request.args,
         user=get_current_user(),
     )
+
+
+@app.route('/admin/audit/<int:log_id>/undo', methods=['POST'])
+@admin_required
+def audit_undo(log_id):
+    """Reverse a single audit_log entry, if enough state was captured to do so.
+
+    Supports three shapes of action:
+      * create  — deletes the row whose id == audit.entity_id
+      * update  — restores columns from audit.before_json on that row
+      * delete  — re-inserts audit.before_json, preserving the original id
+    Writes a new audit row (ACTION_UNDONE) and marks the original as undone.
+    """
+    db = get_db()
+    row = db.execute("""
+        SELECT id, action, entity_type, entity_id, show_id,
+               before_json, after_json, undone_at
+        FROM audit_log WHERE id = ?
+    """, (log_id,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Audit entry not found'}), 404
+
+    ok, kind_or_reason = _can_undo_audit_row(row)
+    if not ok:
+        db.close()
+        return jsonify({'error': kind_or_reason}), 400
+
+    kind = kind_or_reason  # 'create' | 'update' | 'delete'
+    table = UNDO_TABLE_MAP[row['entity_type']]
+    entity_id = row['entity_id']
+    before = json.loads(row['before_json']) if row['before_json'] else None
+    after  = json.loads(row['after_json'])  if row['after_json']  else None
+
+    try:
+        if kind == 'create':
+            # Snapshot the current row before deletion (so the undo is itself undoable)
+            before_undo = _snapshot_row(db, table, entity_id)
+            db.execute(f'DELETE FROM {table} WHERE id = ?', (entity_id,))
+            undo_before, undo_after = before_undo, None
+
+        elif kind == 'update':
+            # Capture current row, then restore columns from before_json
+            before_undo = _snapshot_row(db, table, entity_id)
+            if before_undo is None:
+                db.close()
+                return jsonify({'error': f'{row["entity_type"]} #{entity_id} no longer exists'}), 409
+            # Only restore columns that exist in both before_json and the current row
+            cols = [c for c in before.keys() if c in before_undo and c != 'id']
+            if not cols:
+                db.close()
+                return jsonify({'error': 'No matching columns to restore'}), 400
+            set_clause = ', '.join(f'{c} = ?' for c in cols)
+            values = [before[c] for c in cols] + [entity_id]
+            db.execute(f'UPDATE {table} SET {set_clause} WHERE id = ?', values)
+            undo_before, undo_after = before_undo, before
+
+        elif kind == 'delete':
+            # Re-insert the deleted row from before_json, preserving its id
+            cols = list(before.keys())
+            placeholders = ', '.join('?' for _ in cols)
+            col_list = ', '.join(cols)
+            values = [before[c] for c in cols]
+            db.execute(f'INSERT INTO {table} ({col_list}) VALUES ({placeholders})', values)
+            undo_before, undo_after = None, before
+
+        else:
+            db.close()
+            return jsonify({'error': f'Unknown undo kind: {kind}'}), 500
+
+        # Write the undo audit row
+        undo_cur = db.execute("""
+            INSERT INTO audit_log
+              (user_id, username, action, entity_type, entity_id,
+               show_id, before_json, after_json, ip_address, detail)
+            VALUES (?,?,?,?,?,?,?,?,?,?)
+        """, (
+            session.get('user_id'),
+            session.get('username', ''),
+            'ACTION_UNDONE',
+            row['entity_type'],
+            entity_id,
+            row['show_id'],
+            json.dumps(undo_before) if undo_before is not None else None,
+            json.dumps(undo_after)  if undo_after  is not None else None,
+            request.remote_addr,
+            f'Undid audit #{log_id} ({row["action"]})',
+        ))
+        new_log_id = getattr(undo_cur, 'lastrowid', None)
+
+        # Mark the original row as undone
+        db.execute("""
+            UPDATE audit_log
+               SET undone_at = CURRENT_TIMESTAMP,
+                   undone_by = ?,
+                   undone_by_log_id = ?
+             WHERE id = ?
+        """, (session.get('user_id'), new_log_id, log_id))
+
+        db.commit()
+        db.close()
+        return jsonify({'success': True, 'undo_log_id': new_log_id})
+
+    except Exception as e:
+        try: db.rollback()
+        except Exception: pass
+        db.close()
+        syslog_logger.warning(f"AUDIT_UNDO_FAILED log_id={log_id} err={e}")
+        return jsonify({'error': f'Undo failed: {e}'}), 500
 
 
 # ─── Settings ─────────────────────────────────────────────────────────────────
@@ -3342,7 +3555,8 @@ def add_contact():
           1 if request.form.get('production_recipient') else 0,
           1 if request.form.get('system_recipient') else 0))
     cid_new = cur.lastrowid
-    log_audit(db, 'CONTACT_ADD', 'contact', cid_new, detail=name)
+    log_audit_change(db, 'CONTACT_ADD', 'contact', cid_new, detail=name,
+                     table='contacts')
     db.commit(); db.close()
     syslog_logger.info(f"CONTACT_ADD id={cid_new} name={name!r} by={session.get('username')}")
     flash('Contact added.', 'success')
@@ -3354,6 +3568,7 @@ def add_contact():
 def edit_contact(cid):
     data = request.get_json(force=True) or {}
     db = get_db()
+    before = _snapshot_row(db, 'contacts', cid)
     db.execute("""
         UPDATE contacts SET name=?, title=?, department=?, phone=?, email=?,
                             report_recipient=?, advance_recipient=?, production_recipient=?, system_recipient=?
@@ -3365,7 +3580,9 @@ def edit_contact(cid):
           1 if data.get('production_recipient') else 0,
           1 if data.get('system_recipient') else 0,
           cid))
-    log_audit(db, 'CONTACT_EDIT', 'contact', cid, detail=data.get('name',''))
+    after = _snapshot_row(db, 'contacts', cid)
+    log_audit(db, 'CONTACT_EDIT', 'contact', cid, detail=data.get('name',''),
+              before=before, after=after)
     db.commit(); db.close()
     syslog_logger.info(f"CONTACT_EDIT id={cid} name={data.get('name','')!r} by={session.get('username')}")
     return jsonify({'success': True})
@@ -3375,8 +3592,9 @@ def edit_contact(cid):
 @content_admin_required
 def delete_contact(cid):
     db = get_db()
-    row = db.execute('SELECT name FROM contacts WHERE id=?', (cid,)).fetchone()
-    log_audit(db, 'CONTACT_DELETE', 'contact', cid, detail=row['name'] if row else str(cid))
+    before = _snapshot_row(db, 'contacts', cid)
+    name = before['name'] if before else str(cid)
+    log_audit(db, 'CONTACT_DELETE', 'contact', cid, detail=name, before=before)
     db.execute('DELETE FROM contacts WHERE id=?', (cid,))
     db.commit(); db.close()
     syslog_logger.info(f"CONTACT_DELETE id={cid} by={session.get('username')}")
@@ -3727,7 +3945,8 @@ def add_form_field():
               data.get('display_as') or None,
               1 if data.get('allow_multi') else 0))
         fid = cur.lastrowid
-        log_audit(db, 'FIELD_ADD', 'form_field', fid, detail=field_key)
+        log_audit_change(db, 'FIELD_ADD', 'form_field', fid, detail=field_key,
+                         table='form_fields')
         db.commit()
         syslog_logger.info(f"FIELD_ADD key={field_key} by={session.get('username')}")
         return jsonify({'success': True, 'id': fid})
@@ -3744,6 +3963,7 @@ def edit_form_field(fid):
     options = data.get('options', [])
     options_json = json.dumps(options) if options else None
     db = get_db()
+    before = _snapshot_row(db, 'form_fields', fid)
     db.execute("""
         UPDATE form_fields SET
             section_id=?, label=?, field_type=?,
@@ -3761,7 +3981,9 @@ def edit_form_field(fid):
           data.get('display_as') or None,
           1 if data.get('allow_multi') else 0,
           fid))
-    log_audit(db, 'FIELD_EDIT', 'form_field', fid, detail=data.get('label',''))
+    after = _snapshot_row(db, 'form_fields', fid)
+    log_audit(db, 'FIELD_EDIT', 'form_field', fid, detail=data.get('label',''),
+              before=before, after=after)
     db.commit(); db.close()
     syslog_logger.info(f"FIELD_EDIT id={fid} label={data.get('label','')!r} by={session.get('username')}")
     return jsonify({'success': True})
@@ -3771,7 +3993,8 @@ def edit_form_field(fid):
 @content_admin_required
 def delete_form_field(fid):
     db = get_db()
-    log_audit(db, 'FIELD_DELETE', 'form_field', fid)
+    before = _snapshot_row(db, 'form_fields', fid)
+    log_audit(db, 'FIELD_DELETE', 'form_field', fid, before=before)
     db.execute('DELETE FROM form_fields WHERE id=?', (fid,))
     db.commit(); db.close()
     syslog_logger.info(f"FIELD_DELETE id={fid} by={session.get('username')}")
@@ -3809,7 +4032,8 @@ def add_form_section():
               data.get('icon', '◈'),
               0 if str(data.get('default_open', '1')) == '0' else 1))
         sid = cur.lastrowid
-        log_audit(db, 'SECTION_ADD', 'form_section', sid, detail=label)
+        log_audit_change(db, 'SECTION_ADD', 'form_section', sid, detail=label,
+                         table='form_sections')
         db.commit()
         syslog_logger.info(f"SECTION_ADD id={sid} label={label!r} by={session.get('username')}")
         return jsonify({'success': True, 'id': sid})
@@ -3824,6 +4048,7 @@ def add_form_section():
 def edit_form_section(sid):
     data = request.get_json(force=True) or {}
     db = get_db()
+    before = _snapshot_row(db, 'form_sections', sid)
     db.execute("""
         UPDATE form_sections SET label=?, collapsible=?, icon=?, default_open=? WHERE id=?
     """, (data.get('label',''),
@@ -3831,7 +4056,9 @@ def edit_form_section(sid):
           data.get('icon','◈'),
           0 if str(data.get('default_open', '1')) == '0' else 1,
           sid))
-    log_audit(db, 'SECTION_EDIT', 'form_section', sid, detail=data.get('label',''))
+    after = _snapshot_row(db, 'form_sections', sid)
+    log_audit(db, 'SECTION_EDIT', 'form_section', sid, detail=data.get('label',''),
+              before=before, after=after)
     db.commit(); db.close()
     syslog_logger.info(f"SECTION_EDIT id={sid} label={data.get('label','')!r} by={session.get('username')}")
     return jsonify({'success': True})
@@ -3841,7 +4068,8 @@ def edit_form_section(sid):
 @content_admin_required
 def delete_form_section(sid):
     db = get_db()
-    log_audit(db, 'SECTION_DELETE', 'form_section', sid)
+    before = _snapshot_row(db, 'form_sections', sid)
+    log_audit(db, 'SECTION_DELETE', 'form_section', sid, before=before)
     db.execute('DELETE FROM form_sections WHERE id=?', (sid,))
     db.commit(); db.close()
     syslog_logger.info(f"SECTION_DELETE id={sid} by={session.get('username')}")
@@ -5212,7 +5440,8 @@ def add_position_category():
         (name, max_order + 10)
     )
     cid = cur.lastrowid
-    log_audit(db, 'POSITION_CATEGORY_ADD', 'position_category', cid, detail=name)
+    log_audit_change(db, 'POSITION_CATEGORY_ADD', 'position_category', cid, detail=name,
+                     table='position_categories')
     db.commit()
     db.close()
     syslog_logger.info(f"POSITION_CATEGORY_ADD id={cid} name={name!r} by={session.get('username')}")
@@ -5227,8 +5456,11 @@ def edit_position_category(cid):
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     db = get_db()
+    before = _snapshot_row(db, 'position_categories', cid)
     db.execute('UPDATE position_categories SET name=? WHERE id=?', (name, cid))
-    log_audit(db, 'POSITION_CATEGORY_EDIT', 'position_category', cid, detail=name)
+    after = _snapshot_row(db, 'position_categories', cid)
+    log_audit(db, 'POSITION_CATEGORY_EDIT', 'position_category', cid, detail=name,
+              before=before, after=after)
     db.commit()
     db.close()
     syslog_logger.info(f"POSITION_CATEGORY_EDIT id={cid} name={name!r} by={session.get('username')}")
@@ -5240,11 +5472,11 @@ def edit_position_category(cid):
 def delete_position_category(cid):
     db = get_db()
     # Null out category_id on positions in this category
-    row = db.execute('SELECT name FROM position_categories WHERE id=?', (cid,)).fetchone()
+    before = _snapshot_row(db, 'position_categories', cid)
     db.execute('UPDATE job_positions SET category_id=NULL WHERE category_id=?', (cid,))
     db.execute('DELETE FROM position_categories WHERE id=?', (cid,))
     log_audit(db, 'POSITION_CATEGORY_DELETE', 'position_category', cid,
-              detail=row['name'] if row else str(cid))
+              detail=before['name'] if before else str(cid), before=before)
     db.commit()
     db.close()
     syslog_logger.info(f"POSITION_CATEGORY_DELETE id={cid} by={session.get('username')}")
@@ -5269,7 +5501,8 @@ def add_job_position():
         (category_id, name, venue, override_rate, max_order + 10)
     )
     pid = cur.lastrowid
-    log_audit(db, 'JOB_POSITION_ADD', 'job_position', pid, detail=name)
+    log_audit_change(db, 'JOB_POSITION_ADD', 'job_position', pid, detail=name,
+                     table='job_positions')
     db.commit()
     db.close()
     syslog_logger.info(f"JOB_POSITION_ADD id={pid} name={name!r} category_id={category_id} by={session.get('username')}")
@@ -5288,11 +5521,14 @@ def edit_job_position(pid):
     override_rate = data.get('override_rate')
     override_rate = float(override_rate) if override_rate not in (None, '') else None
     db = get_db()
+    before = _snapshot_row(db, 'job_positions', pid)
     db.execute(
         'UPDATE job_positions SET name=?, category_id=?, venue=?, override_rate=? WHERE id=?',
         (name, category_id, venue, override_rate, pid)
     )
-    log_audit(db, 'JOB_POSITION_EDIT', 'job_position', pid, detail=name)
+    after = _snapshot_row(db, 'job_positions', pid)
+    log_audit(db, 'JOB_POSITION_EDIT', 'job_position', pid, detail=name,
+              before=before, after=after)
     db.commit()
     db.close()
     syslog_logger.info(f"JOB_POSITION_EDIT id={pid} name={name!r} category_id={category_id} by={session.get('username')}")
@@ -5303,9 +5539,9 @@ def edit_job_position(pid):
 @content_admin_required
 def delete_job_position(pid):
     db = get_db()
-    row = db.execute('SELECT name FROM job_positions WHERE id=?', (pid,)).fetchone()
+    before = _snapshot_row(db, 'job_positions', pid)
     log_audit(db, 'JOB_POSITION_DELETE', 'job_position', pid,
-              detail=row['name'] if row else str(pid))
+              detail=before['name'] if before else str(pid), before=before)
     db.execute('DELETE FROM job_positions WHERE id=?', (pid,))
     db.commit()
     db.close()
@@ -5734,7 +5970,8 @@ def add_pay_rate_level():
     cur = db.execute('INSERT INTO pay_rate_levels (name, hourly_rate, sort_order) VALUES (?,?,?)',
                      (name, rate, max_order + 10))
     lid = cur.lastrowid
-    log_audit(db, 'PAY_LEVEL_ADD', 'pay_rate_level', lid, detail=f'{name} ${rate}/hr')
+    log_audit_change(db, 'PAY_LEVEL_ADD', 'pay_rate_level', lid,
+                     detail=f'{name} ${rate}/hr', table='pay_rate_levels')
     db.commit(); db.close()
     syslog_logger.info(f"PAY_LEVEL_ADD id={lid} name={name!r} rate={rate} by={session.get('username')}")
     return jsonify({'success': True, 'id': lid, 'name': name, 'hourly_rate': rate})
@@ -5749,8 +5986,11 @@ def edit_pay_rate_level(lid):
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     db = get_db()
+    before = _snapshot_row(db, 'pay_rate_levels', lid)
     db.execute('UPDATE pay_rate_levels SET name=?, hourly_rate=? WHERE id=?', (name, rate, lid))
-    log_audit(db, 'PAY_LEVEL_EDIT', 'pay_rate_level', lid, detail=f'{name} ${rate}/hr')
+    after = _snapshot_row(db, 'pay_rate_levels', lid)
+    log_audit(db, 'PAY_LEVEL_EDIT', 'pay_rate_level', lid, detail=f'{name} ${rate}/hr',
+              before=before, after=after)
     db.commit(); db.close()
     syslog_logger.info(f"PAY_LEVEL_EDIT id={lid} name={name!r} rate={rate} by={session.get('username')}")
     return jsonify({'success': True})
@@ -5760,8 +6000,9 @@ def edit_pay_rate_level(lid):
 @admin_required
 def delete_pay_rate_level(lid):
     db = get_db()
+    before = _snapshot_row(db, 'pay_rate_levels', lid)
     db.execute('DELETE FROM pay_rate_levels WHERE id=?', (lid,))
-    log_audit(db, 'PAY_LEVEL_DELETE', 'pay_rate_level', lid)
+    log_audit(db, 'PAY_LEVEL_DELETE', 'pay_rate_level', lid, before=before)
     db.commit(); db.close()
     syslog_logger.info(f"PAY_LEVEL_DELETE id={lid} by={session.get('username')}")
     return jsonify({'success': True})
@@ -5806,7 +6047,8 @@ def add_crew_member():
         (name, rate_level_id, max_order + 10)
     )
     mid = cur.lastrowid
-    log_audit(db, 'CREW_MEMBER_ADD', 'crew_member', mid, detail=name)
+    log_audit_change(db, 'CREW_MEMBER_ADD', 'crew_member', mid, detail=name,
+                     table='crew_members')
     db.commit()
     level_row = db.execute(
         'SELECT name, hourly_rate FROM pay_rate_levels WHERE id=?', (rate_level_id,)
@@ -5830,8 +6072,11 @@ def edit_crew_member(mid):
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     db = get_db()
     rate_level_id = data.get('rate_level_id') or None
+    before = _snapshot_row(db, 'crew_members', mid)
     db.execute('UPDATE crew_members SET name=?, rate_level_id=? WHERE id=?', (name, rate_level_id, mid))
-    log_audit(db, 'CREW_MEMBER_EDIT', 'crew_member', mid, detail=name)
+    after = _snapshot_row(db, 'crew_members', mid)
+    log_audit(db, 'CREW_MEMBER_EDIT', 'crew_member', mid, detail=name,
+              before=before, after=after)
     db.commit()
     level_row = db.execute(
         'SELECT name, hourly_rate FROM pay_rate_levels WHERE id=?', (rate_level_id,)
@@ -5849,8 +6094,9 @@ def edit_crew_member(mid):
 @content_admin_required
 def delete_crew_member(mid):
     db = get_db()
+    before = _snapshot_row(db, 'crew_members', mid)
     db.execute('DELETE FROM crew_members WHERE id=?', (mid,))
-    log_audit(db, 'CREW_MEMBER_DELETE', 'crew_member', mid)
+    log_audit(db, 'CREW_MEMBER_DELETE', 'crew_member', mid, before=before)
     db.commit()
     db.close()
     syslog_logger.info(f"TECHNICIAN_DELETE id={mid} by={session.get('username')}")
@@ -5928,7 +6174,8 @@ def warehouse_location_add():
         db.execute('INSERT INTO warehouse_locations (name, sort_order) VALUES (?,?)', (name, max_order + 1))
         db.commit()
         row = db.execute('SELECT * FROM warehouse_locations WHERE name=?', (name,)).fetchone()
-        log_audit(db, 'WAREHOUSE_LOC_ADD', 'warehouse_location', row['id'], detail=name)
+        log_audit_change(db, 'WAREHOUSE_LOC_ADD', 'warehouse_location', row['id'],
+                         detail=name, table='warehouse_locations')
         db.commit()
         syslog_logger.info(f"WAREHOUSE_LOC_ADD name={name} by={session.get('username')}")
         result = dict(row)
@@ -5948,9 +6195,12 @@ def warehouse_location_edit(loc_id):
         return jsonify({'error': 'Name required'}), 400
     db = get_db()
     try:
+        before = _snapshot_row(db, 'warehouse_locations', loc_id)
         db.execute('UPDATE warehouse_locations SET name=? WHERE id=?', (name, loc_id))
         db.commit()
-        log_audit(db, 'WAREHOUSE_LOC_EDIT', 'warehouse_location', loc_id, detail=name)
+        after = _snapshot_row(db, 'warehouse_locations', loc_id)
+        log_audit(db, 'WAREHOUSE_LOC_EDIT', 'warehouse_location', loc_id,
+                  detail=name, before=before, after=after)
         db.commit()
         db.close()
         return jsonify({'success': True})
@@ -5963,11 +6213,13 @@ def warehouse_location_edit(loc_id):
 @admin_required
 def warehouse_location_delete(loc_id):
     db = get_db()
+    before = _snapshot_row(db, 'warehouse_locations', loc_id)
     row = db.execute('SELECT name FROM warehouse_locations WHERE id=?', (loc_id,)).fetchone()
     db.execute('DELETE FROM warehouse_locations WHERE id=?', (loc_id,))
     db.commit()
     log_audit(db, 'WAREHOUSE_LOC_DELETE', 'warehouse_location', loc_id,
-              detail=row['name'] if row else str(loc_id))
+              detail=row['name'] if row else str(loc_id),
+              before=before)
     db.commit()
     db.close()
     return jsonify({'success': True})
@@ -5996,7 +6248,8 @@ def asset_category_add():
     db.execute('INSERT INTO asset_categories (name, sort_order) VALUES (?,?)', (name, max_order + 1))
     db.commit()
     row = db.execute('SELECT * FROM asset_categories WHERE name=? ORDER BY id DESC LIMIT 1', (name,)).fetchone()
-    log_audit(db, 'ASSET_CATEGORY_ADD', 'asset_category', row['id'], detail=name)
+    log_audit_change(db, 'ASSET_CATEGORY_ADD', 'asset_category', row['id'],
+                     detail=name, table='asset_categories')
     db.commit()
     syslog_logger.info(f"ASSET_CATEGORY_ADD name={name} by={session.get('username')}")
     result = dict(row)
@@ -6012,9 +6265,12 @@ def asset_category_edit(cat_id):
     if not name:
         return jsonify({'error': 'Name required'}), 400
     db = get_db()
+    before = _snapshot_row(db, 'asset_categories', cat_id)
     db.execute('UPDATE asset_categories SET name=? WHERE id=?', (name, cat_id))
     db.commit()
-    log_audit(db, 'ASSET_CATEGORY_EDIT', 'asset_category', cat_id, detail=name)
+    after = _snapshot_row(db, 'asset_categories', cat_id)
+    log_audit(db, 'ASSET_CATEGORY_EDIT', 'asset_category', cat_id,
+              detail=name, before=before, after=after)
     db.commit()
     db.close()
     return jsonify({'success': True})
@@ -6031,11 +6287,13 @@ def asset_category_delete(cat_id):
     if type_count > 0:
         db.close()
         return jsonify({'error': f'Cannot delete: this category still has {type_count} item type(s). Retire all types first.'}), 400
+    before = _snapshot_row(db, 'asset_categories', cat_id)
     row = db.execute('SELECT name FROM asset_categories WHERE id=?', (cat_id,)).fetchone()
     db.execute('DELETE FROM asset_categories WHERE id=?', (cat_id,))
     db.commit()
     log_audit(db, 'ASSET_CATEGORY_DELETE', 'asset_category', cat_id,
-              detail=row['name'] if row else str(cat_id))
+              detail=row['name'] if row else str(cat_id),
+              before=before)
     db.commit()
     db.close()
     return jsonify({'success': True})

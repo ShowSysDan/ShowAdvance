@@ -65,7 +65,7 @@
         <th style="width:90px">ENTITY</th>
         <th>SHOW / DETAIL</th>
         <th style="width:110px">IP</th>
-        <th style="width:36px"></th>
+        <th style="width:90px"></th>
       </tr>
     </thead>
     <tbody>
@@ -83,7 +83,17 @@
           {{ e.detail or '' }}
         </td>
         <td class="text-dim" style="font-size:.78rem">{{ e.ip_address or '—' }}</td>
-        <td>
+        <td style="white-space:nowrap;text-align:right">
+          {% if e.undone_at %}
+            <span class="audit-undone-badge" title="Undone at {{ e.undone_at }}">undone</span>
+          {% elif e.undoable %}
+            <button class="btn-icon audit-undo-btn" title="Undo this action"
+                    onclick="undoAudit({{ e.id }}, '{{ e.action }}')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14">
+                <path d="M3 7v6h6"/><path d="M21 17a9 9 0 00-15-6.7L3 13"/>
+              </svg>
+            </button>
+          {% endif %}
           {% if e.before_json or e.after_json %}
           <button class="btn-icon" title="Show diff"
                   onclick="toggleDiff({{ e.id }})">
@@ -151,6 +161,19 @@
 .action-comment{ background: rgba(251,191,36,.15);  color: #fbbf24; }
 .action-history{ background: rgba(167,139,250,.15); color: #a78bfa; }
 
+.audit-undone-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: .7rem;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  background: rgba(148,163,184,.15);
+  color: var(--text-dim);
+}
+.audit-undo-btn { color: #fb923c; }
+.audit-undo-btn:hover { color: #f97316; }
+
 .audit-diff-container {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -184,6 +207,25 @@
 function toggleDiff(id) {
   const row = document.getElementById('diff-' + id);
   if (row) row.style.display = row.style.display === 'none' ? '' : 'none';
+}
+
+async function undoAudit(id, action) {
+  if (!confirm(`Undo "${action}" (audit #${id})?\n\nThis will reverse the action and record a new audit entry.`)) return;
+  try {
+    const resp = await fetch(`/admin/audit/${id}/undo`, {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest', 'Content-Type': 'application/json' },
+      body: '{}'
+    });
+    const data = await resp.json();
+    if (!resp.ok || data.error) {
+      alert('Undo failed: ' + (data.error || resp.statusText));
+      return;
+    }
+    window.location.reload();
+  } catch (err) {
+    alert('Undo failed: ' + err.message);
+  }
 }
 </script>
 {% endblock %}
