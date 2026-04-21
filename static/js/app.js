@@ -567,22 +567,33 @@ function copySchedDay(sourcePerfId, targetPerfId) {
   scheduleSave();
 }
 
-/* Insert a SHOW START row at the top of the day */
+/* Insert a SHOW START row at the top of the day for each provided time */
 function pullAdvanceTime(perfId, perfTime) {
   const tbody = document.getElementById(`schedule-rows-${perfId}`);
   if (!tbody) return;
-  const tr = document.createElement('tr');
-  tr.className = 'schedule-row';
-  tr.innerHTML = `
-    <td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>
-    <td><input type="text" class="sched-cell" value="${parseTimeToHHMM(perfTime)}"></td>
-    <td><input type="text" class="sched-cell" placeholder="16:00" value=""></td>
-    <td><input type="text" class="sched-cell" value="SHOW START"></td>
-    <td><input type="text" class="sched-cell" placeholder="Notes" value=""></td>
-    <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
-  `;
-  tbody.insertBefore(tr, tbody.firstChild);
-  _bindRowDrag(tr);
+  const times = Array.isArray(perfTime) ? perfTime : [perfTime];
+  const existing = new Set(
+    Array.from(tbody.querySelectorAll('.schedule-row')).map(tr => {
+      const cells = tr.querySelectorAll('.sched-cell');
+      return (cells[0]?.value || '') + '|' + (cells[2]?.value || '').toUpperCase();
+    })
+  );
+  times.slice().reverse().forEach(t => {
+    const hhmm = parseTimeToHHMM(t);
+    if (existing.has(hhmm + '|SHOW START')) return;
+    const tr = document.createElement('tr');
+    tr.className = 'schedule-row';
+    tr.innerHTML = `
+      <td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>
+      <td><input type="text" class="sched-cell" value="${hhmm}"></td>
+      <td><input type="text" class="sched-cell" placeholder="16:00" value=""></td>
+      <td><input type="text" class="sched-cell" value="SHOW START"></td>
+      <td><input type="text" class="sched-cell" placeholder="Notes" value=""></td>
+      <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
+    `;
+    tbody.insertBefore(tr, tbody.firstChild);
+    _bindRowDrag(tr);
+  });
   scheduleSave();
 }
 

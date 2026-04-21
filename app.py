@@ -183,6 +183,27 @@ def pretty_json_filter(value):
         return value or ''
 
 
+@app.template_filter('hhmm')
+def hhmm_filter(value):
+    """Normalize a time string to HH:MM for display (e.g. '1900' → '19:00')."""
+    s = (value or '').strip() if isinstance(value, str) else str(value or '').strip()
+    if not s:
+        return ''
+    if ':' in s:
+        parts = s.split(':', 1)
+        try:
+            h = int(parts[0]); m = int(parts[1])
+        except ValueError:
+            return s
+    elif s.isdigit() and len(s) in (3, 4):
+        h = int(s[:-2]); m = int(s[-2:])
+    else:
+        return s
+    if 0 <= h <= 23 and 0 <= m <= 59:
+        return f'{h:02d}:{m:02d}'
+    return s
+
+
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advance.db')
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 
@@ -1524,6 +1545,38 @@ def dashboard():
             active = []
             archived = []
 
+    # Attach full performance list per show (for multi-date display on card)
+    def _attach_perfs(rows):
+        if not rows:
+            return []
+        ids = [r['id'] for r in rows]
+        ph = ','.join('?' * len(ids))
+        perfs = db.execute(
+            f"""SELECT show_id, perf_date, perf_time FROM show_performances
+                WHERE show_id IN ({ph})
+                ORDER BY CASE WHEN perf_date IS NULL THEN 1 ELSE 0 END,
+                         perf_date, perf_time, id""",
+            ids
+        ).fetchall()
+        by_show = {}
+        for p in perfs:
+            pd = p['perf_date']
+            if pd is not None and not isinstance(pd, str):
+                try: pd = pd.strftime('%Y-%m-%d')
+                except AttributeError: pd = str(pd)
+            by_show.setdefault(p['show_id'], []).append(
+                {'perf_date': pd, 'perf_time': p['perf_time']}
+            )
+        out = []
+        for r in rows:
+            d = dict(r)
+            d['performances'] = by_show.get(r['id'], [])
+            out.append(d)
+        return out
+
+    active = _attach_perfs(active)
+    archived = _attach_perfs(archived)
+
     db.close()
     restricted = session.get('is_restricted', False)
 
@@ -1657,6 +1710,32 @@ def show_page(show_id):
         SELECT * FROM show_performances WHERE show_id = ?
         ORDER BY CASE WHEN perf_date IS NULL THEN 1 ELSE 0 END, perf_date, perf_time, id
     """, (show_id,)).fetchall()
+    performances = [dict(p) for p in performances]
+    for _p in performances:
+        _pd = _p.get('perf_date')
+        if _pd is not None and not isinstance(_pd, str):
+            try: _p['perf_date'] = _pd.strftime('%Y-%m-%d')
+            except AttributeError: _p['perf_date'] = str(_pd)
+
+    # Group performances by date for the production schedule — two perfs on the
+    # same calendar date share a single timeline.
+    schedule_days = []
+    _date_to_idx = {}
+    for _p in performances:
+        key = _p.get('perf_date') or f"__null_{_p['id']}"
+        idx = _date_to_idx.get(key)
+        if idx is None:
+            idx = len(schedule_days)
+            _date_to_idx[key] = idx
+            schedule_days.append({
+                'perf_date': _p.get('perf_date'),
+                'perfs': [],
+                'perf_ids': [],
+            })
+        schedule_days[idx]['perfs'].append(_p)
+        schedule_days[idx]['perf_ids'].append(_p['id'])
+    for d in schedule_days:
+        d['primary_perf_id'] = d['perf_ids'][0] if d['perf_ids'] else None
 
     # Export log
     exports = db.execute("""
@@ -1717,7 +1796,8 @@ def show_page(show_id):
                            show=show,
                            tab=tab,
                            advance_data=advance_data,
-                           performances=[dict(p) for p in performances],
+                           performances=performances,
+                           schedule_days=schedule_days,
                            schedule_rows=[dict(r) for r in sched_rows],
                            schedule_meta=schedule_meta,
                            sched_meta_fields=get_schedule_meta_fields(),
@@ -1805,6 +1885,38 @@ def save_advance(show_id):
 
 # ─── Performances (multiple dates/times per show) ─────────────────────────────
 
+def _normalize_perf_time(raw):
+    """Accept '19:00', '1900', '7:00', '' — return canonical 'HH:MM' or ''."""
+    s = (raw or '').strip()
+    if not s:
+        return ''
+    if ':' in s:
+        parts = s.split(':', 1)
+        try:
+            h = int(parts[0]); m = int(parts[1])
+        except ValueError:
+            return s
+    elif s.isdigit() and len(s) in (3, 4):
+        h = int(s[:-2]); m = int(s[-2:])
+    else:
+        return s
+    if 0 <= h <= 23 and 0 <= m <= 59:
+        return f'{h:02d}:{m:02d}'
+    return s
+
+
+def _perf_to_json(row):
+    """Serialize a performance row with perf_date as YYYY-MM-DD string."""
+    d = dict(row)
+    pd = d.get('perf_date')
+    if pd is not None and not isinstance(pd, str):
+        try:
+            d['perf_date'] = pd.strftime('%Y-%m-%d')
+        except AttributeError:
+            d['perf_date'] = str(pd)
+    return d
+
+
 @app.route('/shows/<int:show_id>/performances', methods=['POST'])
 @login_required
 def add_performance(show_id):
@@ -1815,7 +1927,7 @@ def add_performance(show_id):
     get_show_or_404(show_id)
     data = request.get_json(force=True) or {}
     perf_date = data.get('perf_date') or None
-    perf_time = data.get('perf_time', '')
+    perf_time = _normalize_perf_time(data.get('perf_time'))
     db = get_db()
     cur = db.execute("""
         INSERT INTO show_performances (show_id, perf_date, perf_time, sort_order)
@@ -1827,7 +1939,7 @@ def add_performance(show_id):
     db.commit()
     perf = db.execute('SELECT * FROM show_performances WHERE id=?', (perf_id,)).fetchone()
     db.close()
-    return jsonify({'success': True, 'performance': dict(perf)})
+    return jsonify({'success': True, 'performance': _perf_to_json(perf)})
 
 
 @app.route('/shows/<int:show_id>/performances/<int:perf_id>', methods=['PUT'])
@@ -1847,12 +1959,12 @@ def update_performance(show_id, perf_id):
     data = request.get_json(force=True) or {}
     db.execute("""
         UPDATE show_performances SET perf_date=?, perf_time=? WHERE id=?
-    """, (data.get('perf_date') or None, data.get('perf_time', ''), perf_id))
+    """, (data.get('perf_date') or None, _normalize_perf_time(data.get('perf_time')), perf_id))
     _sync_show_primary_date(db, show_id)
     db.commit()
     perf = db.execute('SELECT * FROM show_performances WHERE id=?', (perf_id,)).fetchone()
     db.close()
-    return jsonify({'success': True, 'performance': dict(perf)})
+    return jsonify({'success': True, 'performance': _perf_to_json(perf)})
 
 
 @app.route('/shows/<int:show_id>/performances/<int:perf_id>', methods=['DELETE'])

@@ -84,7 +84,7 @@
         </select>
       </div>
       <table class="data-table" id="contacts-table">
-        <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th>EMAIL</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="System notification emails">SYSTEM</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px">ACTIONS</th>{% endif %}</tr></thead>
+        <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th style="width:220px">EMAIL</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="System notification emails">SYSTEM</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
@@ -92,7 +92,7 @@
             <td class="text-dim" data-field="title">{{ c.title or '—' }}</td>
             <td>{% if c.department %}<span class="dept-badge">{{ c.department }}</span>{% else %}—{% endif %}</td>
             <td class="mono text-sm" data-field="phone">{{ c.phone or '—' }}</td>
-            <td class="text-sm" data-field="email">{{ c.email or '—' }}</td>
+            <td class="text-sm" data-field="email" style="word-break:break-all;max-width:220px">{{ c.email or '—' }}</td>
             {% if user.role == 'admin' %}
             <td style="text-align:center">
               <span class="recipient-indicator recipient-dot {{ 'on' if c.report_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="report"

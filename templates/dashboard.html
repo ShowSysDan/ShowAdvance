@@ -78,7 +78,13 @@
           </div>
           <div class="show-info">
             <div class="show-name">{{ s.name }}{% if s.perf_count > 1 %}<span class="multi-date-badge">{{ s.perf_count }} DATES</span>{% endif %}</div>
-            <div class="show-meta">{% if s.show_time %}{{ s.show_time }}{% else %}—{% endif %}</div>
+            {% if s.performances and s.performances|length > 1 %}
+              {% for p in s.performances %}
+                <div class="show-meta">{% if p.perf_date %}{{ p.perf_date }}{% endif %}{% if p.perf_time %} · {{ p.perf_time | hhmm }}{% endif %}</div>
+              {% endfor %}
+            {% else %}
+              <div class="show-meta">{% if s.show_time %}{{ s.show_time | hhmm }}{% else %}—{% endif %}</div>
+            {% endif %}
           </div>
         </div>
         <div class="show-card-actions">
