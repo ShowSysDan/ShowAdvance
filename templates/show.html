@@ -478,15 +478,12 @@ const SHOW_VENUE = {{ show.venue | tojson }};
             {% endfor %}
           </select>
           {% endif %}
-          {# Pull show time — one button per perf on this date #}
-          {% for _p in d.perfs %}
-            {% if _p.perf_time %}
-            <button type="button" class="btn btn-sm btn-ghost"
-                    onclick="pullAdvanceTime({{ d.primary_perf_id }}, '{{ _p.perf_time | hhmm | e }}')">
-              Pull {{ _p.perf_time | hhmm }}
-            </button>
-            {% endif %}
-          {% endfor %}
+          {# Pull show time — one button per day, inserts a SHOW START row for each time #}
+          {% set _times = d.perfs | selectattr('perf_time') | map(attribute='perf_time') | list %}
+          {% if _times %}
+          <button type="button" class="btn btn-sm btn-ghost"
+                  onclick='pullAdvanceTime({{ d.primary_perf_id }}, {{ _times | tojson }})'>Pull time{% if _times|length > 1 %}s{% endif %}</button>
+          {% endif %}
           <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime({{ d.primary_perf_id }})" title="Sort rows by start time">⇅ Sort</button>
           <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow({{ d.primary_perf_id }})">+ Add Row</button>
         </div>
