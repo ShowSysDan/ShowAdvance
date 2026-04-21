@@ -1043,6 +1043,8 @@
 {% if user.role == 'admin' or is_content_admin %}
 <div id="stab-technicians" class="stab-pane" style="display:none">
 
+  <div class="two-col">
+
   {# ── Pay Rate Levels ───────────────────────────────────────────────────────── #}
   <div class="form-section">
     <div class="form-section-header">
@@ -1129,6 +1131,8 @@
       </table>
     </div>
   </div>
+
+  </div>{# end .two-col #}
 </div>
 {% endif %}
 
@@ -2445,10 +2449,19 @@ function editPayRateLevel(btn) {
   const origRateText = rateEl.textContent.trim().replace(/[^0-9.]/g, '');
   nameEl.innerHTML = `<input type="text" class="field-input field-input-sm" style="max-width:180px" value="${_esc(origName)}">`;
   rateEl.innerHTML = `<input type="number" class="field-input field-input-sm" style="max-width:80px;text-align:right" step="0.01" min="0" value="${origRateText}">`;
+  const nameInp = nameEl.querySelector('input');
+  const rateInp = rateEl.querySelector('input');
+  let saving = false;
+  const revert = () => {
+    nameEl.textContent = origName;
+    rateEl.textContent = `$${parseFloat(origRateText).toFixed(2)}/hr`;
+  };
   const save = async () => {
-    const newName = nameEl.querySelector('input').value.trim();
-    const newRate = parseFloat(rateEl.querySelector('input').value) || 0;
-    if (!newName) { nameEl.textContent = origName; rateEl.textContent = `$${parseFloat(origRateText).toFixed(2)}/hr`; return; }
+    if (saving) return;
+    const newName = nameInp.value.trim();
+    const newRate = parseFloat(rateInp.value) || 0;
+    if (!newName) { revert(); return; }
+    saving = true;
     const r = await fetch(`/settings/pay-rate-levels/${lid}/edit`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({name: newName, hourly_rate: newRate})
@@ -2460,13 +2473,25 @@ function editPayRateLevel(btn) {
       const opt = document.querySelector(`#new-crew-rate-level option[value="${lid}"]`);
       if (opt) opt.textContent = `${newName} ($${newRate.toFixed(2)}/hr)`;
     } else {
-      nameEl.textContent = origName; rateEl.textContent = `$${parseFloat(origRateText).toFixed(2)}/hr`;
+      revert();
       alert(d.error || 'Error updating rate level.');
     }
   };
-  nameEl.querySelector('input').addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { nameEl.textContent = origName; rateEl.textContent = `$${parseFloat(origRateText).toFixed(2)}/hr`; } });
-  nameEl.querySelector('input').addEventListener('blur', save);
-  nameEl.querySelector('input').focus();
+  const handleBlur = (e) => {
+    // Don't save if focus is just moving to the sibling input within the same row
+    if (e.relatedTarget && tr.contains(e.relatedTarget)) return;
+    setTimeout(save, 50);
+  };
+  const handleKey = e => {
+    if (e.key === 'Enter') save();
+    if (e.key === 'Escape') revert();
+  };
+  nameInp.addEventListener('blur', handleBlur);
+  rateInp.addEventListener('blur', handleBlur);
+  nameInp.addEventListener('keydown', handleKey);
+  rateInp.addEventListener('keydown', handleKey);
+  nameInp.focus();
+  nameInp.select();
 }
 
 async function deletePayRateLevel(lid) {
@@ -2536,10 +2561,17 @@ function editCrewMember(btn) {
   nameEl.appendChild(inp);
   levelEl.innerHTML = ''; levelEl.appendChild(rateSel);
 
+  let saving = false;
+  const revert = () => {
+    nameEl.textContent = origName;
+    levelEl.innerHTML = origLevelText;
+  };
   const save = async () => {
+    if (saving) return;
     const name = inp.value.trim();
     const rateLevelId = rateSel.value || null;
-    if (!name) { nameEl.textContent = origName; levelEl.innerHTML = origLevelText; return; }
+    if (!name) { revert(); return; }
+    saving = true;
     const r = await fetch(`/settings/crew-members/${mid}/edit`, {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({name, rate_level_id: rateLevelId})
@@ -2550,12 +2582,23 @@ function editCrewMember(btn) {
       tr.dataset.rateLevelId = rateLevelId || '';
       levelEl.innerHTML = d.level_name ? `${_esc(d.level_name)} <span class="mono" style="font-size:10px">($${parseFloat(d.level_rate||0).toFixed(2)}/hr)</span>` : '—';
     } else {
-      nameEl.textContent = origName; levelEl.innerHTML = origLevelText;
+      revert();
       alert(d.error || 'Error updating technician.');
     }
   };
-  inp.addEventListener('keydown', e => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { nameEl.textContent = origName; levelEl.innerHTML = origLevelText; } });
-  inp.addEventListener('blur', () => setTimeout(save, 150));
+  const handleBlur = (e) => {
+    // Don't save if focus is just moving to the sibling control within the same row
+    if (e.relatedTarget && tr.contains(e.relatedTarget)) return;
+    setTimeout(save, 50);
+  };
+  const handleKey = e => {
+    if (e.key === 'Enter') save();
+    if (e.key === 'Escape') revert();
+  };
+  inp.addEventListener('blur', handleBlur);
+  rateSel.addEventListener('blur', handleBlur);
+  inp.addEventListener('keydown', handleKey);
+  rateSel.addEventListener('keydown', handleKey);
   inp.focus(); inp.select();
 }
 
