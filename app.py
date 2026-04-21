@@ -1710,6 +1710,32 @@ def show_page(show_id):
         SELECT * FROM show_performances WHERE show_id = ?
         ORDER BY CASE WHEN perf_date IS NULL THEN 1 ELSE 0 END, perf_date, perf_time, id
     """, (show_id,)).fetchall()
+    performances = [dict(p) for p in performances]
+    for _p in performances:
+        _pd = _p.get('perf_date')
+        if _pd is not None and not isinstance(_pd, str):
+            try: _p['perf_date'] = _pd.strftime('%Y-%m-%d')
+            except AttributeError: _p['perf_date'] = str(_pd)
+
+    # Group performances by date for the production schedule — two perfs on the
+    # same calendar date share a single timeline.
+    schedule_days = []
+    _date_to_idx = {}
+    for _p in performances:
+        key = _p.get('perf_date') or f"__null_{_p['id']}"
+        idx = _date_to_idx.get(key)
+        if idx is None:
+            idx = len(schedule_days)
+            _date_to_idx[key] = idx
+            schedule_days.append({
+                'perf_date': _p.get('perf_date'),
+                'perfs': [],
+                'perf_ids': [],
+            })
+        schedule_days[idx]['perfs'].append(_p)
+        schedule_days[idx]['perf_ids'].append(_p['id'])
+    for d in schedule_days:
+        d['primary_perf_id'] = d['perf_ids'][0] if d['perf_ids'] else None
 
     # Export log
     exports = db.execute("""
@@ -1770,7 +1796,8 @@ def show_page(show_id):
                            show=show,
                            tab=tab,
                            advance_data=advance_data,
-                           performances=[dict(p) for p in performances],
+                           performances=performances,
+                           schedule_days=schedule_days,
                            schedule_rows=[dict(r) for r in sched_rows],
                            schedule_meta=schedule_meta,
                            sched_meta_fields=get_schedule_meta_fields(),

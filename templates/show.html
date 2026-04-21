@@ -420,42 +420,46 @@ const SHOW_VENUE = {{ show.venue | tojson }};
     </div>
   </div>
 
-  {# ── Day Tabs (multi-performance) ─────────────────────────────────────── #}
-  {% if performances | length > 1 %}
+  {# ── Day Tabs (grouped by calendar date) ─────────────────────────────── #}
+  {% if schedule_days | length > 1 %}
   <div class="sched-day-tabs" style="display:flex;gap:6px;padding:0 0 0 0;margin-bottom:0">
-    {% for p in performances %}
+    {% for d in schedule_days %}
     <button type="button"
             class="btn btn-sm {% if loop.first %}btn-primary{% else %}btn-ghost{% endif %} sched-day-tab"
-            data-perf-id="{{ p.id }}"
-            onclick="switchSchedDay({{ p.id }}, this)">
-      DAY {{ loop.index }}{% if p.perf_date %} · {{ (p.perf_date|string)[5:] | replace('-','/') }}{% endif %}
+            data-perf-id="{{ d.primary_perf_id }}"
+            onclick="switchSchedDay({{ d.primary_perf_id }}, this)">
+      DAY {{ loop.index }}{% if d.perf_date %} · {{ (d.perf_date|string)[5:] | replace('-','/') }}{% endif %}
     </button>
     {% endfor %}
   </div>
   {% endif %}
 
-  {# ── Per-day Timeline sections ─────────────────────────────────────────── #}
-  {% for p in performances %}
-  {% set day_rows = schedule_rows | selectattr('perf_id', 'equalto', p.id) | list %}
+  {# ── Per-day Timeline sections (one timeline per calendar date) ──────── #}
+  {% for d in schedule_days %}
+  {% set day_rows = [] %}
   {% if loop.first %}
-    {# First day also shows NULL-keyed legacy rows #}
-    {% set null_rows = schedule_rows | selectattr('perf_id', 'none') | list %}
-    {% set day_rows = null_rows + (schedule_rows | selectattr('perf_id', 'equalto', p.id) | list) %}
+    {# First day absorbs any legacy NULL-keyed rows #}
+    {% set day_rows = day_rows + (schedule_rows | selectattr('perf_id', 'none') | list) %}
   {% endif %}
+  {% for _pid in d.perf_ids %}
+    {% set day_rows = day_rows + (schedule_rows | selectattr('perf_id', 'equalto', _pid) | list) %}
+  {% endfor %}
   <div class="sched-day-pane {% if not loop.first %}hidden{% endif %}"
-       data-perf-id="{{ p.id }}"
+       data-perf-id="{{ d.primary_perf_id }}"
        style="{% if not loop.first %}display:none{% endif %}">
 
     <div class="form-section">
       <div class="form-section-header">
         <span class="section-icon">◈</span>
-        TIMELINE{% if performances | length > 1 %} — DAY {{ loop.index }}{% if p.perf_date %}: {{ p.perf_date }}{% endif %}{% if p.perf_time %} {{ p.perf_time | hhmm }}{% endif %}{% endif %}
+        TIMELINE{% if schedule_days | length > 1 %} — DAY {{ loop.index }}{% if d.perf_date %}: {{ d.perf_date }}{% endif %}{% endif %}
+        {% set _times = d.perfs | selectattr('perf_time') | map(attribute='perf_time') | list %}
+        {% if _times %} <span class="text-dim" style="font-weight:400">({% for t in _times %}{{ t | hhmm }}{% if not loop.last %}, {% endif %}{% endfor %})</span>{% endif %}
         {% if not restricted %}
         <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
           {# Apply template dropdown #}
           {% if sched_templates %}
           <select class="field-input" style="width:auto;font-size:11px;padding:3px 6px;height:auto"
-                  onchange="applySchedTemplate(this.value, {{ p.id }}); this.value=''">
+                  onchange="applySchedTemplate(this.value, {{ d.primary_perf_id }}); this.value=''">
             <option value="">Apply template…</option>
             {% for t in sched_templates %}
             <option value="{{ t.id }}">{{ t.name }}</option>
@@ -463,24 +467,28 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           </select>
           {% endif %}
           {# Copy from another day #}
-          {% if performances | length > 1 %}
+          {% if schedule_days | length > 1 %}
           <select class="field-input" style="width:auto;font-size:11px;padding:3px 6px;height:auto"
-                  onchange="copySchedDay(this.value, {{ p.id }}); this.value=''">
+                  onchange="copySchedDay(this.value, {{ d.primary_perf_id }}); this.value=''">
             <option value="">Copy from…</option>
-            {% for op in performances %}
-            {% if op.id != p.id %}
-            <option value="{{ op.id }}">Day {{ loop.index }}{% if op.perf_date %} ({{ (op.perf_date|string)[5:] | replace('-','/') }}){% endif %}</option>
+            {% for od in schedule_days %}
+            {% if od.primary_perf_id != d.primary_perf_id %}
+            <option value="{{ od.primary_perf_id }}">Day {{ loop.index }}{% if od.perf_date %} ({{ (od.perf_date|string)[5:] | replace('-','/') }}){% endif %}</option>
             {% endif %}
             {% endfor %}
           </select>
           {% endif %}
-          {# Pull show time #}
-          {% if p.perf_time %}
-          <button type="button" class="btn btn-sm btn-ghost"
-                  onclick="pullAdvanceTime({{ p.id }}, '{{ p.perf_time | hhmm | e }}')">Pull time</button>
-          {% endif %}
-          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime({{ p.id }})" title="Sort rows by start time">⇅ Sort</button>
-          <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow({{ p.id }})">+ Add Row</button>
+          {# Pull show time — one button per perf on this date #}
+          {% for _p in d.perfs %}
+            {% if _p.perf_time %}
+            <button type="button" class="btn btn-sm btn-ghost"
+                    onclick="pullAdvanceTime({{ d.primary_perf_id }}, '{{ _p.perf_time | hhmm | e }}')">
+              Pull {{ _p.perf_time | hhmm }}
+            </button>
+            {% endif %}
+          {% endfor %}
+          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime({{ d.primary_perf_id }})" title="Sort rows by start time">⇅ Sort</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow({{ d.primary_perf_id }})">+ Add Row</button>
         </div>
         {% endif %}
       </div>
@@ -496,7 +504,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
               {% if not restricted %}<th style="width:40px"></th>{% endif %}
             </tr>
           </thead>
-          <tbody id="schedule-rows-{{ p.id }}">
+          <tbody id="schedule-rows-{{ d.primary_perf_id }}">
             {% if day_rows %}
               {% for row in day_rows %}
               <tr class="schedule-row">
@@ -523,8 +531,8 @@ const SHOW_VENUE = {{ show.venue | tojson }};
       </div>
       {% if not restricted %}
       <div class="form-section-footer">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow({{ p.id }})">+ Add Row</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedRowsByTime({{ p.id }})">⇅ Sort by time</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow({{ d.primary_perf_id }})">+ Add Row</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedRowsByTime({{ d.primary_perf_id }})">⇅ Sort by time</button>
       </div>
       {% endif %}
     </div>
