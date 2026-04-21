@@ -567,11 +567,45 @@ function copySchedDay(sourcePerfId, targetPerfId) {
   scheduleSave();
 }
 
+/* Parse a show-length string ("2:35", "2h 35m", "1hr 45min", "95") to minutes, or 0. */
+function parseShowLengthToMinutes(s) {
+  if (!s) return 0;
+  const str = String(s).trim().toLowerCase();
+  if (!str) return 0;
+  // HH:MM
+  let m = str.match(/^(\d+):(\d{1,2})$/);
+  if (m) return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
+  // "2h 35m" / "1hr 45min" / "2 hours 35 minutes"
+  let hrs = 0, mins = 0;
+  m = str.match(/(\d+)\s*(?:hrs?|hours?|h)\b/);
+  if (m) hrs = parseInt(m[1], 10);
+  m = str.match(/(\d+)\s*(?:mins?|minutes?|m)\b/);
+  if (m) mins = parseInt(m[1], 10);
+  if (hrs || mins) return hrs * 60 + mins;
+  // plain number → minutes
+  if (/^\d+$/.test(str)) return parseInt(str, 10);
+  return 0;
+}
+
+/* Add `minutes` to an HH:MM string, returning the resulting HH:MM (24h, wraps at 24). */
+function addMinutesToHHMM(hhmm, minutes) {
+  const parts = String(hhmm || '').split(':');
+  if (parts.length !== 2) return '';
+  const h = parseInt(parts[0], 10), mi = parseInt(parts[1], 10);
+  if (isNaN(h) || isNaN(mi)) return '';
+  const total = (h * 60 + mi + minutes) % (24 * 60);
+  const nh = Math.floor(total / 60), nm = total % 60;
+  return `${String(nh).padStart(2, '0')}:${String(nm).padStart(2, '0')}`;
+}
+
 /* Insert a SHOW START row at the top of the day for each provided time */
 function pullAdvanceTime(perfId, perfTime) {
   const tbody = document.getElementById(`schedule-rows-${perfId}`);
   if (!tbody) return;
   const times = Array.isArray(perfTime) ? perfTime : [perfTime];
+  const lengthMin = parseShowLengthToMinutes(
+    document.querySelector('[data-key="show_length"]')?.value || ''
+  );
   const existing = new Set(
     Array.from(tbody.querySelectorAll('.schedule-row')).map(tr => {
       const cells = tr.querySelectorAll('.sched-cell');
@@ -581,12 +615,13 @@ function pullAdvanceTime(perfId, perfTime) {
   times.slice().reverse().forEach(t => {
     const hhmm = parseTimeToHHMM(t);
     if (existing.has(hhmm + '|SHOW START')) return;
+    const endTime = lengthMin > 0 ? addMinutesToHHMM(hhmm, lengthMin) : '';
     const tr = document.createElement('tr');
     tr.className = 'schedule-row';
     tr.innerHTML = `
       <td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>
       <td><input type="text" class="sched-cell" value="${hhmm}"></td>
-      <td><input type="text" class="sched-cell" placeholder="16:00" value=""></td>
+      <td><input type="text" class="sched-cell" placeholder="16:00" value="${endTime}"></td>
       <td><input type="text" class="sched-cell" value="SHOW START"></td>
       <td><input type="text" class="sched-cell" placeholder="Notes" value=""></td>
       <td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>
