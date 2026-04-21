@@ -1599,15 +1599,29 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     // no saved state → server-rendered default_open class is used as-is
   });
 
-  /* ── Auto-expand sections that have data in them ─────────────── */
+  /* ── Auto-expand sections/notes that have data in them ───────── */
   function syncAdvanceSectionVisibility() {
+    // Top-level collapsible form sections (advance + schedule forms)
     document.querySelectorAll('.form-section[data-key]').forEach(sec => {
       if (!sec.querySelector('.form-section-header.collapsible')) return;
-      const hasData = Array.from(sec.querySelectorAll('.adv-field')).some(el => {
+      const hasData = Array.from(sec.querySelectorAll('.adv-field, .sched-meta')).some(el => {
         if (el.type === 'checkbox') return el.checked;
         return (el.value || '').trim() !== '';
       });
       if (hasData) sec.classList.remove('collapsed');
+    });
+    // Per-field notes toggles (advance + schedule) — open any that contain text
+    document.querySelectorAll('#tab-advance .notes-section, #tab-schedule .notes-section').forEach(ns => {
+      const body = ns.querySelector('.notes-body');
+      if (!body || !body.classList.contains('hidden')) return;
+      const hasText = Array.from(ns.querySelectorAll('textarea, input[type="text"]')).some(
+        el => (el.value || '').trim() !== ''
+      );
+      if (hasText) {
+        body.classList.remove('hidden');
+        const btn = ns.querySelector('.notes-toggle');
+        if (btn) btn.textContent = btn.textContent.replace('▸', '▾');
+      }
     });
   }
   syncAdvanceSectionVisibility();
