@@ -5491,7 +5491,7 @@ def add_job_position():
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     category_id = data.get('category_id') or None
-    venue = data.get('venue', '').strip() or None
+    venue = (data.get('venue') or '').strip() or None
     db = get_db()
     max_order = db.execute('SELECT MAX(sort_order) FROM job_positions').fetchone()[0] or 0
     override_rate = data.get('override_rate')
@@ -5517,7 +5517,7 @@ def edit_job_position(pid):
     if not name:
         return jsonify({'success': False, 'error': 'Name is required.'}), 400
     category_id = data.get('category_id') or None
-    venue = data.get('venue', '').strip() or None
+    venue = (data.get('venue') or '').strip() or None
     override_rate = data.get('override_rate')
     override_rate = float(override_rate) if override_rate not in (None, '') else None
     db = get_db()
