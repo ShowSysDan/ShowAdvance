@@ -227,7 +227,7 @@
       <span class="section-icon">◈</span> SHOW DATES &amp; TIMES
       {% if not restricted %}
       <div class="action-btns ml-auto">
-        <button type="button" class="btn btn-sm btn-ghost" onclick="openPerfForm()">+ Add Date</button>
+        <button type="button" class="btn btn-sm btn-ghost" onclick="openPerfForm()">+ Add Show Time</button>
       </div>
       {% endif %}
     </div>
@@ -235,7 +235,7 @@
 
       <table class="field-editor-table" id="perf-table" {% if not performances %}style="display:none"{% endif %}>
         <thead><tr>
-          <th>DATE</th><th>TIME(S)</th>
+          <th>DATE</th><th>TIME</th>
           {% if not restricted %}<th style="width:80px"></th>{% endif %}
         </tr></thead>
         <tbody id="perf-tbody">
@@ -247,7 +247,7 @@
             <td>
               <div class="action-btns">
                 <button type="button" class="btn btn-xs btn-ghost"
-                  onclick="editPerf({{ p.id }}, '{{ p.perf_date or '' }}', {{ p.perf_time | tojson }})">Edit</button>
+                  onclick='editPerf({{ p.id }}, {{ (p.perf_date|string if p.perf_date else "")|tojson }}, {{ (p.perf_time or "")|tojson }})'>Edit</button>
                 <button type="button" class="btn btn-xs btn-danger-ghost"
                   onclick="deletePerf({{ p.id }})">×</button>
               </div>
@@ -259,7 +259,7 @@
       </table>
 
       <p id="perf-empty-msg" class="text-dim" style="font-size:12px;margin:0{% if performances %};display:none{% endif %}">
-        No dates set yet.{% if not restricted %} Use "+ Add Date" above.{% endif %}
+        No show times set yet.{% if not restricted %} Use "+ Add Show Time" above.{% endif %}
       </p>
 
       {% if not restricted %}
@@ -271,10 +271,13 @@
             <input type="date" id="perf-date-input" class="field-input">
           </div>
           <div class="field-group">
-            <label class="field-label">TIME(S)</label>
-            <input type="text" id="perf-time-input" class="field-input" placeholder="e.g. 7pm and 9pm">
+            <label class="field-label">TIME</label>
+            <input type="text" id="perf-time-input" class="field-input" placeholder="19:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5">
           </div>
         </div>
+        <p class="field-note" style="margin:0 0 8px;font-size:11px;color:var(--text-muted)">
+          24-hour format (e.g. 14:00, 19:30). For multiple performances on the same date, add a separate row for each time.
+        </p>
         <div class="action-btns">
           <button type="button" class="btn btn-primary btn-sm" onclick="savePerf()">Save</button>
           <button type="button" class="btn btn-ghost btn-sm" onclick="closePerfForm()">Cancel</button>
@@ -1681,7 +1684,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const timeCell = `<td class="text-dim" style="font-size:12px">${p.perf_time || '—'}</td>`;
     const actionsCell = `<td><div class="action-btns">
       <button type="button" class="btn btn-xs btn-ghost"
-        onclick="editPerf(${p.id}, '${p.perf_date || ''}', ${JSON.stringify(p.perf_time || '')})">Edit</button>
+        onclick='editPerf(${p.id}, ${JSON.stringify(p.perf_date || '')}, ${JSON.stringify(p.perf_time || '')})'>Edit</button>
       <button type="button" class="btn btn-xs btn-danger-ghost"
         onclick="deletePerf(${p.id})">×</button>
     </div></td>`;
