@@ -1255,7 +1255,15 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     </div>
     <div class="form-section-body">
       <div class="show-info-readonly">
-        <span>{{ show.name }}</span> · <span>{{ show.show_date or '—' }}</span> · <span>{{ show.show_time or '—' }}</span> · <span>{{ show.venue or '—' }}</span>
+        <span>{{ show.name }}</span> ·
+        {% if performances %}
+          <span>
+            {% for p in performances %}{{ p.perf_date or '—' }}{% if p.perf_time %} {{ p.perf_time | hhmm }}{% endif %}{% if not loop.last %}, {% endif %}{% endfor %}
+          </span>
+        {% else %}
+          <span>{{ show.show_date or '—' }}</span> · <span>{{ show.show_time | hhmm or '—' }}</span>
+        {% endif %}
+        · <span>{{ show.venue or '—' }}</span>
       </div>
 
       <div class="form-row cols-2">

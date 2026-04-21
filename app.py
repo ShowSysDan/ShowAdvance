@@ -1545,6 +1545,38 @@ def dashboard():
             active = []
             archived = []
 
+    # Attach full performance list per show (for multi-date display on card)
+    def _attach_perfs(rows):
+        if not rows:
+            return []
+        ids = [r['id'] for r in rows]
+        ph = ','.join('?' * len(ids))
+        perfs = db.execute(
+            f"""SELECT show_id, perf_date, perf_time FROM show_performances
+                WHERE show_id IN ({ph})
+                ORDER BY CASE WHEN perf_date IS NULL THEN 1 ELSE 0 END,
+                         perf_date, perf_time, id""",
+            ids
+        ).fetchall()
+        by_show = {}
+        for p in perfs:
+            pd = p['perf_date']
+            if pd is not None and not isinstance(pd, str):
+                try: pd = pd.strftime('%Y-%m-%d')
+                except AttributeError: pd = str(pd)
+            by_show.setdefault(p['show_id'], []).append(
+                {'perf_date': pd, 'perf_time': p['perf_time']}
+            )
+        out = []
+        for r in rows:
+            d = dict(r)
+            d['performances'] = by_show.get(r['id'], [])
+            out.append(d)
+        return out
+
+    active = _attach_perfs(active)
+    archived = _attach_perfs(archived)
+
     db.close()
     restricted = session.get('is_restricted', False)
 
