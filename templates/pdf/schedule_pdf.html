@@ -94,7 +94,7 @@
         <strong>{{ show.name }}</strong>
         {% if schedule_days | length > 1 %} &nbsp;·&nbsp; <strong>Day {{ day.day_num }}</strong>{% endif %}
         &nbsp;·&nbsp; {{ day.perf.perf_date or show.show_date or '—' }}
-        {% if day.perf.perf_time %} &nbsp;·&nbsp; {{ day.perf.perf_time }}{% endif %}
+        {% if day.perf.perf_time %} &nbsp;·&nbsp; {{ day.perf.perf_time | hhmm }}{% endif %}
       </div>
     </div>
   </div>
@@ -103,7 +103,7 @@
   {% if schedule_days | length > 1 %}
   <div class="day-banner">
     <span>Day {{ day.day_num }}</span>
-    <span class="day-date">{{ day.perf.perf_date or '' }}{% if day.perf.perf_time %} · {{ day.perf.perf_time }}{% endif %}</span>
+    <span class="day-date">{{ day.perf.perf_date or '' }}{% if day.perf.perf_time %} · {{ day.perf.perf_time | hhmm }}{% endif %}</span>
   </div>
   {% endif %}
 

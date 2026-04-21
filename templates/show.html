@@ -242,12 +242,12 @@
           {% for p in performances %}
           <tr data-id="{{ p.id }}">
             <td>{{ p.perf_date or '—' }}</td>
-            <td class="text-dim" style="font-size:12px">{{ p.perf_time or '—' }}</td>
+            <td class="text-dim" style="font-size:12px">{{ (p.perf_time | hhmm) or '—' }}</td>
             {% if not restricted %}
             <td>
               <div class="action-btns">
                 <button type="button" class="btn btn-xs btn-ghost"
-                  onclick='editPerf({{ p.id }}, {{ (p.perf_date|string if p.perf_date else "")|tojson }}, {{ (p.perf_time or "")|tojson }})'>Edit</button>
+                  onclick='editPerf({{ p.id }}, {{ (p.perf_date|string if p.perf_date else "")|tojson }}, {{ (p.perf_time | hhmm)|tojson }})'>Edit</button>
                 <button type="button" class="btn btn-xs btn-danger-ghost"
                   onclick="deletePerf({{ p.id }})">×</button>
               </div>
@@ -449,7 +449,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
     <div class="form-section">
       <div class="form-section-header">
         <span class="section-icon">◈</span>
-        TIMELINE{% if performances | length > 1 %} — DAY {{ loop.index }}{% if p.perf_date %}: {{ p.perf_date }}{% endif %}{% if p.perf_time %} {{ p.perf_time }}{% endif %}{% endif %}
+        TIMELINE{% if performances | length > 1 %} — DAY {{ loop.index }}{% if p.perf_date %}: {{ p.perf_date }}{% endif %}{% if p.perf_time %} {{ p.perf_time | hhmm }}{% endif %}{% endif %}
         {% if not restricted %}
         <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-wrap:wrap">
           {# Apply template dropdown #}
@@ -477,7 +477,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           {# Pull show time #}
           {% if p.perf_time %}
           <button type="button" class="btn btn-sm btn-ghost"
-                  onclick="pullAdvanceTime({{ p.id }}, '{{ p.perf_time | e }}')">Pull time</button>
+                  onclick="pullAdvanceTime({{ p.id }}, '{{ p.perf_time | hhmm | e }}')">Pull time</button>
           {% endif %}
           <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime({{ p.id }})" title="Sort rows by start time">⇅ Sort</button>
           <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow({{ p.id }})">+ Add Row</button>

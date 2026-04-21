@@ -183,6 +183,27 @@ def pretty_json_filter(value):
         return value or ''
 
 
+@app.template_filter('hhmm')
+def hhmm_filter(value):
+    """Normalize a time string to HH:MM for display (e.g. '1900' → '19:00')."""
+    s = (value or '').strip() if isinstance(value, str) else str(value or '').strip()
+    if not s:
+        return ''
+    if ':' in s:
+        parts = s.split(':', 1)
+        try:
+            h = int(parts[0]); m = int(parts[1])
+        except ValueError:
+            return s
+    elif s.isdigit() and len(s) in (3, 4):
+        h = int(s[:-2]); m = int(s[-2:])
+    else:
+        return s
+    if 0 <= h <= 23 and 0 <= m <= 59:
+        return f'{h:02d}:{m:02d}'
+    return s
+
+
 DATABASE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'advance.db')
 BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 
@@ -1805,6 +1826,38 @@ def save_advance(show_id):
 
 # ─── Performances (multiple dates/times per show) ─────────────────────────────
 
+def _normalize_perf_time(raw):
+    """Accept '19:00', '1900', '7:00', '' — return canonical 'HH:MM' or ''."""
+    s = (raw or '').strip()
+    if not s:
+        return ''
+    if ':' in s:
+        parts = s.split(':', 1)
+        try:
+            h = int(parts[0]); m = int(parts[1])
+        except ValueError:
+            return s
+    elif s.isdigit() and len(s) in (3, 4):
+        h = int(s[:-2]); m = int(s[-2:])
+    else:
+        return s
+    if 0 <= h <= 23 and 0 <= m <= 59:
+        return f'{h:02d}:{m:02d}'
+    return s
+
+
+def _perf_to_json(row):
+    """Serialize a performance row with perf_date as YYYY-MM-DD string."""
+    d = dict(row)
+    pd = d.get('perf_date')
+    if pd is not None and not isinstance(pd, str):
+        try:
+            d['perf_date'] = pd.strftime('%Y-%m-%d')
+        except AttributeError:
+            d['perf_date'] = str(pd)
+    return d
+
+
 @app.route('/shows/<int:show_id>/performances', methods=['POST'])
 @login_required
 def add_performance(show_id):
@@ -1815,7 +1868,7 @@ def add_performance(show_id):
     get_show_or_404(show_id)
     data = request.get_json(force=True) or {}
     perf_date = data.get('perf_date') or None
-    perf_time = data.get('perf_time', '')
+    perf_time = _normalize_perf_time(data.get('perf_time'))
     db = get_db()
     cur = db.execute("""
         INSERT INTO show_performances (show_id, perf_date, perf_time, sort_order)
@@ -1827,7 +1880,7 @@ def add_performance(show_id):
     db.commit()
     perf = db.execute('SELECT * FROM show_performances WHERE id=?', (perf_id,)).fetchone()
     db.close()
-    return jsonify({'success': True, 'performance': dict(perf)})
+    return jsonify({'success': True, 'performance': _perf_to_json(perf)})
 
 
 @app.route('/shows/<int:show_id>/performances/<int:perf_id>', methods=['PUT'])
@@ -1847,12 +1900,12 @@ def update_performance(show_id, perf_id):
     data = request.get_json(force=True) or {}
     db.execute("""
         UPDATE show_performances SET perf_date=?, perf_time=? WHERE id=?
-    """, (data.get('perf_date') or None, data.get('perf_time', ''), perf_id))
+    """, (data.get('perf_date') or None, _normalize_perf_time(data.get('perf_time')), perf_id))
     _sync_show_primary_date(db, show_id)
     db.commit()
     perf = db.execute('SELECT * FROM show_performances WHERE id=?', (perf_id,)).fetchone()
     db.close()
-    return jsonify({'success': True, 'performance': dict(perf)})
+    return jsonify({'success': True, 'performance': _perf_to_json(perf)})
 
 
 @app.route('/shows/<int:show_id>/performances/<int:perf_id>', methods=['DELETE'])
