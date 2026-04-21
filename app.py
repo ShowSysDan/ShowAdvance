@@ -1655,7 +1655,7 @@ def show_page(show_id):
     # Performances
     performances = db.execute("""
         SELECT * FROM show_performances WHERE show_id = ?
-        ORDER BY CASE WHEN perf_date IS NULL THEN 1 ELSE 0 END, perf_date, id
+        ORDER BY CASE WHEN perf_date IS NULL THEN 1 ELSE 0 END, perf_date, perf_time, id
     """, (show_id,)).fetchall()
 
     # Export log
@@ -2719,7 +2719,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
     ).fetchall()
     advance_data = {r['field_key']: r['field_value'] for r in adv_rows}
     performances = [dict(p) for p in db.execute(
-        'SELECT * FROM show_performances WHERE show_id=? ORDER BY sort_order, perf_date, id', (show_id,)
+        'SELECT * FROM show_performances WHERE show_id=? ORDER BY sort_order, perf_date, perf_time, id', (show_id,)
     ).fetchall()]
     contacts = db.execute('SELECT * FROM contacts ORDER BY name').fetchall()
     contact_map = {c['id']: dict(c) for c in contacts}
