@@ -31,11 +31,22 @@
     color: var(--text-dim);
     font-size: 13px;
   }
-  .sched-ro { color: var(--text); }
-  .sched-ro-dim { color: var(--text-dim); }
   .sched-check-cell { text-align: center; }
   .sched-check-cell input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; }
   .scheduled-row { background: rgba(72, 187, 120, 0.08); }
+  .sched-time-input {
+    width: 74px;
+    padding: 3px 5px;
+    font-size: 12px;
+    font-family: var(--font-mono, monospace);
+    text-align: center;
+    background: var(--bg-input, var(--bg-surface));
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm, 4px);
+    color: var(--text);
+  }
+  .sched-time-input:focus { outline: none; border-color: var(--accent); }
+  .sched-add-row { font-size: 12px; }
 </style>
 {% endblock %}
 
@@ -43,10 +54,10 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">Labor Scheduler</h1>
-    <p class="page-sub">Pick a date range to see all labor requests grouped by show. Check positions as you schedule them and assign the actual technician.</p>
+    <p class="page-sub">Pick a date range to see all labor requests grouped by show. Schedule positions and assign technicians.</p>
   </div>
   <div class="header-actions">
-    <button class="btn btn-primary" onclick="window.__scheduler.saveAll()">Save</button>
+    <button class="btn btn-primary" onclick="window.__scheduler.saveAll()">Save All</button>
   </div>
 </div>
 
@@ -72,6 +83,7 @@
 <script>
 (function() {
   let _crewMembers = null;
+  let _positions   = null;
 
   function fmtDate(d) {
     const y = d.getFullYear();
@@ -92,6 +104,14 @@
     const r = await fetch('/api/crew-members');
     _crewMembers = await r.json();
     return _crewMembers;
+  }
+
+  async function loadPositions() {
+    if (_positions) return _positions;
+    const r = await fetch('/api/job-positions');
+    const data = await r.json();
+    _positions = Array.isArray(data) ? data : (data.positions || []);
+    return _positions;
   }
 
   function buildTechnicianSelect(selectEl, positionId, selectedId) {
@@ -139,11 +159,83 @@
     }
   }
 
+  function buildPositionSelect(selectEl, selectedId) {
+    selectEl.innerHTML = '<option value="">— Position —</option>';
+    if (!_positions) return;
+    const byCat = {};
+    _positions.forEach(p => {
+      const c = p.category_name || 'Other';
+      if (!byCat[c]) byCat[c] = [];
+      byCat[c].push(p);
+    });
+    for (const [cat, positions] of Object.entries(byCat)) {
+      const og = document.createElement('optgroup');
+      og.label = cat;
+      positions.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id;
+        opt.textContent = p.name + (p.venue ? ` (${p.venue})` : '');
+        if (String(p.id) === String(selectedId)) opt.selected = true;
+        og.appendChild(opt);
+      });
+      selectEl.appendChild(og);
+    }
+  }
+
   function escapeHtml(s) {
     if (s == null) return '';
     return String(s).replace(/[&<>"']/g, c => ({
       '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
     }[c]));
+  }
+
+  function buildRow(lr) {
+    const tr = document.createElement('tr');
+    tr.dataset.rid = lr.id;
+    if (lr.is_scheduled) tr.classList.add('scheduled-row');
+    tr.innerHTML = `
+      <td class="sched-check-cell">
+        <input type="checkbox" class="sched-check" ${lr.is_scheduled ? 'checked' : ''}
+               onchange="window.__scheduler.onScheduledToggle(this)">
+      </td>
+      <td style="font-size:12px;color:var(--text-dim)">${escapeHtml(lr.work_date || '—')}</td>
+      <td>
+        <select class="field-input field-input-sm sched-pos" style="min-width:150px"
+                onchange="window.__scheduler.onPositionChange(this)">
+        </select>
+      </td>
+      <td><input type="text" class="sched-time-input sched-in"   value="${escapeHtml(lr.in_time||'')}"    placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)"></td>
+      <td><input type="text" class="sched-time-input sched-bstart" value="${escapeHtml(lr.break_start||'')}" placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)"></td>
+      <td><input type="text" class="sched-time-input sched-bend"  value="${escapeHtml(lr.break_end||'')}"  placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)"></td>
+      <td><input type="text" class="sched-time-input sched-out"  value="${escapeHtml(lr.out_time||'')}"   placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)"></td>
+      <td style="font-size:12px;color:var(--text-dim)">${escapeHtml(lr.requested_name || '—')}</td>
+      <td>
+        <select class="field-input field-input-sm sched-tech"
+                data-position-id="${lr.position_id || ''}"
+                data-selected-id="${lr.scheduled_crew_member_id || ''}"
+                onchange="window.__scheduler.onCrewChange(this)">
+        </select>
+      </td>
+      <td style="text-align:center">
+        <button class="btn btn-xs btn-danger-ghost" onclick="window.__scheduler.removeRow(this)" title="Remove line">×</button>
+      </td>
+    `;
+    // Build position select
+    const posSel = tr.querySelector('.sched-pos');
+    buildPositionSelect(posSel, lr.position_id);
+    posSel.addEventListener('change', () => {
+      const newPid = parseInt(posSel.value) || null;
+      const techSel = tr.querySelector('.sched-tech');
+      buildTechnicianSelect(techSel, newPid, '');
+    });
+    // Build technician select
+    const techSel = tr.querySelector('.sched-tech');
+    buildTechnicianSelect(techSel, lr.position_id, lr.scheduled_crew_member_id);
+    return tr;
   }
 
   function renderShows(shows) {
@@ -152,70 +244,56 @@
       container.innerHTML = '<div class="form-section"><div class="form-section-body"><div class="scheduler-empty">No labor requests found in this date range.</div></div></div>';
       return;
     }
-    container.innerHTML = shows.map(show => {
-      const rowsHtml = show.requests.map(lr => {
-        const scheduledClass = lr.is_scheduled ? 'scheduled-row' : '';
-        return `
-          <tr data-rid="${lr.id}" class="${scheduledClass}">
-            <td class="sched-check-cell">
-              <input type="checkbox" class="sched-check" ${lr.is_scheduled ? 'checked' : ''}
-                     onchange="window.__scheduler.onScheduledToggle(this)">
-            </td>
-            <td class="sched-ro">${escapeHtml(lr.work_date || '—')}</td>
-            <td class="sched-ro">${escapeHtml(lr.position_name || '—')}</td>
-            <td class="sched-ro-dim">${escapeHtml(lr.in_time || '')}</td>
-            <td class="sched-ro-dim">${escapeHtml(lr.out_time || '')}</td>
-            <td class="sched-ro-dim">${escapeHtml(lr.break_start || '')}${lr.break_end ? ' – ' + escapeHtml(lr.break_end) : ''}</td>
-            <td class="sched-ro-dim">${escapeHtml(lr.requested_name || '—')}</td>
-            <td>
-              <select class="field-input field-input-sm sched-tech"
-                      data-position-id="${lr.position_id || ''}"
-                      data-selected-id="${lr.scheduled_crew_member_id || ''}"
-                      onchange="window.__scheduler.onCrewChange(this)">
-              </select>
-            </td>
-          </tr>
-        `;
-      }).join('');
+    container.innerHTML = '';
 
-      return `
-        <div class="form-section" style="margin-bottom:16px">
-          <div class="form-section-header">
-            <span class="section-icon">◈</span>
-            <div class="scheduler-show-header">
-              <strong style="text-transform:none;letter-spacing:normal;font-size:14px">${escapeHtml(show.show_name)}</strong>
-              <span class="text-dim" style="font-size:11px">
-                ${escapeHtml(show.show_venue || '')}${show.show_date ? ' · ' + escapeHtml(show.show_date) : ''}
-              </span>
-              <a href="/shows/${show.show_id}?tab=staffing" class="show-link" target="_blank" rel="noopener">Open show →</a>
-            </div>
-          </div>
-          <div class="form-section-body no-pad">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width:52px;text-align:center">SCHED ✓</th>
-                  <th style="width:120px">DATE</th>
-                  <th style="width:200px">POSITION</th>
-                  <th style="width:70px">IN</th>
-                  <th style="width:70px">OUT</th>
-                  <th style="width:140px">BREAK</th>
-                  <th style="width:160px">REQUESTED</th>
-                  <th>SCHEDULED TECH</th>
-                </tr>
-              </thead>
-              <tbody>${rowsHtml}</tbody>
-            </table>
-          </div>
+    shows.forEach(show => {
+      const section = document.createElement('div');
+      section.className = 'form-section';
+      section.style.marginBottom = '16px';
+      section.dataset.showId = show.show_id;
+
+      const header = document.createElement('div');
+      header.className = 'form-section-header';
+      header.innerHTML = `
+        <span class="section-icon">◈</span>
+        <div class="scheduler-show-header">
+          <strong style="text-transform:none;letter-spacing:normal;font-size:14px">${escapeHtml(show.show_name)}</strong>
+          <span class="text-dim" style="font-size:11px">
+            ${escapeHtml(show.show_venue || '')}${show.show_date ? ' · ' + escapeHtml(show.show_date) : ''}
+          </span>
+          <a href="/shows/${show.show_id}?tab=staffing" class="show-link" target="_blank" rel="noopener">Open show →</a>
         </div>
+        <button class="btn btn-ghost btn-sm ml-auto" onclick="window.__scheduler.addRow(this, ${show.show_id})">+ Add Line</button>
       `;
-    }).join('');
+      section.appendChild(header);
 
-    // After injecting HTML, build the crew dropdowns from cached data
-    container.querySelectorAll('.sched-tech').forEach(sel => {
-      const pid = parseInt(sel.dataset.positionId, 10) || null;
-      const sid = sel.dataset.selectedId || '';
-      buildTechnicianSelect(sel, pid, sid);
+      const bodyWrap = document.createElement('div');
+      bodyWrap.className = 'form-section-body no-pad';
+
+      const table = document.createElement('table');
+      table.className = 'data-table';
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th style="width:52px;text-align:center">SCHED ✓</th>
+            <th style="width:110px">DATE</th>
+            <th style="min-width:160px">POSITION</th>
+            <th style="width:80px">IN</th>
+            <th style="width:80px">LUNCH START</th>
+            <th style="width:80px">LUNCH END</th>
+            <th style="width:80px">OUT</th>
+            <th style="width:140px">REQUESTED</th>
+            <th>SCHEDULED TECH</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+      `;
+      const tbody = document.createElement('tbody');
+      show.requests.forEach(lr => tbody.appendChild(buildRow(lr)));
+      table.appendChild(tbody);
+      bodyWrap.appendChild(table);
+      section.appendChild(bodyWrap);
+      container.appendChild(section);
     });
   }
 
@@ -229,7 +307,7 @@
     }
     status.textContent = 'Loading…';
     try {
-      await loadCrew();
+      await Promise.all([loadCrew(), loadPositions()]);
       const r = await fetch(`/api/labor-scheduler?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
       if (!r.ok) {
         status.textContent = 'Failed to load.';
@@ -255,9 +333,8 @@
       showSaveToast('✗ Save failed', 'error');
       return null;
     }
-    const data = await r.json();
     showSaveToast('✓ Saved');
-    return data;
+    return await r.json();
   }
 
   async function onScheduledToggle(checkbox) {
@@ -275,8 +352,53 @@
   async function onCrewChange(select) {
     const tr = select.closest('tr');
     const rid = tr.dataset.rid;
-    const val = select.value || null;
-    await putSchedulerUpdate(rid, { scheduled_crew_member_id: val });
+    await putSchedulerUpdate(rid, { scheduled_crew_member_id: select.value || null });
+  }
+
+  async function onPositionChange(select) {
+    const tr = select.closest('tr');
+    const rid = tr.dataset.rid;
+    await putSchedulerUpdate(rid, { position_id: parseInt(select.value) || null });
+  }
+
+  async function onTimeChange(input) {
+    const tr = input.closest('tr');
+    const rid = tr.dataset.rid;
+    const payload = {
+      in_time:     tr.querySelector('.sched-in').value.trim(),
+      break_start: tr.querySelector('.sched-bstart').value.trim(),
+      break_end:   tr.querySelector('.sched-bend').value.trim(),
+      out_time:    tr.querySelector('.sched-out').value.trim(),
+    };
+    await putSchedulerUpdate(rid, payload);
+  }
+
+  async function addRow(btn, showId) {
+    const workDate = document.getElementById('sched-from').value || null;
+    const r = await fetch('/api/labor-scheduler/add', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ show_id: showId, work_date: workDate }),
+    });
+    if (!r.ok) { showSaveToast('✗ Add failed', 'error'); return; }
+    const data = await r.json();
+    if (!data.success) { showSaveToast('✗ ' + (data.error || 'Add failed'), 'error'); return; }
+    const section = btn.closest('.form-section');
+    const tbody = section.querySelector('tbody');
+    const newRow = buildRow(data.row);
+    tbody.appendChild(newRow);
+    showSaveToast('✓ Row added');
+  }
+
+  async function removeRow(btn) {
+    const tr = btn.closest('tr');
+    const rid = tr.dataset.rid;
+    if (!rid) { tr.remove(); return; }
+    if (!confirm('Remove this labor line?')) return;
+    const r = await fetch(`/api/labor-scheduler/${rid}`, { method: 'DELETE' });
+    if (!r.ok) { showSaveToast('✗ Delete failed', 'error'); return; }
+    tr.remove();
+    showSaveToast('✓ Removed');
   }
 
   async function saveAll() {
@@ -287,10 +409,16 @@
       const rid = tr.dataset.rid;
       const isScheduled = tr.querySelector('.sched-check')?.checked ? true : false;
       const crewId = tr.querySelector('.sched-tech')?.value || null;
+      const positionId = parseInt(tr.querySelector('.sched-pos')?.value) || null;
+      const in_time    = tr.querySelector('.sched-in')?.value.trim()     || '';
+      const break_start= tr.querySelector('.sched-bstart')?.value.trim() || '';
+      const break_end  = tr.querySelector('.sched-bend')?.value.trim()   || '';
+      const out_time   = tr.querySelector('.sched-out')?.value.trim()    || '';
       const r = await fetch(`/api/labor-scheduler/${rid}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ is_scheduled: isScheduled, scheduled_crew_member_id: crewId }),
+        body: JSON.stringify({ is_scheduled: isScheduled, scheduled_crew_member_id: crewId,
+                               position_id: positionId, in_time, break_start, break_end, out_time }),
       });
       if (r.ok) ok++; else fail++;
     }
@@ -298,7 +426,7 @@
     else showSaveToast(`✓ All ${ok} rows saved`);
   }
 
-  window.__scheduler = { onScheduledToggle, onCrewChange, saveAll };
+  window.__scheduler = { onScheduledToggle, onCrewChange, onPositionChange, onTimeChange, addRow, removeRow, saveAll };
   window.loadScheduler = loadScheduler;
 
   document.addEventListener('DOMContentLoaded', () => {

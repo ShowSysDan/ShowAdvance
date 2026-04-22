@@ -26,6 +26,8 @@ CREATE TABLE IF NOT EXISTS users (
     theme TEXT DEFAULT 'dark',
     last_login TIMESTAMP,
     must_change_password INTEGER DEFAULT 0,
+    is_scheduler INTEGER DEFAULT 0,
+    is_asset_manager INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1357,6 +1359,8 @@ def migrate_db():
         "ALTER TABLE users ADD COLUMN is_readonly INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN email_confirmed INTEGER DEFAULT 1",
         "ALTER TABLE users ADD COLUMN pending_approval INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN is_scheduler INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN is_asset_manager INTEGER DEFAULT 0",
         # Asset manager enhancements
         "ALTER TABLE asset_types ADD COLUMN supplier_name TEXT DEFAULT ''",
         "ALTER TABLE asset_types ADD COLUMN supplier_contact TEXT DEFAULT ''",
@@ -1609,6 +1613,8 @@ CREATE TABLE IF NOT EXISTS users (
     is_readonly INTEGER DEFAULT 0,
     email_confirmed INTEGER DEFAULT 1,
     pending_approval INTEGER DEFAULT 0,
+    is_scheduler INTEGER DEFAULT 0,
+    is_asset_manager INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -2422,6 +2428,8 @@ def migrate_db_postgres():
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS email_confirmed INTEGER DEFAULT 1',
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS pending_approval INTEGER DEFAULT 0',
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 0',
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS is_scheduler INTEGER DEFAULT 0',
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS is_asset_manager INTEGER DEFAULT 0',
         ]
 
         n = 0

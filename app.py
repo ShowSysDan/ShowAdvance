@@ -392,7 +392,7 @@ def staff_or_admin_required(f):
 
 
 def scheduler_required(f):
-    """Allow admins, staff, or members of a 'scheduler_group' type group."""
+    """Allow admins, staff, scheduler_group members, or users with is_scheduler flag."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'user_id' not in session:
@@ -400,6 +400,24 @@ def scheduler_required(f):
         if session.get('user_role') in ('admin', 'staff'):
             return f(*args, **kwargs)
         if session.get('is_labor_scheduler') or session.get('is_content_admin'):
+            return f(*args, **kwargs)
+        if session.get('is_scheduler'):
+            return f(*args, **kwargs)
+        abort(403)
+    return decorated
+
+
+def asset_manager_required(f):
+    """Allow admins, content-admins, or users with is_asset_manager flag."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        if session.get('user_role') == 'admin':
+            return f(*args, **kwargs)
+        if session.get('is_content_admin'):
+            return f(*args, **kwargs)
+        if session.get('is_asset_manager'):
             return f(*args, **kwargs)
         abort(403)
     return decorated
@@ -416,8 +434,10 @@ def _refresh_session_roles():
         return
     try:
         db = get_db()
-        user = db.execute('SELECT id, role, display_name FROM users WHERE id=?',
-                          (session['user_id'],)).fetchone()
+        user = db.execute(
+            'SELECT id, role, display_name, is_readonly, is_scheduler, is_asset_manager FROM users WHERE id=?',
+            (session['user_id'],)
+        ).fetchone()
         db.close()
         if not user:
             session.clear()
@@ -428,6 +448,8 @@ def _refresh_session_roles():
         session['is_content_admin'] = is_content_admin(user['id'])
         session['is_labor_scheduler'] = is_labor_scheduler(user['id'])
         session['is_readonly'] = bool(user.get('is_readonly', 0))
+        session['is_scheduler'] = bool(user.get('is_scheduler', 0))
+        session['is_asset_manager'] = bool(user.get('is_asset_manager', 0))
         session['_role_checked_at'] = now
     except Exception:
         pass
@@ -444,6 +466,8 @@ def get_current_user():
             'is_restricted': session.get('is_restricted', False),
             'is_content_admin': session.get('is_content_admin', False),
             'is_labor_scheduler': session.get('is_labor_scheduler', False),
+            'is_scheduler': session.get('is_scheduler', False),
+            'is_asset_manager': session.get('is_asset_manager', False),
         }
     return None
 
@@ -1337,6 +1361,8 @@ def _login_route():
             session['is_content_admin'] = is_content_admin(user['id'])
             session['is_labor_scheduler'] = is_labor_scheduler(user['id'])
             session['is_readonly'] = bool(user.get('is_readonly', 0))
+            session['is_scheduler'] = bool(user.get('is_scheduler', 0))
+            session['is_asset_manager'] = bool(user.get('is_asset_manager', 0))
             session['_role_checked_at'] = datetime.utcnow().timestamp()
             log_audit(db, 'LOGIN', 'user', user['id'], detail=username)
             db.commit()
@@ -1410,26 +1436,32 @@ def admin_view_as():
         session['_real_role'] = session.get('user_role')
         session['_real_is_readonly'] = session.get('is_readonly', False)
         session['_real_is_content_admin'] = session.get('is_content_admin', False)
+        session['_real_is_labor_scheduler'] = session.get('is_labor_scheduler', False)
+        session['_real_is_scheduler'] = session.get('is_scheduler', False)
+        session['_real_is_asset_manager'] = session.get('is_asset_manager', False)
     session['_view_as'] = view_as
     syslog_logger.info(f"ADMIN_VIEW_AS view_as={view_as} by={session.get('username')}")
-    # Save scheduler flag too so we can restore on reset
-    if '_real_is_labor_scheduler' not in session:
-        session['_real_is_labor_scheduler'] = session.get('is_labor_scheduler', False)
     if view_as == 'readonly':
         session['user_role'] = 'user'
         session['is_readonly'] = True
         session['is_content_admin'] = False
         session['is_labor_scheduler'] = False
+        session['is_scheduler'] = False
+        session['is_asset_manager'] = False
     elif view_as == 'user':
         session['user_role'] = 'user'
         session['is_readonly'] = False
         session['is_content_admin'] = False
         session['is_labor_scheduler'] = False
+        session['is_scheduler'] = False
+        session['is_asset_manager'] = False
     elif view_as == 'staff':
         session['user_role'] = 'staff'
         session['is_readonly'] = False
         session['is_content_admin'] = False
         session['is_labor_scheduler'] = False
+        session['is_scheduler'] = False
+        session['is_asset_manager'] = False
     return jsonify({'success': True, 'view_as': view_as})
 
 
@@ -1443,6 +1475,8 @@ def admin_view_as_reset():
     session['is_readonly'] = session.pop('_real_is_readonly', False)
     session['is_content_admin'] = session.pop('_real_is_content_admin', False)
     session['is_labor_scheduler'] = session.pop('_real_is_labor_scheduler', False)
+    session['is_scheduler'] = session.pop('_real_is_scheduler', False)
+    session['is_asset_manager'] = session.pop('_real_is_asset_manager', False)
     session.pop('_view_as', None)
     syslog_logger.info(f"ADMIN_VIEW_AS_RESET by={session.get('username')}")
     return jsonify({'success': True})
@@ -3597,7 +3631,7 @@ def settings():
     db = get_db()
     contacts = db.execute('SELECT * FROM contacts ORDER BY department, name').fetchall()
     users    = db.execute(
-        'SELECT id, username, display_name, role, created_at, is_readonly FROM users ORDER BY display_name'
+        'SELECT id, username, display_name, role, created_at, is_readonly, is_scheduler, is_asset_manager FROM users ORDER BY display_name'
     ).fetchall()
     groups   = db.execute('SELECT * FROM user_groups ORDER BY name').fetchall()
 
@@ -3855,6 +3889,8 @@ def edit_user(uid):
     email = (data.get('email') or '').strip()
     role = data.get('role', 'user')
     is_readonly = 1 if data.get('is_readonly') else 0
+    is_scheduler = 1 if data.get('is_scheduler') else 0
+    is_asset_manager = 1 if data.get('is_asset_manager') else 0
     if role not in ('user', 'staff', 'admin'):
         return jsonify({'success': False, 'error': 'Invalid role'}), 400
     db = get_db()
@@ -3863,14 +3899,14 @@ def edit_user(uid):
         db.close()
         return jsonify({'success': False, 'error': 'User not found'}), 404
     db.execute(
-        'UPDATE users SET display_name=?, email=?, role=?, is_readonly=? WHERE id=?',
-        (display_name or row['username'], email, role, is_readonly, uid)
+        'UPDATE users SET display_name=?, email=?, role=?, is_readonly=?, is_scheduler=?, is_asset_manager=? WHERE id=?',
+        (display_name or row['username'], email, role, is_readonly, is_scheduler, is_asset_manager, uid)
     )
     log_audit(db, 'USER_EDIT', 'user', uid,
-              detail=f'role={role} readonly={is_readonly} by={session.get("username")}')
+              detail=f'role={role} readonly={is_readonly} scheduler={is_scheduler} asset_mgr={is_asset_manager} by={session.get("username")}')
     db.commit()
     db.close()
-    syslog_logger.info(f"USER_EDIT user_id={uid} role={role} readonly={is_readonly} by={session.get('username')}")
+    syslog_logger.info(f"USER_EDIT user_id={uid} role={role} readonly={is_readonly} scheduler={is_scheduler} asset_mgr={is_asset_manager} by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -6067,6 +6103,11 @@ def api_labor_scheduler_update(rid):
         updates.append('scheduled_crew_member_id=?')
         params.append(cmid)
         detail_parts.append(f"crew_id={cmid}")
+    for field in ('in_time', 'out_time', 'break_start', 'break_end'):
+        if field in data:
+            updates.append(f'{field}=?')
+            params.append((data[field] or '').strip())
+            detail_parts.append(f"{field}={data[field]}")
 
     if not updates:
         db.close()
@@ -6098,6 +6139,70 @@ def api_labor_scheduler_update(rid):
         f"LABOR_SCHEDULED id={rid} show_id={show_id} by={session.get('username')}"
     )
     return jsonify({'success': True, 'row': _normalize_row_dates(dict(refreshed)) if refreshed else None})
+
+
+@app.route('/api/labor-scheduler/<int:rid>', methods=['DELETE'])
+@scheduler_required
+def api_labor_scheduler_delete(rid):
+    """Delete a labor request from the scheduler view."""
+    db = get_db()
+    row = db.execute('SELECT show_id FROM labor_requests WHERE id=?', (rid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    if not can_access_show(session['user_id'], row['show_id']):
+        db.close()
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    db.execute('DELETE FROM labor_requests WHERE id=?', (rid,))
+    log_audit(db, 'LABOR_REQUEST_DELETE', 'labor_request', rid, show_id=row['show_id'])
+    db.commit()
+    db.close()
+    syslog_logger.info(f"LABOR_REQUEST_DELETE (scheduler) id={rid} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/api/labor-scheduler/add', methods=['POST'])
+@scheduler_required
+def api_labor_scheduler_add():
+    """Add a new labor request from the scheduler view."""
+    data = request.get_json(force=True) or {}
+    show_id = data.get('show_id')
+    if not show_id:
+        return jsonify({'success': False, 'error': 'show_id required'}), 400
+    if not can_access_show(session['user_id'], show_id):
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    db = get_db()
+    max_order = db.execute(
+        'SELECT MAX(sort_order) FROM labor_requests WHERE show_id=?', (show_id,)
+    ).fetchone()[0] or 0
+    cur = db.execute("""
+        INSERT INTO labor_requests (show_id, position_id, work_date, in_time, out_time,
+                                    break_start, break_end, requested_name, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (show_id,
+          data.get('position_id') or None,
+          data.get('work_date') or None,
+          data.get('in_time', ''), data.get('out_time', ''),
+          data.get('break_start', ''), data.get('break_end', ''),
+          data.get('requested_name', ''), max_order + 10))
+    rid = cur.lastrowid
+    log_audit(db, 'LABOR_REQUEST_ADD', 'labor_request', rid, show_id=show_id, detail='via scheduler')
+    db.commit()
+    row = db.execute("""
+        SELECT lr.id, lr.show_id, lr.position_id, lr.work_date, lr.in_time, lr.out_time,
+               lr.break_start, lr.break_end, lr.requested_name, lr.is_scheduled,
+               lr.scheduled_crew_member_id, lr.sort_order,
+               jp.name as position_name, pc.name as category_name,
+               cm.name as scheduled_crew_name
+        FROM labor_requests lr
+        LEFT JOIN job_positions jp ON lr.position_id = jp.id
+        LEFT JOIN position_categories pc ON jp.category_id = pc.id
+        LEFT JOIN crew_members cm ON lr.scheduled_crew_member_id = cm.id
+        WHERE lr.id=?
+    """, (rid,)).fetchone()
+    db.close()
+    syslog_logger.info(f"LABOR_REQUEST_ADD (scheduler) show_id={show_id} id={rid} by={session.get('username')}")
+    return jsonify({'success': True, 'row': _normalize_row_dates(dict(row)) if row else {'id': rid}})
 
 
 # ─── Crew Members ────────────────────────────────────────────────────────────
@@ -6433,7 +6538,7 @@ def warehouse_location_delete(loc_id):
 # ─── Asset Manager — Categories ───────────────────────────────────────────────
 
 @app.route('/settings/asset-categories', methods=['GET'])
-@admin_required
+@asset_manager_required
 def asset_categories_list():
     db = get_db()
     rows = db.execute('SELECT * FROM asset_categories ORDER BY sort_order, name').fetchall()
@@ -6442,7 +6547,7 @@ def asset_categories_list():
 
 
 @app.route('/settings/asset-categories', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_category_add():
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -6463,7 +6568,7 @@ def asset_category_add():
 
 
 @app.route('/settings/asset-categories/<int:cat_id>', methods=['PUT'])
-@admin_required
+@asset_manager_required
 def asset_category_edit(cat_id):
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -6482,7 +6587,7 @@ def asset_category_edit(cat_id):
 
 
 @app.route('/settings/asset-categories/<int:cat_id>', methods=['DELETE'])
-@admin_required
+@asset_manager_required
 def asset_category_delete(cat_id):
     db = get_db()
     # Block deletion if any types (including retired) exist — preserves history
@@ -6530,7 +6635,7 @@ def asset_types_api():
 
 
 @app.route('/settings/asset-types', methods=['GET'])
-@admin_required
+@asset_manager_required
 def asset_types_admin_list():
     db = get_db()
     show_retired = request.args.get('show_retired') == '1'
@@ -6556,7 +6661,7 @@ def asset_types_admin_list():
 
 
 @app.route('/settings/asset-types', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_type_add():
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -6603,7 +6708,7 @@ def asset_type_add():
 
 
 @app.route('/settings/asset-types/<int:type_id>', methods=['PUT'])
-@admin_required
+@asset_manager_required
 def asset_type_edit(type_id):
     data = request.get_json() or {}
     name = (data.get('name') or '').strip()
@@ -6644,7 +6749,7 @@ def asset_type_edit(type_id):
 
 
 @app.route('/settings/asset-types/<int:type_id>', methods=['DELETE'])
-@admin_required
+@asset_manager_required
 def asset_type_delete(type_id):
     """Retire an asset type (soft delete) — history is preserved."""
     db = get_db()
@@ -6666,7 +6771,7 @@ def asset_type_delete(type_id):
 
 
 @app.route('/settings/asset-types/<int:type_id>/photo', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_type_photo_upload(type_id):
     f = request.files.get('photo')
     if not f:
@@ -6697,7 +6802,7 @@ def asset_type_photo_upload(type_id):
 
 
 @app.route('/settings/asset-types/<int:type_id>/photo', methods=['DELETE'])
-@admin_required
+@asset_manager_required
 def asset_type_photo_delete(type_id):
     db = get_db()
     row = db.execute('SELECT photo_s3_key FROM asset_types WHERE id=?', (type_id,)).fetchone()
@@ -6756,7 +6861,7 @@ def asset_type_used_in(type_id):
 # ─── Asset Manager — System/Package Members ──────────────────────────────────
 
 @app.route('/settings/asset-types/<int:type_id>/members', methods=['GET'])
-@admin_required
+@asset_manager_required
 def asset_type_members_list(type_id):
     db = get_db()
     try:
@@ -6792,7 +6897,7 @@ def asset_type_members_list(type_id):
 
 
 @app.route('/settings/asset-types/<int:type_id>/members', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_type_member_add(type_id):
     data = request.get_json() or {}
     component_id = data.get('component_type_id')
@@ -6815,7 +6920,7 @@ def asset_type_member_add(type_id):
 
 
 @app.route('/settings/asset-types/<int:type_id>/members/<int:component_id>', methods=['DELETE'])
-@admin_required
+@asset_manager_required
 def asset_type_member_remove(type_id, component_id):
     db = get_db()
     db.execute("""
@@ -6832,7 +6937,7 @@ def asset_type_member_remove(type_id, component_id):
 # ─── Asset Manager — Items ────────────────────────────────────────────────────
 
 @app.route('/settings/asset-types/<int:type_id>/items', methods=['GET'])
-@admin_required
+@asset_manager_required
 def asset_items_list(type_id):
     db = get_db()
     show_retired = request.args.get('show_retired') == '1'
@@ -6853,7 +6958,7 @@ def asset_items_list(type_id):
 
 
 @app.route('/settings/asset-types/<int:type_id>/items', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_item_add(type_id):
     data = request.get_json() or {}
     count = int(data.get('count') or 1)
@@ -6877,7 +6982,7 @@ def asset_item_add(type_id):
 
 
 @app.route('/settings/asset-items/<int:item_id>', methods=['PUT'])
-@admin_required
+@asset_manager_required
 def asset_item_edit(item_id):
     data = request.get_json() or {}
     db = get_db()
@@ -6917,7 +7022,7 @@ def asset_item_edit(item_id):
 
 
 @app.route('/settings/asset-items/<int:item_id>/contents', methods=['GET'])
-@admin_required
+@asset_manager_required
 def asset_item_contents(item_id):
     """List items contained within a container item."""
     db = get_db()
@@ -6933,7 +7038,7 @@ def asset_item_contents(item_id):
 
 
 @app.route('/settings/asset-items/<int:item_id>/set-container', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_item_set_container(item_id):
     """Assign an item to a container (or clear its container)."""
     data = request.get_json() or {}
@@ -6953,7 +7058,7 @@ def asset_item_set_container(item_id):
 
 
 @app.route('/settings/asset-items/<int:item_id>/logs', methods=['GET'])
-@admin_required
+@asset_manager_required
 def asset_item_logs_list(item_id):
     db = get_db()
     rows = db.execute("""
@@ -6968,7 +7073,7 @@ def asset_item_logs_list(item_id):
 
 
 @app.route('/settings/asset-items/<int:item_id>/logs', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_item_log_add(item_id):
     data = request.get_json() or {}
     body = (data.get('body') or '').strip()
@@ -7001,7 +7106,7 @@ def asset_item_log_add(item_id):
 
 
 @app.route('/settings/asset-logs/<int:log_id>', methods=['DELETE'])
-@admin_required
+@asset_manager_required
 def asset_log_delete(log_id):
     db = get_db()
     db.execute('DELETE FROM asset_logs WHERE id=?', (log_id,))
@@ -7012,7 +7117,7 @@ def asset_log_delete(log_id):
 
 
 @app.route('/settings/asset-items/<int:item_id>', methods=['DELETE'])
-@admin_required
+@asset_manager_required
 def asset_item_delete(item_id):
     """Retire an asset item (soft delete) — history is preserved."""
     db = get_db()
@@ -7026,7 +7131,7 @@ def asset_item_delete(item_id):
 
 
 @app.route('/settings/asset-items/<int:item_id>/maintenance', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_item_maintenance_start(item_id):
     data = request.get_json() or {}
     reason = (data.get('reason') or '').strip()
@@ -7049,7 +7154,7 @@ def asset_item_maintenance_start(item_id):
 
 
 @app.route('/settings/asset-items/<int:item_id>/maintenance/resolve', methods=['POST'])
-@admin_required
+@asset_manager_required
 def asset_item_maintenance_resolve(item_id):
     data = request.get_json() or {}
     notes = (data.get('notes') or '').strip()
@@ -7541,7 +7646,7 @@ def external_rental_pdf(show_id, er_id):
 # ─── Asset Manager — Approvals ────────────────────────────────────────────────
 
 @app.route('/assets/approvals')
-@admin_required
+@asset_manager_required
 def asset_approvals():
     """Rental approval sub-page: shows whose load-in falls in a rolling
     (or custom) window, with their requested assets and approval state."""
@@ -7621,7 +7726,7 @@ def asset_approvals():
 
 
 @app.route('/shows/<int:show_id>/assets/approve', methods=['POST'])
-@admin_required
+@asset_manager_required
 def show_assets_approve(show_id):
     db = get_db()
     row = db.execute('SELECT assets_approved FROM shows WHERE id=?', (show_id,)).fetchone()
@@ -7647,7 +7752,7 @@ def show_assets_approve(show_id):
 
 
 @app.route('/shows/<int:show_id>/assets/unapprove', methods=['POST'])
-@admin_required
+@asset_manager_required
 def show_assets_unapprove(show_id):
     db = get_db()
     row = db.execute('SELECT assets_approved FROM shows WHERE id=?', (show_id,)).fetchone()
@@ -7666,7 +7771,7 @@ def show_assets_unapprove(show_id):
 
 
 @app.route('/shows/<int:show_id>/assets/<int:sa_id>/price', methods=['PUT'])
-@admin_required
+@asset_manager_required
 def show_asset_price_override(show_id, sa_id):
     """Approver-only price override — edits the per-show locked_price
     without touching the catalog or other shows, and does NOT reset the
@@ -7697,7 +7802,7 @@ def show_asset_price_override(show_id, sa_id):
 
 
 @app.route('/assets')
-@admin_required
+@asset_manager_required
 def assets_admin():
     db = get_db()
     categories = db.execute('SELECT * FROM asset_categories ORDER BY sort_order, name').fetchall()
@@ -7710,7 +7815,7 @@ def assets_admin():
 
 
 @app.route('/assets/retired')
-@admin_required
+@asset_manager_required
 def assets_retired():
     db = get_db()
     # Retired types with their items and log counts
@@ -8657,6 +8762,126 @@ def ai_slots_status():
 
 # ─── Asset Availability Dashboard ─────────────────────────────────────────────
 
+@app.route('/api/dashboard/shows-calendar')
+@login_required
+def api_dashboard_shows_calendar():
+    """Return shows per day for a date range (for calendar widget)."""
+    from datetime import date as _date, timedelta
+    date_from = request.args.get('from', '')
+    date_to   = request.args.get('to', '')
+    db = get_db()
+    accessible = get_accessible_shows(session['user_id'])
+    params = []
+    where_parts = ["s.status != 'archived'"]
+    if date_from:
+        where_parts.append("COALESCE(s.show_date, s.load_in_date, s.load_out_date) >= ?")
+        params.append(date_from)
+    if date_to:
+        where_parts.append("COALESCE(s.show_date, s.load_in_date, s.load_out_date) <= ?")
+        params.append(date_to)
+    if accessible is not None:
+        if not accessible:
+            db.close()
+            return jsonify({'days': []})
+        placeholders = ','.join('?' * len(accessible))
+        where_parts.append(f's.id IN ({placeholders})')
+        params.extend(accessible)
+    where_sql = 'WHERE ' + ' AND '.join(where_parts)
+    rows = db.execute(f"""
+        SELECT s.id, s.name, s.show_date, s.load_in_date, s.load_out_date, s.venue, s.status
+        FROM shows s {where_sql}
+        ORDER BY COALESCE(s.show_date, s.load_in_date), s.name
+    """, params).fetchall()
+    db.close()
+
+    # Build per-day buckets: a show appears on its load_in, show, and load_out dates
+    day_map = {}
+    for r in rows:
+        dates_for_show = set()
+        if r['load_in_date']:  dates_for_show.add(r['load_in_date'])
+        if r['show_date']:     dates_for_show.add(r['show_date'])
+        if r['load_out_date']: dates_for_show.add(r['load_out_date'])
+        for d in dates_for_show:
+            if date_from and d < date_from: continue
+            if date_to   and d > date_to:   continue
+            if d not in day_map: day_map[d] = []
+            day_map[d].append({'id': r['id'], 'name': r['name'], 'venue': r['venue'],
+                               'load_in_date': r['load_in_date'], 'show_date': r['show_date'],
+                               'load_out_date': r['load_out_date']})
+
+    # Fill in all calendar days even if empty
+    days = []
+    if date_from and date_to:
+        try:
+            cur = _date.fromisoformat(date_from)
+            end = _date.fromisoformat(date_to)
+            while cur <= end:
+                ds = cur.isoformat()
+                days.append({'date': ds, 'shows': day_map.get(ds, []),
+                             'show_count': len(day_map.get(ds, []))})
+                cur += timedelta(days=1)
+        except ValueError:
+            pass
+    else:
+        for d in sorted(day_map):
+            days.append({'date': d, 'shows': day_map[d], 'show_count': len(day_map[d])})
+
+    return jsonify({'days': days})
+
+
+@app.route('/api/dashboard/skills-summary')
+@login_required
+def api_dashboard_skills_summary():
+    """Return technician skill coverage per position."""
+    db = get_db()
+    total_crew = db.execute('SELECT COUNT(*) FROM crew_members').fetchone()[0]
+    cats = db.execute("""
+        SELECT pc.id, pc.name
+        FROM position_categories pc
+        ORDER BY pc.sort_order, pc.id
+    """).fetchall()
+    result = []
+    for cat in cats:
+        positions = db.execute("""
+            SELECT jp.id, jp.name, jp.venue,
+                   COUNT(cq.crew_member_id) as qualified_count
+            FROM job_positions jp
+            LEFT JOIN crew_qualifications cq ON cq.position_id = jp.id
+            WHERE jp.category_id = ?
+            GROUP BY jp.id
+            ORDER BY jp.sort_order, jp.id
+        """, (cat['id'],)).fetchall()
+        if positions:
+            result.append({
+                'id': cat['id'],
+                'name': cat['name'],
+                'positions': [{'id': p['id'], 'name': p['name'], 'venue': p['venue'],
+                               'qualified': p['qualified_count'],
+                               'unqualified': max(0, total_crew - p['qualified_count'])}
+                              for p in positions]
+            })
+    # Uncategorized positions
+    uncategorized = db.execute("""
+        SELECT jp.id, jp.name, jp.venue,
+               COUNT(cq.crew_member_id) as qualified_count
+        FROM job_positions jp
+        LEFT JOIN crew_qualifications cq ON cq.position_id = jp.id
+        WHERE jp.category_id IS NULL
+        GROUP BY jp.id
+        ORDER BY jp.sort_order, jp.id
+    """).fetchall()
+    if uncategorized:
+        result.append({
+            'id': None, 'name': 'Other',
+            'positions': [{'id': p['id'], 'name': p['name'], 'venue': p['venue'],
+                           'qualified': p['qualified_count'],
+                           'unqualified': max(0, total_crew - p['qualified_count'])}
+                          for p in uncategorized]
+        })
+    db.close()
+    return jsonify({'total_crew': total_crew, 'categories': result})
+
+
 @app.route('/dashboards')
 @login_required
 def dashboards_list():
@@ -8831,7 +9056,7 @@ def public_dashboard(slug):
 # ─── Asset Reports ─────────────────────────────────────────────────────────────
 
 @app.route('/reports/assets')
-@admin_required
+@asset_manager_required
 def asset_reports():
     db = get_db()
     companies = db.execute("""
@@ -8859,7 +9084,7 @@ def asset_reports():
 
 
 @app.route('/api/reports/assets')
-@admin_required
+@asset_manager_required
 def asset_reports_data():
     company   = request.args.get('company', '')
     venue     = request.args.get('venue', '')
