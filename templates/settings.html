@@ -175,12 +175,14 @@
             <td class="mono text-sm">{{ u.username }}</td>
             <td>
               <span class="role-badge role-{{ u.role }}">{% if u.is_readonly %}Read-only{% else %}{{ u.role }}{% endif %}</span>
+              {% if u.is_scheduler %}<span style="font-size:10px;background:rgba(74,158,255,.15);color:#4A9EFF;padding:2px 6px;border-radius:99px;border:1px solid rgba(74,158,255,.3);margin-left:4px">Scheduler</span>{% endif %}
+              {% if u.is_asset_manager %}<span style="font-size:10px;background:rgba(72,187,120,.15);color:#68D391;padding:2px 6px;border-radius:99px;border:1px solid rgba(72,187,120,.3);margin-left:4px">Asset Mgr</span>{% endif %}
             </td>
             <td class="text-dim text-sm">{{ (u.created_at|string)[:10] if u.created_at else '—' }}</td>
             <td>
               <div class="action-btns">
                 {% if user.role == 'admin' %}
-                <button class="btn btn-xs btn-ghost" onclick="openEditUser({{ u.id }}, '{{ u.display_name|replace("'","\\'") or u.username }}', '{{ u.email or '' }}', '{{ u.role }}', {{ 1 if u.is_readonly else 0 }})">Edit</button>
+                <button class="btn btn-xs btn-ghost" onclick="openEditUser({{ u.id }}, '{{ u.display_name|replace("'","\\'") or u.username }}', '{{ u.email or '' }}', '{{ u.role }}', {{ 1 if u.is_readonly else 0 }}, {{ 1 if u.is_scheduler else 0 }}, {{ 1 if u.is_asset_manager else 0 }})">Edit</button>
                 <button class="btn btn-xs btn-ghost" onclick="resetPassword({{ u.id }})">Reset PW</button>
                 {% if u.id != user.id %}
                 <button class="btn btn-xs btn-danger-ghost" onclick="deleteUser({{ u.id }}, this)">Delete</button>
@@ -1696,6 +1698,20 @@
           <option value="readonly">Read-only — view access only, no edits</option>
         </select>
       </div>
+      <div id="edit-user-permissions" style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px">
+        <div style="font-size:11px;font-weight:600;color:var(--text-dim);letter-spacing:.05em;margin-bottom:8px">EXTRA PERMISSIONS</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer">
+            <input type="checkbox" id="edit-user-scheduler" style="width:auto;margin:0">
+            Scheduler — access to Labor Scheduler page
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer">
+            <input type="checkbox" id="edit-user-asset-manager" style="width:auto;margin:0">
+            Asset Manager — access to asset inventory, approvals, retired &amp; reports pages
+          </label>
+        </div>
+        <div style="font-size:11px;color:var(--text-dim);margin-top:6px">Admins always have full access. These only apply to User/Staff accounts.</div>
+      </div>
       <div id="edit-user-msg" style="color:#FC8181;font-size:12px;display:none"></div>
     </div>
     <div class="modal-footer">
@@ -1817,11 +1833,13 @@ async function resetPassword(id) {
   alert(data.success ? 'Password reset successfully.' : data.error);
 }
 
-function openEditUser(id, name, email, role, isReadonly) {
+function openEditUser(id, name, email, role, isReadonly, isScheduler, isAssetManager) {
   document.getElementById('edit-user-id').value = id;
   document.getElementById('edit-user-name').value = name;
   document.getElementById('edit-user-email').value = email;
   document.getElementById('edit-user-role').value = isReadonly ? 'readonly' : role;
+  document.getElementById('edit-user-scheduler').checked = !!isScheduler;
+  document.getElementById('edit-user-asset-manager').checked = !!isAssetManager;
   document.getElementById('edit-user-msg').style.display = 'none';
   document.getElementById('edit-user-modal').style.display = 'flex';
 }
@@ -1847,6 +1865,8 @@ async function saveEditUser() {
     email: document.getElementById('edit-user-email').value.trim(),
     role: selectedRole === 'readonly' ? 'user' : selectedRole,
     is_readonly: selectedRole === 'readonly',
+    is_scheduler: document.getElementById('edit-user-scheduler').checked,
+    is_asset_manager: document.getElementById('edit-user-asset-manager').checked,
   };
   const resp = await fetch(`/settings/users/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'},
