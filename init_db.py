@@ -2383,7 +2383,7 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS perf_id INTEGER DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS day_date TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS assets_approved INTEGER DEFAULT 0',
-            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS assets_approved_by INTEGER REFERENCES "{app_schema}".users(id) ON DELETE SET NULL',
+            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS assets_approved_by INTEGER',
             f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS assets_approved_at TIMESTAMP',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS ai_hint TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS display_as TEXT DEFAULT NULL',
