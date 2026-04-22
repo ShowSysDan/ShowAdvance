@@ -474,7 +474,7 @@
 {# ── SYSTEM TAB WRAPPER (admin only) ──────────────────────────────────────── #}
 {% if user.role == 'admin' %}
 <div id="stab-system" class="stab-pane" style="display:none">
-  <div class="tab-bar" style="margin-bottom:8px;flex-wrap:wrap">
+  <div class="tab-nav" style="margin-bottom:16px">
     <button class="tab-btn system-sub-btn active" data-stab="messages" onclick="switchSystemTab('messages')">Messages</button>
     <button class="tab-btn system-sub-btn" data-stab="update" onclick="switchSystemTab('update')">Updates</button>
     <button class="tab-btn system-sub-btn" data-stab="syslog" onclick="switchSystemTab('syslog')">Syslog</button>
