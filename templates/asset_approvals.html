@@ -207,6 +207,7 @@
       <a href="{{ url_for('show_page', show_id=s.id, tab='assets') }}" class="btn btn-ghost btn-xs" target="_blank">Open show ↗</a>
       <span class="text-dim" style="font-size:11px">Change prices inline to override for this show only.</span>
       <div class="appr-show-actions">
+        <button class="btn btn-xs btn-ghost"  onclick="openAddAsset({{ s.id }}, '{{ s.load_in_date or s.show_date or '' }}', '{{ s.load_out_date or s.show_date or '' }}')">+ Add Asset</button>
         <button class="btn btn-xs btn-ghost"  onclick="openAddExternal({{ s.id }})">+ External Rental</button>
         {% if s.assets_approved %}
         <button class="btn btn-xs btn-ghost"  onclick="unapproveShow({{ s.id }})">Unapprove</button>
@@ -293,6 +294,68 @@
 {% endfor %}
 
 {% endif %}
+
+<!-- Asset Search Modal (Approvals) -->
+<div id="appr-asset-search-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeApprAssetSearch()">
+  <div class="modal-card" style="max-width:700px;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header">Add Asset to Show — <span id="appr-search-show-name" style="font-weight:400"></span>
+      <button onclick="closeApprAssetSearch()" class="modal-close">×</button>
+    </div>
+    <div class="modal-body" style="overflow-y:auto;flex:1">
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <input type="text" id="appr-asset-search-input" class="field-input" placeholder="Search by name, category, manufacturer…" oninput="filterApprAssets()" style="flex:1">
+        <select id="appr-asset-cat-filter" class="field-input" style="width:160px" onchange="filterApprAssets()">
+          <option value="">All Categories</option>
+        </select>
+      </div>
+      <div id="appr-asset-search-results" style="min-height:100px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Asset Add Detail Modal (Approvals) -->
+<div id="appr-asset-add-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeApprAssetAdd()">
+  <div class="modal-card" style="max-width:500px">
+    <div class="modal-header">Add <span id="appr-add-title"></span>
+      <button onclick="closeApprAssetAdd()" class="modal-close">×</button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="appr-add-show-id">
+      <input type="hidden" id="appr-add-type-id">
+      <div class="form-grid" style="grid-template-columns:1fr 1fr;gap:10px">
+        <div class="field-group">
+          <label class="field-label">QUANTITY</label>
+          <input type="number" id="appr-add-qty" class="field-input" value="1" min="1" oninput="updateApprAddState()">
+        </div>
+        <div class="field-group">
+          <label class="field-label">UNIT PRICE (locked)</label>
+          <input type="text" id="appr-add-price" class="field-input" placeholder="0.00">
+        </div>
+        <div class="field-group">
+          <label class="field-label">RENTAL START</label>
+          <input type="date" id="appr-add-start" class="field-input">
+        </div>
+        <div class="field-group">
+          <label class="field-label">RENTAL END</label>
+          <input type="date" id="appr-add-end" class="field-input">
+        </div>
+        <div class="field-group" style="grid-column:span 2">
+          <label class="field-label">NOTES</label>
+          <input type="text" id="appr-add-notes" class="field-input" placeholder="Optional notes…">
+        </div>
+      </div>
+      <div id="appr-avail-info" style="margin-top:10px;font-size:12px;color:var(--text-dim)"></div>
+      <div id="appr-overbook-warning" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.4);border-radius:var(--radius);font-size:12px;color:#F59E0B">
+        <strong>⚠ Availability Override</strong> — adding this asset will result in negative availability (overbooked).
+        This is only possible from the Approvals page. Proceed only if you have authority to override.
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn btn-ghost" onclick="closeApprAssetAdd()">Cancel</button>
+        <button id="appr-add-submit-btn" class="btn btn-primary" onclick="submitApprAsset()">Add to Show</button>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- External Rental Add Modal -->
 <div id="ext-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeExt()">
@@ -382,6 +445,171 @@ async function removeExternal(showId, erId) {
   if (!r.ok) { alert('Remove failed'); return; }
   location.reload();
 }
+// ── Add Asset to Show (Approvals) ────────────────────────────────
+let _apprAllTypes = null;
+let _apprCurrentShowId = null;
+let _apprCurrentTypeId = null;
+let _apprAvailData = null;
+let _apprDefaultStart = '';
+let _apprDefaultEnd   = '';
+
+async function _loadApprAssetTypes() {
+  if (_apprAllTypes) return _apprAllTypes;
+  const r = await fetch('/api/asset-types');
+  _apprAllTypes = await r.json();
+  // Populate category filter
+  const sel = document.getElementById('appr-asset-cat-filter');
+  const cats = [...new Set(_apprAllTypes.map(t => t.category_name).filter(Boolean))];
+  cats.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; sel.appendChild(o); });
+  return _apprAllTypes;
+}
+
+function _esc(s) { return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+async function openAddAsset(showId, defaultStart, defaultEnd) {
+  _apprCurrentShowId = showId;
+  _apprDefaultStart  = defaultStart || '';
+  _apprDefaultEnd    = defaultEnd   || '';
+  document.getElementById('appr-asset-search-input').value = '';
+  document.getElementById('appr-asset-cat-filter').value   = '';
+  document.getElementById('appr-asset-search-results').innerHTML = '';
+  // Show name for modal header
+  const showCard = document.querySelector(`.appr-show[data-show-id="${showId}"] .appr-show-name`);
+  document.getElementById('appr-search-show-name').textContent = showCard?.textContent || '';
+  document.getElementById('appr-asset-search-modal').style.display = 'flex';
+  await _loadApprAssetTypes();
+  renderApprAssetResults('', '');
+  setTimeout(() => document.getElementById('appr-asset-search-input').focus(), 80);
+}
+
+function closeApprAssetSearch() { document.getElementById('appr-asset-search-modal').style.display = 'none'; }
+function closeApprAssetAdd()    { document.getElementById('appr-asset-add-modal').style.display = 'none'; _apprAvailData = null; }
+
+function filterApprAssets() {
+  const q   = document.getElementById('appr-asset-search-input').value;
+  const cat = document.getElementById('appr-asset-cat-filter').value;
+  renderApprAssetResults(q, cat);
+}
+
+function renderApprAssetResults(q, cat) {
+  const container = document.getElementById('appr-asset-search-results');
+  const lq = q.toLowerCase();
+  const filtered = (_apprAllTypes || []).filter(t => {
+    if (cat && t.category_name !== cat) return false;
+    const hay = [t.name, t.category_name, t.manufacturer, t.model].join(' ').toLowerCase();
+    return !lq || hay.includes(lq);
+  });
+  if (!filtered.length) { container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-dim)">No items found.</p>'; return; }
+  const byCat = {};
+  filtered.forEach(t => { if (!byCat[t.category_name]) byCat[t.category_name] = []; byCat[t.category_name].push(t); });
+  let html = '<div style="display:flex;flex-direction:column;gap:10px">';
+  for (const [c, items] of Object.entries(byCat)) {
+    html += `<div><div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase">${_esc(c)}</div><div style="display:flex;flex-wrap:wrap;gap:5px">`;
+    items.forEach(t => {
+      const rate = `$${Number(t.rental_cost||0).toFixed(2)}/day`;
+      html += `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal"
+               onclick="selectApprAssetType(${t.id},'${_esc(t.name).replace(/'/g,"\\'")}',${t.rental_cost||0},${t.weekly_rate||0},${t.is_system?1:0})">
+        <div style="font-weight:500">${_esc(t.name)}</div>
+        ${t.manufacturer ? `<div style="font-size:10px;color:var(--text-dim)">${_esc(t.manufacturer)} ${_esc(t.model||'')}</div>` : ''}
+        <div style="font-size:10px;color:var(--text-dim)">${rate}${t.is_consumable?' · consumable':''}</div>
+      </button>`;
+    });
+    html += '</div></div>';
+  }
+  html += '</div>';
+  container.innerHTML = html;
+}
+
+async function selectApprAssetType(typeId, label, price, weeklyRate, isSystem) {
+  _apprCurrentTypeId = typeId;
+  _apprAvailData = null;
+  document.getElementById('appr-add-type-id').value = typeId;
+  document.getElementById('appr-add-show-id').value = _apprCurrentShowId;
+  document.getElementById('appr-add-title').textContent = label;
+  document.getElementById('appr-add-qty').value = 1;
+  document.getElementById('appr-add-notes').value = '';
+  document.getElementById('appr-add-start').value = _apprDefaultStart;
+  document.getElementById('appr-add-end').value   = _apprDefaultEnd;
+
+  // Smart price
+  const dailyRate = Number(price) || 0;
+  const wkRate    = Number(weeklyRate) || 0;
+  let calcPrice = dailyRate;
+  if (_apprDefaultStart && _apprDefaultEnd) {
+    try {
+      const d1 = new Date(_apprDefaultStart), d2 = new Date(_apprDefaultEnd);
+      const days = Math.max(1, Math.round((d2 - d1) / 86400000) + 1);
+      calcPrice = wkRate > 0 && days >= 7 ? wkRate * Math.ceil(days / 7) : dailyRate * days;
+    } catch(e) {}
+  }
+  document.getElementById('appr-add-price').value = calcPrice.toFixed(2);
+
+  closeApprAssetSearch();
+  document.getElementById('appr-asset-add-modal').style.display = 'flex';
+
+  const availDiv = document.getElementById('appr-avail-info');
+  if (isSystem) {
+    availDiv.innerHTML = '<span style="color:var(--accent)">System — no unit limit.</span>';
+    updateApprAddState();
+    return;
+  }
+  availDiv.textContent = 'Checking availability…';
+  try {
+    const r = await fetch(`/api/asset-types/${typeId}/availability?start=${_apprDefaultStart}&end=${_apprDefaultEnd}`);
+    const av = await r.json();
+    _apprAvailData = av;
+    if (av.unlimited) {
+      availDiv.textContent = 'Consumable — unlimited stock.';
+    } else {
+      const avClass = av.available > 2 ? 'color:#48BB78' : (av.available > 0 ? 'color:#FBBF24' : 'color:#FC8181');
+      availDiv.innerHTML =
+        `Stock: ${av.total_items} total · ${av.in_maintenance} maintenance · ${av.reserve_count} reserved · ${av.total_reserved} allocated — ` +
+        `<strong style="${avClass}">${av.available} available</strong>`;
+    }
+  } catch(e) { availDiv.textContent = ''; }
+  updateApprAddState();
+}
+
+function updateApprAddState() {
+  const av  = _apprAvailData;
+  const qty = parseInt(document.getElementById('appr-add-qty').value) || 1;
+  const warn = document.getElementById('appr-overbook-warning');
+  if (!warn) return;
+  if (av && !av.unlimited && av.available !== undefined && av.available !== null) {
+    const wouldRemain = av.available - qty;
+    warn.style.display = wouldRemain < 0 ? '' : 'none';
+  } else {
+    warn.style.display = 'none';
+  }
+}
+
+async function submitApprAsset() {
+  const showId = document.getElementById('appr-add-show-id').value;
+  const typeId = document.getElementById('appr-add-type-id').value;
+  const qty    = parseInt(document.getElementById('appr-add-qty').value) || 1;
+  const price  = parseFloat(document.getElementById('appr-add-price').value) || 0;
+  const start  = document.getElementById('appr-add-start').value;
+  const end    = document.getElementById('appr-add-end').value;
+  const notes  = document.getElementById('appr-add-notes').value;
+
+  const btn = document.getElementById('appr-add-submit-btn');
+  btn.disabled = true;
+  const r = await fetch(`/shows/${showId}/assets`, {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({asset_type_id: typeId, quantity: qty, locked_price: price,
+                          rental_start: start, rental_end: end, notes})
+  });
+  btn.disabled = false;
+  if (!r.ok) {
+    const e = await r.json();
+    alert(e.error || 'Failed to add asset');
+    return;
+  }
+  closeApprAssetAdd();
+  location.reload();
+}
+
 function openAddExternal(showId) {
   document.getElementById('ext-show-id').value = showId;
   document.getElementById('ext-desc').value = '';

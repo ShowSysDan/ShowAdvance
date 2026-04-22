@@ -6067,6 +6067,11 @@ def api_labor_scheduler_update(rid):
         updates.append('scheduled_crew_member_id=?')
         params.append(cmid)
         detail_parts.append(f"crew_id={cmid}")
+    for field in ('in_time', 'out_time', 'break_start', 'break_end'):
+        if field in data:
+            updates.append(f'{field}=?')
+            params.append((data[field] or '').strip())
+            detail_parts.append(f"{field}={data[field]}")
 
     if not updates:
         db.close()
@@ -6098,6 +6103,70 @@ def api_labor_scheduler_update(rid):
         f"LABOR_SCHEDULED id={rid} show_id={show_id} by={session.get('username')}"
     )
     return jsonify({'success': True, 'row': _normalize_row_dates(dict(refreshed)) if refreshed else None})
+
+
+@app.route('/api/labor-scheduler/<int:rid>', methods=['DELETE'])
+@scheduler_required
+def api_labor_scheduler_delete(rid):
+    """Delete a labor request from the scheduler view."""
+    db = get_db()
+    row = db.execute('SELECT show_id FROM labor_requests WHERE id=?', (rid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    if not can_access_show(session['user_id'], row['show_id']):
+        db.close()
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    db.execute('DELETE FROM labor_requests WHERE id=?', (rid,))
+    log_audit(db, 'LABOR_REQUEST_DELETE', 'labor_request', rid, show_id=row['show_id'])
+    db.commit()
+    db.close()
+    syslog_logger.info(f"LABOR_REQUEST_DELETE (scheduler) id={rid} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/api/labor-scheduler/add', methods=['POST'])
+@scheduler_required
+def api_labor_scheduler_add():
+    """Add a new labor request from the scheduler view."""
+    data = request.get_json(force=True) or {}
+    show_id = data.get('show_id')
+    if not show_id:
+        return jsonify({'success': False, 'error': 'show_id required'}), 400
+    if not can_access_show(session['user_id'], show_id):
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    db = get_db()
+    max_order = db.execute(
+        'SELECT MAX(sort_order) FROM labor_requests WHERE show_id=?', (show_id,)
+    ).fetchone()[0] or 0
+    cur = db.execute("""
+        INSERT INTO labor_requests (show_id, position_id, work_date, in_time, out_time,
+                                    break_start, break_end, requested_name, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (show_id,
+          data.get('position_id') or None,
+          data.get('work_date') or None,
+          data.get('in_time', ''), data.get('out_time', ''),
+          data.get('break_start', ''), data.get('break_end', ''),
+          data.get('requested_name', ''), max_order + 10))
+    rid = cur.lastrowid
+    log_audit(db, 'LABOR_REQUEST_ADD', 'labor_request', rid, show_id=show_id, detail='via scheduler')
+    db.commit()
+    row = db.execute("""
+        SELECT lr.id, lr.show_id, lr.position_id, lr.work_date, lr.in_time, lr.out_time,
+               lr.break_start, lr.break_end, lr.requested_name, lr.is_scheduled,
+               lr.scheduled_crew_member_id, lr.sort_order,
+               jp.name as position_name, pc.name as category_name,
+               cm.name as scheduled_crew_name
+        FROM labor_requests lr
+        LEFT JOIN job_positions jp ON lr.position_id = jp.id
+        LEFT JOIN position_categories pc ON jp.category_id = pc.id
+        LEFT JOIN crew_members cm ON lr.scheduled_crew_member_id = cm.id
+        WHERE lr.id=?
+    """, (rid,)).fetchone()
+    db.close()
+    syslog_logger.info(f"LABOR_REQUEST_ADD (scheduler) show_id={show_id} id={rid} by={session.get('username')}")
+    return jsonify({'success': True, 'row': _normalize_row_dates(dict(row)) if row else {'id': rid}})
 
 
 # ─── Crew Members ────────────────────────────────────────────────────────────
@@ -8656,6 +8725,126 @@ def ai_slots_status():
 
 
 # ─── Asset Availability Dashboard ─────────────────────────────────────────────
+
+@app.route('/api/dashboard/shows-calendar')
+@login_required
+def api_dashboard_shows_calendar():
+    """Return shows per day for a date range (for calendar widget)."""
+    from datetime import date as _date, timedelta
+    date_from = request.args.get('from', '')
+    date_to   = request.args.get('to', '')
+    db = get_db()
+    accessible = get_accessible_shows(session['user_id'])
+    params = []
+    where_parts = ["s.status != 'archived'"]
+    if date_from:
+        where_parts.append("COALESCE(s.show_date, s.load_in_date, s.load_out_date) >= ?")
+        params.append(date_from)
+    if date_to:
+        where_parts.append("COALESCE(s.show_date, s.load_in_date, s.load_out_date) <= ?")
+        params.append(date_to)
+    if accessible is not None:
+        if not accessible:
+            db.close()
+            return jsonify({'days': []})
+        placeholders = ','.join('?' * len(accessible))
+        where_parts.append(f's.id IN ({placeholders})')
+        params.extend(accessible)
+    where_sql = 'WHERE ' + ' AND '.join(where_parts)
+    rows = db.execute(f"""
+        SELECT s.id, s.name, s.show_date, s.load_in_date, s.load_out_date, s.venue, s.status
+        FROM shows s {where_sql}
+        ORDER BY COALESCE(s.show_date, s.load_in_date), s.name
+    """, params).fetchall()
+    db.close()
+
+    # Build per-day buckets: a show appears on its load_in, show, and load_out dates
+    day_map = {}
+    for r in rows:
+        dates_for_show = set()
+        if r['load_in_date']:  dates_for_show.add(r['load_in_date'])
+        if r['show_date']:     dates_for_show.add(r['show_date'])
+        if r['load_out_date']: dates_for_show.add(r['load_out_date'])
+        for d in dates_for_show:
+            if date_from and d < date_from: continue
+            if date_to   and d > date_to:   continue
+            if d not in day_map: day_map[d] = []
+            day_map[d].append({'id': r['id'], 'name': r['name'], 'venue': r['venue'],
+                               'load_in_date': r['load_in_date'], 'show_date': r['show_date'],
+                               'load_out_date': r['load_out_date']})
+
+    # Fill in all calendar days even if empty
+    days = []
+    if date_from and date_to:
+        try:
+            cur = _date.fromisoformat(date_from)
+            end = _date.fromisoformat(date_to)
+            while cur <= end:
+                ds = cur.isoformat()
+                days.append({'date': ds, 'shows': day_map.get(ds, []),
+                             'show_count': len(day_map.get(ds, []))})
+                cur += timedelta(days=1)
+        except ValueError:
+            pass
+    else:
+        for d in sorted(day_map):
+            days.append({'date': d, 'shows': day_map[d], 'show_count': len(day_map[d])})
+
+    return jsonify({'days': days})
+
+
+@app.route('/api/dashboard/skills-summary')
+@login_required
+def api_dashboard_skills_summary():
+    """Return technician skill coverage per position."""
+    db = get_db()
+    total_crew = db.execute('SELECT COUNT(*) FROM crew_members').fetchone()[0]
+    cats = db.execute("""
+        SELECT pc.id, pc.name
+        FROM position_categories pc
+        ORDER BY pc.sort_order, pc.id
+    """).fetchall()
+    result = []
+    for cat in cats:
+        positions = db.execute("""
+            SELECT jp.id, jp.name, jp.venue,
+                   COUNT(cq.crew_member_id) as qualified_count
+            FROM job_positions jp
+            LEFT JOIN crew_qualifications cq ON cq.position_id = jp.id
+            WHERE jp.category_id = ?
+            GROUP BY jp.id
+            ORDER BY jp.sort_order, jp.id
+        """, (cat['id'],)).fetchall()
+        if positions:
+            result.append({
+                'id': cat['id'],
+                'name': cat['name'],
+                'positions': [{'id': p['id'], 'name': p['name'], 'venue': p['venue'],
+                               'qualified': p['qualified_count'],
+                               'unqualified': max(0, total_crew - p['qualified_count'])}
+                              for p in positions]
+            })
+    # Uncategorized positions
+    uncategorized = db.execute("""
+        SELECT jp.id, jp.name, jp.venue,
+               COUNT(cq.crew_member_id) as qualified_count
+        FROM job_positions jp
+        LEFT JOIN crew_qualifications cq ON cq.position_id = jp.id
+        WHERE jp.category_id IS NULL
+        GROUP BY jp.id
+        ORDER BY jp.sort_order, jp.id
+    """).fetchall()
+    if uncategorized:
+        result.append({
+            'id': None, 'name': 'Other',
+            'positions': [{'id': p['id'], 'name': p['name'], 'venue': p['venue'],
+                           'qualified': p['qualified_count'],
+                           'unqualified': max(0, total_crew - p['qualified_count'])}
+                          for p in uncategorized]
+        })
+    db.close()
+    return jsonify({'total_crew': total_crew, 'categories': result})
+
 
 @app.route('/dashboards')
 @login_required

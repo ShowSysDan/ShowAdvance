@@ -3,6 +3,7 @@
 
 {% block head %}
 <style>
+/* ── Availability table ───────────────────────────────────────────── */
 .avail-table { width:100%;border-collapse:collapse;font-size:12px }
 .avail-table th { background:var(--bg-hover);padding:6px 10px;text-align:left;font-weight:600;font-size:10px;letter-spacing:.06em;color:var(--text-dim);border-bottom:1px solid var(--border) }
 .avail-table td { padding:5px 10px;border-bottom:1px solid var(--border-faint,rgba(255,255,255,.06)) }
@@ -12,6 +13,158 @@
 .avail-warn { background:rgba(251,191,36,.15);color:#FBBF24;border:1px solid rgba(251,191,36,.3) }
 .avail-none { background:rgba(239,68,68,.12);color:#EF4444;border:1px solid rgba(239,68,68,.3) }
 .avail-maint{ background:rgba(148,163,184,.12);color:#94A3B8;border:1px solid rgba(148,163,184,.3) }
+
+/* ── Calendar ────────────────────────────────────────────────────── */
+.dash-cal-nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.dash-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+.dash-cal-dow {
+  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: var(--text-dim);
+  padding: 4px 0;
+  text-transform: uppercase;
+}
+.dash-cal-cell {
+  min-height: 80px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px;
+  background: var(--bg-card);
+  vertical-align: top;
+  cursor: default;
+  transition: background .1s;
+}
+.dash-cal-cell.other-month { opacity: .35; }
+.dash-cal-cell.today { border-color: var(--accent); }
+.dash-cal-cell:hover { background: var(--bg-hover); }
+.dash-cal-day-num {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.dash-cal-cell.today .dash-cal-day-num {
+  background: var(--accent);
+  color: #000;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+.dash-cal-show-chip {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 5px;
+  border-radius: 3px;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  display: block;
+}
+.chip-load-in  { background: rgba(74,158,255,.18); color: #4A9EFF; }
+.chip-show     { background: rgba(34,197,94,.18);  color: #22C55E; }
+.chip-load-out { background: rgba(245,158,11,.18); color: #F59E0B; }
+
+/* ── Week strip ──────────────────────────────────────────────────── */
+.dash-week-strip {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.dash-week-cell {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  background: var(--bg-card);
+  text-align: center;
+}
+.dash-week-cell.today { border-color: var(--accent); }
+.dash-week-cell-dow  { font-size: 10px; font-weight: 700; letter-spacing:.06em; color: var(--text-dim); text-transform: uppercase; }
+.dash-week-cell-date { font-size: 14px; font-weight: 600; margin: 2px 0; }
+.dash-week-cell-count{
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  margin: 4px 0 2px;
+}
+.dash-week-cell-label{ font-size: 10px; color: var(--text-dim); }
+
+/* ── Skills chart ────────────────────────────────────────────────── */
+.skills-cat-header {
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--accent);
+  padding: 10px 0 4px;
+}
+.skills-row {
+  display: grid;
+  grid-template-columns: 180px 1fr 60px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+.skills-pos-name {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+.skills-bar-bg {
+  height: 14px;
+  background: var(--bg-hover);
+  border-radius: 7px;
+  overflow: hidden;
+}
+.skills-bar-fill {
+  height: 100%;
+  border-radius: 7px;
+  transition: width .4s ease;
+}
+.skills-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-align: right;
+  white-space: nowrap;
+}
+.dash-view-tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+}
+.dash-view-tab {
+  padding: 4px 14px;
+  font-size: 12px;
+  border-radius: 99px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: all .15s;
+}
+.dash-view-tab.active {
+  background: var(--accent);
+  color: #000;
+  border-color: var(--accent);
+}
 </style>
 {% endblock %}
 
@@ -19,17 +172,21 @@
 <div class="page-header">
   <div>
     <h1 class="page-title">{{ dash.name }}</h1>
-    <p class="page-sub">Asset availability — layout: {{ dash.layout }}</p>
+    <p class="page-sub">
+      {% if dash.layout == 'calendar' %}Shows calendar{% elif dash.layout == 'skills' %}Technician skills overview{% else %}Asset availability — layout: {{ dash.layout }}{% endif %}
+    </p>
   </div>
   <div style="display:flex;gap:8px;align-items:center">
     {% if not public %}
+    {% if dash.layout not in ('skills',) %}
     <div class="field-group" style="margin:0;display:flex;gap:8px;align-items:center">
       <label class="field-label" style="white-space:nowrap;margin:0">Show range:</label>
-      <input type="date" id="range-from" class="field-input field-input-sm" style="width:140px" onchange="loadAvailability()">
+      <input type="date" id="range-from" class="field-input field-input-sm" style="width:140px" onchange="loadData()">
       <span style="color:var(--text-dim)">–</span>
-      <input type="date" id="range-to" class="field-input field-input-sm" style="width:140px" onchange="loadAvailability()">
+      <input type="date" id="range-to" class="field-input field-input-sm" style="width:140px" onchange="loadData()">
     </div>
-    <button class="btn btn-ghost btn-sm" onclick="loadAvailability()">Refresh</button>
+    {% endif %}
+    <button class="btn btn-ghost btn-sm" onclick="loadData()">Refresh</button>
     {% if dash.user_id == user.id %}
     <a href="/dashboards" class="btn btn-ghost btn-sm">← All Dashboards</a>
     {% endif %}
@@ -45,7 +202,7 @@
 
 <div id="avail-loading" style="text-align:center;padding:40px;color:var(--text-dim)">
   <div class="loading-spinner" style="margin:0 auto 12px"></div>
-  Loading availability data…
+  Loading…
 </div>
 
 <div id="avail-content" style="display:none"></div>
@@ -57,37 +214,37 @@ const ASSET_TYPES = {{ asset_types | tojson }};
 const CATEGORIES  = {{ categories | tojson }};
 const LAYOUT      = '{{ dash.layout }}';
 
-async function loadAvailability() {
+async function loadData() {
   document.getElementById('avail-loading').style.display = 'block';
   document.getElementById('avail-content').style.display = 'none';
+  try {
+    if (LAYOUT === 'calendar')       await loadCalendar();
+    else if (LAYOUT === 'skills')    await loadSkills();
+    else                             await loadAvailability();
+  } catch(e) {
+    document.getElementById('avail-loading').textContent = 'Error: ' + e.message;
+  }
+}
 
+/* ── Availability (existing layouts) ────────────────────────────── */
+async function loadAvailability() {
   const fromEl = document.getElementById('range-from');
   const toEl   = document.getElementById('range-to');
   const params = new URLSearchParams();
   if (fromEl && fromEl.value) params.set('from', fromEl.value);
   if (toEl   && toEl.value)   params.set('to',   toEl.value);
-
-  try {
-    const resp = await fetch('/api/assets/availability?' + params.toString());
-    const data = await resp.json();
-    renderAvailability(data);
-  } catch(e) {
-    document.getElementById('avail-loading').textContent = 'Error loading data: ' + e.message;
-  }
+  const resp = await fetch('/api/assets/availability?' + params.toString());
+  const data = await resp.json();
+  renderAvailability(data);
 }
 
 function renderAvailability(data) {
   const content = document.getElementById('avail-content');
   document.getElementById('avail-loading').style.display = 'none';
   content.style.display = 'block';
-
-  if (LAYOUT === 'by_category') {
-    content.innerHTML = renderByCategory(data);
-  } else if (LAYOUT === 'by_show') {
-    content.innerHTML = renderByShow(data);
-  } else {
-    content.innerHTML = renderCombined(data);
-  }
+  if (LAYOUT === 'by_category')      content.innerHTML = renderByCategory(data);
+  else if (LAYOUT === 'by_show')     content.innerHTML = renderByShow(data);
+  else                               content.innerHTML = renderCombined(data);
 }
 
 function availPill(avail) {
@@ -103,7 +260,6 @@ function renderCombined(data) {
   let html = '<div class="form-section"><div class="form-section-header"><span class="section-icon">◈</span> ALL ASSETS</div>';
   html += '<div class="form-section-body no-pad"><table class="avail-table">';
   html += '<thead><tr><th>CATEGORY</th><th>ITEM TYPE</th><th>TOTAL UNITS</th><th>IN MAINTENANCE</th><th>RESERVED</th><th>AVAILABLE</th></tr></thead><tbody>';
-
   for (const t of ASSET_TYPES) {
     const info = byType[t.id] || {};
     const total = info.total ?? '—';
@@ -119,7 +275,6 @@ function renderCombined(data) {
       <td>${availPill(avail)}</td>
     </tr>`;
   }
-
   if (ASSET_TYPES.length === 0) html += '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--text-dim)">No asset types configured.</td></tr>';
   html += '</tbody></table></div></div>';
   return html;
@@ -174,17 +329,210 @@ function renderByShow(data) {
   return html;
 }
 
-// Set default date range (next 90 days)
+/* ── Calendar layout ─────────────────────────────────────────────── */
+let _calYear, _calMonth;
+let _calDaysData = {};
+
+async function loadCalendar() {
+  const now = new Date();
+  if (!_calYear) _calYear  = now.getFullYear();
+  if (!_calMonth) _calMonth = now.getMonth(); // 0-indexed
+
+  const fromEl = document.getElementById('range-from');
+  const toEl   = document.getElementById('range-to');
+  const from = fromEl?.value || new Date(_calYear, _calMonth, 1).toISOString().slice(0,10);
+  const to   = toEl?.value   || new Date(_calYear, _calMonth + 1, 0).toISOString().slice(0,10);
+
+  const resp = await fetch(`/api/dashboard/shows-calendar?from=${from}&to=${to}`);
+  const data = await resp.json();
+  _calDaysData = {};
+  (data.days || []).forEach(d => { _calDaysData[d.date] = d; });
+
+  renderCalendarLayout(from, to);
+}
+
+function renderCalendarLayout(from, to) {
+  const content = document.getElementById('avail-content');
+  document.getElementById('avail-loading').style.display = 'none';
+  content.style.display = 'block';
+
+  const fromDate = new Date(from + 'T00:00:00');
+  const toDate   = new Date(to   + 'T00:00:00');
+  const todayStr = new Date().toISOString().slice(0,10);
+
+  // Build week strip (next 7 days from fromDate)
+  const weekDays = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(fromDate);
+    d.setDate(d.getDate() + i);
+    const ds = d.toISOString().slice(0,10);
+    if (ds > to) break;
+    weekDays.push({ date: ds, d });
+  }
+
+  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+
+  let html = '';
+
+  // Week strip
+  html += '<div class="form-section" style="margin-bottom:16px"><div class="form-section-header"><span class="section-icon">◈</span> WEEK AT A GLANCE</div><div class="form-section-body">';
+  html += '<div class="dash-week-strip">';
+  for (const { date, d } of weekDays) {
+    const dayData = _calDaysData[date] || { shows: [], show_count: 0 };
+    const isToday = date === todayStr;
+    html += `<div class="dash-week-cell${isToday ? ' today' : ''}">
+      <div class="dash-week-cell-dow">${DOW[d.getDay()]}</div>
+      <div class="dash-week-cell-date">${d.getDate()}</div>
+      <div class="dash-week-cell-count">${dayData.show_count || 0}</div>
+      <div class="dash-week-cell-label">${dayData.show_count === 1 ? 'show' : 'shows'}</div>
+    </div>`;
+  }
+  html += '</div></div></div>';
+
+  // Full calendar: group days by month
+  const monthMap = {};
+  const cur = new Date(fromDate);
+  while (cur <= toDate) {
+    const ds = cur.toISOString().slice(0,10);
+    const mk = `${cur.getFullYear()}-${cur.getMonth()}`;
+    if (!monthMap[mk]) monthMap[mk] = { year: cur.getFullYear(), month: cur.getMonth(), days: [] };
+    monthMap[mk].days.push(ds);
+    cur.setDate(cur.getDate() + 1);
+  }
+
+  for (const [mk, { year, month, days }] of Object.entries(monthMap)) {
+    html += `<div class="form-section" style="margin-bottom:16px">
+      <div class="form-section-header"><span class="section-icon">◈</span> ${MONTHS[month].toUpperCase()} ${year}</div>
+      <div class="form-section-body">`;
+
+    // Day-of-week headers
+    html += '<div class="dash-cal-grid">';
+    DOW.forEach(dw => { html += `<div class="dash-cal-dow">${dw}</div>`; });
+
+    // Leading blank cells
+    const firstDay = new Date(year, month, 1).getDay();
+    for (let i = 0; i < firstDay; i++) html += '<div class="dash-cal-cell other-month"></div>';
+
+    // Day cells for this month (only days in range)
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    for (let d = 1; d <= daysInMonth; d++) {
+      const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+      const inRange = ds >= from && ds <= to;
+      const isToday = ds === todayStr;
+      const dayData = _calDaysData[ds] || { shows: [] };
+      html += `<div class="dash-cal-cell${isToday ? ' today' : ''}${!inRange ? ' other-month' : ''}">
+        <div class="dash-cal-day-num">${d}</div>`;
+      if (inRange) {
+        dayData.shows.slice(0, 3).forEach(s => {
+          const chipClass = s.load_in_date === ds ? 'chip-load-in' : (s.load_out_date === ds ? 'chip-load-out' : 'chip-show');
+          const chipLabel = s.load_in_date === ds ? '↓' : (s.load_out_date === ds ? '↑' : '★');
+          html += `<span class="dash-cal-show-chip ${chipClass}" title="${escHtml(s.name)}">${chipLabel} ${escHtml(s.name)}</span>`;
+        });
+        if (dayData.shows.length > 3) {
+          html += `<span style="font-size:10px;color:var(--text-dim)">+${dayData.shows.length - 3} more</span>`;
+        }
+      }
+      html += '</div>';
+    }
+
+    // Trailing blank cells to fill last row
+    const lastDay = new Date(year, month, daysInMonth).getDay();
+    for (let i = lastDay + 1; i < 7; i++) html += '<div class="dash-cal-cell other-month"></div>';
+
+    html += '</div>'; // grid
+    html += '<div style="margin-top:10px;font-size:11px;color:var(--text-dim);display:flex;gap:16px">';
+    html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(74,158,255,.4);margin-right:4px"></span>Load-In (↓)</span>';
+    html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(34,197,94,.4);margin-right:4px"></span>Show day (★)</span>';
+    html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(245,158,11,.4);margin-right:4px"></span>Load-Out (↑)</span>';
+    html += '</div>';
+    html += '</div></div>'; // form-section-body, form-section
+  }
+
+  content.innerHTML = html;
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+/* ── Skills layout ───────────────────────────────────────────────── */
+async function loadSkills() {
+  const resp = await fetch('/api/dashboard/skills-summary');
+  const data = await resp.json();
+  renderSkills(data);
+}
+
+function renderSkills(data) {
+  const content = document.getElementById('avail-content');
+  document.getElementById('avail-loading').style.display = 'none';
+  content.style.display = 'block';
+
+  const total = data.total_crew || 0;
+  const cats  = data.categories || [];
+
+  if (!total) {
+    content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">No technicians configured. Add crew members in Settings → Technicians.</div>';
+    return;
+  }
+
+  let html = `<div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> TECHNICIAN SKILL COVERAGE
+      <span class="text-dim" style="font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;margin-left:8px">${total} technician${total===1?'':'s'} total</span>
+    </div>
+    <div class="form-section-body">`;
+
+  if (!cats.length) {
+    html += '<p class="text-dim">No positions configured.</p>';
+  } else {
+    for (const cat of cats) {
+      html += `<div class="skills-cat-header">${escHtml(cat.name)}</div>`;
+      for (const pos of cat.positions) {
+        const pct = total > 0 ? Math.round((pos.qualified / total) * 100) : 0;
+        const barColor = pct >= 60 ? '#22C55E' : pct >= 30 ? '#FBBF24' : '#EF4444';
+        const label = pos.venue ? `${escHtml(pos.name)} <span style="color:var(--text-dim);font-weight:400">(${escHtml(pos.venue)})</span>` : escHtml(pos.name);
+        html += `<div class="skills-row">
+          <div class="skills-pos-name">${label}</div>
+          <div class="skills-bar-bg">
+            <div class="skills-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+          </div>
+          <div class="skills-count">${pos.qualified}/${total}</div>
+        </div>`;
+      }
+    }
+  }
+
+  // Summary: positions with zero coverage
+  const zeroCoverage = cats.flatMap(c => c.positions).filter(p => p.qualified === 0);
+  if (zeroCoverage.length) {
+    html += `<div style="margin-top:16px;padding:10px 14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:var(--radius);font-size:12px">
+      <strong style="color:#EF4444">⚠ No coverage:</strong>
+      ${zeroCoverage.map(p => escHtml(p.name)).join(', ')}
+    </div>`;
+  }
+
+  html += '</div></div>';
+  content.innerHTML = html;
+}
+
+/* ── Init ────────────────────────────────────────────────────────── */
 window.addEventListener('DOMContentLoaded', () => {
   const fromEl = document.getElementById('range-from');
   const toEl   = document.getElementById('range-to');
   if (fromEl && toEl) {
     const now = new Date();
-    fromEl.value = now.toISOString().slice(0,10);
-    const end = new Date(); end.setDate(end.getDate() + 90);
-    toEl.value = end.toISOString().slice(0,10);
+    if (LAYOUT === 'calendar') {
+      // Default to current month
+      const y = now.getFullYear(), m = now.getMonth();
+      fromEl.value = new Date(y, m, 1).toISOString().slice(0,10);
+      toEl.value   = new Date(y, m + 1, 0).toISOString().slice(0,10);
+    } else {
+      fromEl.value = now.toISOString().slice(0,10);
+      const end = new Date(); end.setDate(end.getDate() + 90);
+      toEl.value = end.toISOString().slice(0,10);
+    }
   }
-  loadAvailability();
+  loadData();
 });
 </script>
 {% endblock %}

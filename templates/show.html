@@ -681,16 +681,16 @@ const SHOW_VENUE = {{ show.venue | tojson }};
     <div class="labor-quickfill" id="labor-quickfill">
       <span class="labor-qf-label">Quick Fill</span>
       <label class="labor-qf-field"><span>In</span>
-        <input type="text" id="qf-in" class="field-input field-input-sm" placeholder="14:00" maxlength="5">
+        <input type="text" id="qf-in" class="field-input field-input-sm" placeholder="HH:MM" maxlength="5">
+      </label>
+      <label class="labor-qf-field"><span>Lunch Start</span>
+        <input type="text" id="qf-break-start" class="field-input field-input-sm" placeholder="HH:MM" maxlength="5">
+      </label>
+      <label class="labor-qf-field"><span>Lunch End</span>
+        <input type="text" id="qf-break-end" class="field-input field-input-sm" placeholder="HH:MM" maxlength="5">
       </label>
       <label class="labor-qf-field"><span>Out</span>
-        <input type="text" id="qf-out" class="field-input field-input-sm" placeholder="22:00" maxlength="5">
-      </label>
-      <label class="labor-qf-field"><span>Break Start</span>
-        <input type="text" id="qf-break-start" class="field-input field-input-sm" placeholder="18:00" maxlength="5">
-      </label>
-      <label class="labor-qf-field"><span>Break End</span>
-        <input type="text" id="qf-break-end" class="field-input field-input-sm" placeholder="18:30" maxlength="5">
+        <input type="text" id="qf-out" class="field-input field-input-sm" placeholder="HH:MM" maxlength="5">
       </label>
       <button type="button" class="btn btn-sm btn-ghost" onclick="applyQuickFill(false)">Apply to Selected</button>
       <button type="button" class="btn btn-sm btn-primary" onclick="applyQuickFill(true)">Apply to All</button>
@@ -861,9 +861,10 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         </div>
       </div>
       <div id="asset-avail-info" style="margin-top:10px;font-size:12px;color:var(--text-dim)"></div>
+      <div id="asset-add-block-msg" style="display:none;margin-top:8px;padding:8px 12px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:var(--radius);font-size:12px;color:#EF4444"></div>
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
         <button class="btn btn-ghost" onclick="closeAssetAddModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="submitAddAsset()">Add to Show</button>
+        <button id="asset-add-submit-btn" class="btn btn-primary" onclick="submitAddAsset()">Add to Show</button>
       </div>
     </div>
   </div>
@@ -910,6 +911,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   const IS_ADMIN = {{ 'true' if is_content_admin_user else 'false' }};
   let _allAssetTypes = null;
   let _currentAssetTypeId = null;
+  let _currentAvailData = null;
 
   // Load asset types lazily
   async function _loadAssetTypes() {
@@ -1115,39 +1117,84 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     document.getElementById('asset-add-modal').style.display = 'flex';
 
     // Load availability
+    _currentAvailData = null;
+    _updateAddAssetBlockState();
     const availDiv = document.getElementById('asset-avail-info');
     if (isSystem) {
       availDiv.innerHTML = '<span style="color:var(--accent)">System — assembled from individual components, no unit limit.</span>';
     } else {
       availDiv.textContent = 'Checking availability…';
       try {
-      const start = document.getElementById('asset-add-start').value;
-      const end   = document.getElementById('asset-add-end').value;
-      const r = await fetch(`/api/asset-types/${typeId}/availability?start=${start}&end=${end}`, {
-        headers:{'X-Requested-With':'XMLHttpRequest'}
-      });
-      const av = await r.json();
-      if (av.unlimited) {
-        availDiv.textContent = 'Consumable — unlimited stock.';
-      } else {
-        const avClass = av.available > 0 ? 'color:#48BB78' : 'color:#FC8181';
-        availDiv.innerHTML =
-          `<span>Stock: ${av.total_items} total · ${av.in_maintenance} maintenance · ${av.reserve_count} reserved · ${av.total_reserved} allocated</span> — ` +
-          `<strong style="${avClass}">${av.available} available</strong>`;
+        const start = document.getElementById('asset-add-start').value;
+        const end   = document.getElementById('asset-add-end').value;
+        const r = await fetch(`/api/asset-types/${typeId}/availability?start=${start}&end=${end}`, {
+          headers:{'X-Requested-With':'XMLHttpRequest'}
+        });
+        const av = await r.json();
+        _currentAvailData = av;
+        if (av.unlimited) {
+          availDiv.textContent = 'Consumable — unlimited stock.';
+        } else {
+          const avClass = av.available > 2 ? 'color:#48BB78' : (av.available > 0 ? 'color:#FBBF24' : 'color:#FC8181');
+          availDiv.innerHTML =
+            `<span>Stock: ${av.total_items} total · ${av.in_maintenance} maintenance · ${av.reserve_count} reserved · ${av.total_reserved} allocated</span> — ` +
+            `<strong style="${avClass}">${av.available} available</strong>`;
+        }
+        _updateAddAssetBlockState();
+      } catch(e) {
+        availDiv.textContent = '';
       }
-    } catch(e) {
-      availDiv.textContent = '';
-    }
     } // end if (!isSystem)
   };
 
   window.closeAssetAddModal = function() {
     document.getElementById('asset-add-modal').style.display = 'none';
+    _currentAvailData = null;
   };
+
+  function _updateAddAssetBlockState() {
+    const btn = document.getElementById('asset-add-submit-btn');
+    const blockMsg = document.getElementById('asset-add-block-msg');
+    if (!btn) return;
+    const av = _currentAvailData;
+    const qty = parseInt(document.getElementById('asset-add-qty').value) || 1;
+    // unlimited / consumable / system = always OK
+    if (!av || av.unlimited) {
+      btn.disabled = false;
+      btn.textContent = 'Add to Show';
+      if (blockMsg) blockMsg.style.display = 'none';
+      return;
+    }
+    const wouldRemain = (av.available ?? 0) - qty;
+    if (wouldRemain < 0) {
+      btn.disabled = true;
+      btn.textContent = 'Unavailable';
+      if (blockMsg) {
+        blockMsg.style.display = '';
+        blockMsg.innerHTML = `<strong>Not enough units available.</strong> ${av.available} available, ${qty} requested. ` +
+          `To override, use the <a href="/asset-approvals" style="color:var(--accent)">Asset Approvals page</a>.`;
+      }
+    } else {
+      btn.disabled = false;
+      btn.textContent = 'Add to Show';
+      if (blockMsg) blockMsg.style.display = 'none';
+    }
+  }
+
+  // Re-check block state when qty changes
+  document.getElementById('asset-add-qty')?.addEventListener('input', _updateAddAssetBlockState);
 
   window.submitAddAsset = async function() {
     const typeId = document.getElementById('asset-add-type-id').value;
     const qty = parseInt(document.getElementById('asset-add-qty').value) || 1;
+    // Final guard: check availability in case state got out of sync
+    const av = _currentAvailData;
+    if (av && !av.unlimited && av.available !== null && av.available !== undefined) {
+      if ((av.available - qty) < 0) {
+        alert(`Not enough units available (${av.available} available). Use the Asset Approvals page to override.`);
+        return;
+      }
+    }
     const price = parseFloat(document.getElementById('asset-add-price').value) || 0;
     const start = document.getElementById('asset-add-start').value;
     const end   = document.getElementById('asset-add-end').value;
@@ -2055,10 +2102,10 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     tr.innerHTML = `
       ${RESTRICTED ? '' : '<td style="text-align:center"><input type="checkbox" class="labor-row-check"></td>'}
       <td><select class="field-input field-input-sm labor-field" data-field="position_id" ${RESTRICTED ? 'disabled' : ''}></select></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" value="${lr.in_time || ''}" placeholder="14:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" value="${lr.out_time || ''}" placeholder="22:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_start" value="${lr.break_start || ''}" placeholder="18:00" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
-      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_end" value="${lr.break_end || ''}" placeholder="18:30" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" value="${lr.in_time || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_start" value="${lr.break_start || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="break_end" value="${lr.break_end || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
+      <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" value="${lr.out_time || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
       <td><select class="field-input field-input-sm labor-field" data-field="requested_name" ${RESTRICTED ? 'disabled' : ''}></select></td>
       <td style="text-align:center" title="Set by the labor scheduler"><input type="checkbox" class="labor-is-scheduled" disabled ${lr.is_scheduled ? 'checked' : ''}></td>
       <td class="labor-scheduled-tech" style="font-size:12px;color:var(--text-dim)" title="Set by the labor scheduler"></td>
@@ -2114,9 +2161,9 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
             ${RESTRICTED ? '' : '<th style="width:32px;text-align:center"><input type="checkbox" class="labor-day-select-all" title="Select / deselect all in this day"></th>'}
             <th style="width:200px">POSITION</th>
             <th style="width:95px">IN</th>
+            <th style="width:115px;white-space:nowrap">LUNCH START</th>
+            <th style="width:115px;white-space:nowrap">LUNCH END</th>
             <th style="width:95px">OUT</th>
-            <th style="width:115px;white-space:nowrap">BREAK START</th>
-            <th style="width:115px;white-space:nowrap">BREAK END</th>
             <th>REQUESTED TECH</th>
             <th style="width:70px;text-align:center" title="Scheduled by the labor scheduler">SCHED</th>
             <th style="width:180px;white-space:nowrap">SCHEDULED TECH</th>
@@ -2262,6 +2309,18 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       container.appendChild(block);
     });
     _sortDayBlocks();
+    _initQuickFillDefaults();
+  }
+
+  function _initQuickFillDefaults() {
+    const qfIn  = document.getElementById('qf-in');
+    const qfOut = document.getElementById('qf-out');
+    if (!qfIn || !qfOut) return;
+    if (qfIn.value || qfOut.value) return; // already set by user
+    const liTime = (document.getElementById('load-in-time')?.value || '').trim();
+    const loTime = (document.getElementById('load-out-time')?.value || '').trim();
+    if (liTime) qfIn.value  = liTime;
+    if (loTime) qfOut.value = loTime;
   }
 
   /* Return list of YYYY-MM-DD strings spanning load-in → load-out (inclusive).
