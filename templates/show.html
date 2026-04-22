@@ -1171,8 +1171,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       btn.textContent = 'Unavailable';
       if (blockMsg) {
         blockMsg.style.display = '';
-        blockMsg.innerHTML = `<strong>Not enough units available.</strong> ${av.available} available, ${qty} requested. ` +
-          `To override, use the <a href="/asset-approvals" style="color:var(--accent)">Asset Approvals page</a>.`;
+        blockMsg.innerHTML = `<strong>Not enough units available.</strong> ${av.available} unit${av.available === 1 ? '' : 's'} available, ${qty} requested.`;
       }
     } else {
       btn.disabled = false;
@@ -1191,7 +1190,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const av = _currentAvailData;
     if (av && !av.unlimited && av.available !== null && av.available !== undefined) {
       if ((av.available - qty) < 0) {
-        alert(`Not enough units available (${av.available} available). Use the Asset Approvals page to override.`);
+        alert(`Not enough units available — ${av.available} unit${av.available === 1 ? '' : 's'} available, ${qty} requested.`);
         return;
       }
     }
