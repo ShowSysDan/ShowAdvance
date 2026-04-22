@@ -1717,8 +1717,9 @@ def show_page(show_id):
             try: _p['perf_date'] = _pd.strftime('%Y-%m-%d')
             except AttributeError: _p['perf_date'] = str(_pd)
 
-    # Group performances by date for the production schedule — two perfs on the
-    # same calendar date share a single timeline.
+    # Group performances by date, then extend with every date in the
+    # load-in → load-out range so the schedule has a day tab for each
+    # calendar day of the production.
     schedule_days = []
     _date_to_idx = {}
     for _p in performances:
@@ -1729,13 +1730,50 @@ def show_page(show_id):
             _date_to_idx[key] = idx
             schedule_days.append({
                 'perf_date': _p.get('perf_date'),
+                'date_key': _p.get('perf_date') or key,
                 'perfs': [],
                 'perf_ids': [],
             })
         schedule_days[idx]['perfs'].append(_p)
         schedule_days[idx]['perf_ids'].append(_p['id'])
+
+    # Add any load-in → load-out calendar dates not already covered by a perf
+    def _iso(v):
+        s = str(v) if v is not None else ''
+        return s[:10] if s else ''
+    _li = _iso(show['load_in_date'])
+    _lo = _iso(show['load_out_date'])
+    if _li and _lo:
+        try:
+            from datetime import date as _date, timedelta as _td
+            _d1 = _date.fromisoformat(_li)
+            _d2 = _date.fromisoformat(_lo)
+            if _d2 >= _d1:
+                _cur = _d1
+                while _cur <= _d2:
+                    _k = _cur.isoformat()
+                    if _k not in _date_to_idx:
+                        _date_to_idx[_k] = len(schedule_days)
+                        schedule_days.append({
+                            'perf_date': _k,
+                            'date_key': _k,
+                            'perfs': [],
+                            'perf_ids': [],
+                        })
+                    _cur = _cur + _td(days=1)
+        except (ValueError, TypeError):
+            pass
+
+    # Sort days by calendar date (unscheduled/null keys sort last)
+    def _sort_key(d):
+        pd = d.get('perf_date')
+        return (0, pd) if pd else (1, d.get('date_key') or '')
+    schedule_days.sort(key=_sort_key)
+
     for d in schedule_days:
         d['primary_perf_id'] = d['perf_ids'][0] if d['perf_ids'] else None
+        if not d.get('date_key'):
+            d['date_key'] = d.get('perf_date') or f"__null_{d['primary_perf_id']}"
 
     # Export log
     exports = db.execute("""
@@ -2009,10 +2047,13 @@ def save_schedule(show_id):
         db.execute('DELETE FROM schedule_rows WHERE show_id = ?', (show_id,))
         for i, row in enumerate(data['rows']):
             perf_id = row.get('perf_id')  # None for single-day / first day
+            day_date = row.get('day_date') or None
+            if isinstance(day_date, str):
+                day_date = day_date.strip() or None
             db.execute("""
-                INSERT INTO schedule_rows (show_id, perf_id, sort_order, start_time, end_time, description, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (show_id, perf_id, i,
+                INSERT INTO schedule_rows (show_id, perf_id, day_date, sort_order, start_time, end_time, description, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (show_id, perf_id, day_date, i,
                   row.get('start_time', ''), row.get('end_time', ''),
                   row.get('description', ''), row.get('notes', '')))
 
@@ -2852,21 +2893,73 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
         except Exception:
             pass
 
-    # Group schedule rows by perf_id; NULL rows go to the first performance
+    # Group schedule rows: prefer day_date when set, else perf_id (legacy).
+    rows_by_date = {}
     rows_by_perf = {}
     for row in all_sched_rows:
-        pid = row['perf_id']
-        rows_by_perf.setdefault(pid, []).append(dict(row))
+        rd = dict(row)
+        dd = rd.get('day_date')
+        if dd:
+            rows_by_date.setdefault(str(dd)[:10], []).append(rd)
+        else:
+            rows_by_perf.setdefault(rd.get('perf_id'), []).append(rd)
 
-    # Build per-day data for the PDF template
+    # Build per-day data for the PDF template.  Union of performance dates
+    # and the load-in → load-out range so the schedule covers every day of
+    # the production.
+    def _iso_pdf(v):
+        s = str(v) if v is not None else ''
+        return s[:10] if s else ''
+
+    li = _iso_pdf(show['load_in_date'])
+    lo = _iso_pdf(show['load_out_date'])
+    seen_dates = set()
     schedule_days = []
-    for i, p in enumerate(performances):
-        day_rows = rows_by_perf.get(p['id'], [])
-        if i == 0:  # First day absorbs any legacy NULL-keyed rows
-            day_rows = rows_by_perf.get(None, []) + day_rows
-        schedule_days.append({'perf': p, 'rows': day_rows, 'day_num': i + 1})
+    day_num = 1
+    perf_by_date = {}
+    for p in performances:
+        pd = _iso_pdf(p.get('perf_date'))
+        if pd:
+            perf_by_date.setdefault(pd, []).append(p)
 
-    if not schedule_days:  # Fallback: show with no performances recorded
+    ordered_dates = []
+    if li and lo:
+        try:
+            from datetime import date as _d, timedelta as _td
+            d1, d2 = _d.fromisoformat(li), _d.fromisoformat(lo)
+            if d2 >= d1:
+                cur = d1
+                while cur <= d2:
+                    ordered_dates.append(cur.isoformat())
+                    cur += _td(days=1)
+        except (ValueError, TypeError):
+            pass
+    for pd in sorted(perf_by_date.keys()):
+        if pd not in ordered_dates:
+            ordered_dates.append(pd)
+    ordered_dates.sort()
+
+    for pd in ordered_dates:
+        perfs_here = perf_by_date.get(pd, [])
+        primary = perfs_here[0] if perfs_here else {'perf_date': pd, 'perf_time': ''}
+        day_rows = list(rows_by_date.get(pd, []))
+        for p in perfs_here:
+            day_rows += rows_by_perf.get(p['id'], [])
+        if day_num == 1:
+            day_rows = rows_by_perf.get(None, []) + day_rows
+        schedule_days.append({'perf': primary, 'rows': day_rows, 'day_num': day_num})
+        seen_dates.add(pd)
+        day_num += 1
+
+    # Performances without a date (rare) fall back to legacy handling
+    for p in performances:
+        if not _iso_pdf(p.get('perf_date')):
+            schedule_days.append({'perf': p,
+                                  'rows': rows_by_perf.get(p['id'], []),
+                                  'day_num': day_num})
+            day_num += 1
+
+    if not schedule_days:  # Fallback: show with no performances & no load-in/out
         schedule_days = [{'perf': {'perf_date': show['show_date'], 'perf_time': show['show_time']},
                           'rows': rows_by_perf.get(None, []), 'day_num': 1}]
 

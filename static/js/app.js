@@ -434,10 +434,10 @@ function bindScheduleForm() {
   form.addEventListener('input',  () => scheduleSave());
 }
 
-/* Add a row to the day identified by perfId (null = legacy/single-day) */
-function addScheduleRow(perfId) {
-  const id    = (perfId !== undefined && perfId !== null) ? perfId : null;
-  const tbodyId = id !== null ? `schedule-rows-${id}` : 'schedule-rows-null';
+/* Add a row to the day identified by dayKey (date string, or null for legacy single-day) */
+function addScheduleRow(dayKey) {
+  const key = (dayKey !== undefined && dayKey !== null && dayKey !== '') ? dayKey : null;
+  const tbodyId = key !== null ? `schedule-rows-${key}` : 'schedule-rows-null';
   const tbody = document.getElementById(tbodyId);
   if (!tbody) return;
   const tr = document.createElement('tr');
@@ -461,8 +461,8 @@ function removeRow(btn) {
 }
 
 /* ── Sort schedule rows by start time ──────────────────────────── */
-function sortSchedRowsByTime(perfId) {
-  const tbodyId = (perfId !== null && perfId !== undefined) ? `schedule-rows-${perfId}` : 'schedule-rows-null';
+function sortSchedRowsByTime(dayKey) {
+  const tbodyId = (dayKey !== null && dayKey !== undefined && dayKey !== '') ? `schedule-rows-${dayKey}` : 'schedule-rows-null';
   const tbody = document.getElementById(tbodyId);
   if (!tbody) return;
   const rows = Array.from(tbody.querySelectorAll('.schedule-row'));
@@ -528,25 +528,26 @@ function _initRowDrag() {
   document.querySelectorAll('.schedule-row').forEach(tr => _bindRowDrag(tr));
 }
 
-function switchSchedDay(perfId, btn) {
+function switchSchedDay(dayKey, btn) {
   document.querySelectorAll('.sched-day-tab').forEach(t => {
     t.classList.remove('btn-primary');
     t.classList.add('btn-ghost');
   });
   btn.classList.add('btn-primary');
   btn.classList.remove('btn-ghost');
+  const key = String(dayKey == null ? '' : dayKey);
   document.querySelectorAll('.sched-day-pane').forEach(p => {
-    const show = p.dataset.perfId == perfId;
+    const show = (p.dataset.dayKey || '') === key;
     p.classList.toggle('hidden', !show);
     p.style.display = show ? '' : 'none';
   });
 }
 
-/* Copy all rows from sourcePerfId day into targetPerfId day */
-function copySchedDay(sourcePerfId, targetPerfId) {
+/* Copy all rows from sourceKey day into targetKey day */
+function copySchedDay(sourceKey, targetKey) {
   if (!confirm('Replace this day\'s rows with a copy from the selected day?')) return;
-  const src = document.getElementById(`schedule-rows-${sourcePerfId}`);
-  const tgt = document.getElementById(`schedule-rows-${targetPerfId}`);
+  const src = document.getElementById(`schedule-rows-${sourceKey}`);
+  const tgt = document.getElementById(`schedule-rows-${targetKey}`);
   if (!src || !tgt) return;
   tgt.innerHTML = '';
   src.querySelectorAll('.schedule-row').forEach(row => {
@@ -599,8 +600,8 @@ function addMinutesToHHMM(hhmm, minutes) {
 }
 
 /* Insert a SHOW START row at the top of the day for each provided time */
-function pullAdvanceTime(perfId, perfTime) {
-  const tbody = document.getElementById(`schedule-rows-${perfId}`);
+function pullAdvanceTime(dayKey, perfTime) {
+  const tbody = document.getElementById(`schedule-rows-${dayKey}`);
   if (!tbody) return;
   const times = Array.isArray(perfTime) ? perfTime : [perfTime];
   const lengthMin = parseShowLengthToMinutes(
@@ -633,12 +634,12 @@ function pullAdvanceTime(perfId, perfTime) {
 }
 
 /* Apply a saved template to a day */
-async function applySchedTemplate(templateId, perfId) {
+async function applySchedTemplate(templateId, dayKey) {
   if (!templateId) return;
   const resp = await fetch(`/api/schedule-templates/${templateId}`);
   const d = await resp.json();
   if (!d.rows) return;
-  const tbodyId = perfId !== null ? `schedule-rows-${perfId}` : 'schedule-rows-null';
+  const tbodyId = (dayKey !== null && dayKey !== undefined && dayKey !== '') ? `schedule-rows-${dayKey}` : 'schedule-rows-null';
   const tbody   = document.getElementById(tbodyId);
   if (!tbody) return;
   tbody.innerHTML = '';
@@ -668,12 +669,15 @@ function collectScheduleData() {
   const rows = [];
   // Collect all day panes (multi-day or single legacy)
   document.querySelectorAll('.sched-day-pane').forEach(pane => {
-    const rawId  = pane.dataset.perfId;
-    const perfId = (rawId && rawId !== '') ? parseInt(rawId, 10) : null;
+    const rawPerfId = pane.dataset.perfId;
+    const rawDayKey = pane.dataset.dayKey || '';
+    const perfId    = (rawPerfId && rawPerfId !== '') ? parseInt(rawPerfId, 10) : null;
+    const dayDate   = /^\d{4}-\d{2}-\d{2}$/.test(rawDayKey) ? rawDayKey : null;
     pane.querySelectorAll('.schedule-row').forEach(tr => {
       const cells = tr.querySelectorAll('.sched-cell');
       rows.push({
         perf_id:     perfId,
+        day_date:    dayDate,
         start_time:  cells[0]?.value || '',
         end_time:    cells[1]?.value || '',
         description: cells[2]?.value || '',
