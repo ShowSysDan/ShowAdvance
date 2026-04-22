@@ -7222,6 +7222,28 @@ def assets_availability_bulk():
 
 # ─── Asset Manager — Show Assets (per-show tab) ───────────────────────────────
 
+# ─── Asset Approval — helpers ─────────────────────────────────────────────────
+
+def _reset_asset_approval(db, show_id, reason):
+    """If the show's assets were approved, flip back to unapproved and log it.
+
+    Called from every write path that changes a show's gear so an advance
+    update silently re-queues the show for approval.
+    """
+    row = db.execute(
+        'SELECT assets_approved FROM shows WHERE id=?', (show_id,)
+    ).fetchone()
+    if not row or not row['assets_approved']:
+        return
+    db.execute(
+        'UPDATE shows SET assets_approved=0, assets_approved_by=NULL, '
+        'assets_approved_at=NULL WHERE id=?',
+        (show_id,),
+    )
+    log_audit(db, 'ASSET_APPROVAL_RESET', 'show', show_id, show_id=show_id,
+              detail=f'reason={reason}')
+
+
 @app.route('/shows/<int:show_id>/assets', methods=['GET'])
 @login_required
 def show_assets_list(show_id):
@@ -7248,10 +7270,24 @@ def show_assets_list(show_id):
         SELECT * FROM show_external_rentals WHERE show_id=? ORDER BY sort_order, id
     """, (show_id,)).fetchall()
 
+    # Approval state
+    appr = db.execute("""
+        SELECT s.assets_approved, s.assets_approved_at,
+               u.display_name AS approver_name, u.username AS approver_username
+        FROM shows s LEFT JOIN users u ON u.id = s.assets_approved_by
+        WHERE s.id = ?
+    """, (show_id,)).fetchone()
+    approval = {
+        'approved': bool(appr['assets_approved']) if appr else False,
+        'approved_at': appr['assets_approved_at'] if appr else None,
+        'approver_name': (appr['approver_name'] or appr['approver_username']) if appr else None,
+    }
+
     db.close()
     return jsonify({
         'assets': [dict(r) for r in rows],
         'external_rentals': [{k: v for k, v in dict(r).items() if k != 'pdf_data'} for r in ext_rows],
+        'approval': approval,
     })
 
 
@@ -7310,6 +7346,7 @@ def show_asset_add(show_id):
     row = db.execute('SELECT * FROM show_assets ORDER BY id DESC LIMIT 1').fetchone()
     log_audit(db, 'ASSET_ADDED_TO_SHOW', 'show_asset', row['id'], show_id=show_id,
               detail=f'type_id={asset_type_id} qty={quantity}')
+    _reset_asset_approval(db, show_id, 'asset_added')
     db.commit()
     syslog_logger.info(f"ASSET_ADDED_TO_SHOW show_id={show_id} type_id={asset_type_id} qty={quantity} by={session.get('username')}")
     result = dict(row)
@@ -7358,6 +7395,7 @@ def show_asset_edit(show_id, sa_id):
     ))
     db.commit()
     log_audit(db, 'ASSET_SHOW_EDIT', 'show_asset', sa_id, show_id=show_id)
+    _reset_asset_approval(db, show_id, 'asset_edited')
     db.commit()
     db.close()
     return jsonify({'success': True})
@@ -7375,6 +7413,7 @@ def show_asset_remove(show_id, sa_id):
     db.commit()
     log_audit(db, 'ASSET_REMOVED_FROM_SHOW', 'show_asset', sa_id, show_id=show_id,
               detail=f'type_id={row["asset_type_id"]}')
+    _reset_asset_approval(db, show_id, 'asset_removed')
     db.commit()
     syslog_logger.info(f"ASSET_REMOVED_FROM_SHOW show_id={show_id} sa_id={sa_id} by={session.get('username')}")
     db.close()
@@ -7394,6 +7433,7 @@ def show_asset_toggle_hidden(show_id, sa_id):
     db.commit()
     log_audit(db, 'ASSET_HIDE_TOGGLE', 'show_asset', sa_id, show_id=show_id,
               detail=f'hidden={new_val}')
+    _reset_asset_approval(db, show_id, 'asset_visibility_toggled')
     db.commit()
     db.close()
     return jsonify({'success': True, 'is_hidden': new_val})
@@ -7441,6 +7481,7 @@ def external_rental_add(show_id):
         row = db.execute('SELECT * FROM show_external_rentals WHERE id=?', (er_id,)).fetchone()
     log_audit(db, 'EXTERNAL_RENTAL_ADD', 'show_external_rental', er_id, show_id=show_id,
               detail=description)
+    _reset_asset_approval(db, show_id, 'external_rental_added')
     db.commit()
     result = {k: v for k, v in dict(row).items() if k not in ('pdf_data', 's3_key')}
     db.close()
@@ -7463,6 +7504,7 @@ def external_rental_delete(show_id, er_id):
     db.execute('DELETE FROM show_external_rentals WHERE id=? AND show_id=?', (er_id, show_id))
     db.commit()
     log_audit(db, 'EXTERNAL_RENTAL_DELETE', 'show_external_rental', er_id, show_id=show_id)
+    _reset_asset_approval(db, show_id, 'external_rental_removed')
     db.commit()
     db.close()
     syslog_logger.info(f"EXTERNAL_RENTAL_DELETE show_id={show_id} er_id={er_id} by={session.get('username')}")
@@ -7495,6 +7537,164 @@ def external_rental_pdf(show_id, er_id):
 
 
 # ─── Asset Manager — Asset Page (admin view) ──────────────────────────────────
+
+# ─── Asset Manager — Approvals ────────────────────────────────────────────────
+
+@app.route('/assets/approvals')
+@admin_required
+def asset_approvals():
+    """Rental approval sub-page: shows whose load-in falls in a rolling
+    (or custom) window, with their requested assets and approval state."""
+    from datetime import date, timedelta
+    try:
+        start_str = (request.args.get('start') or '').strip()
+        end_str   = (request.args.get('end')   or '').strip()
+        start = date.fromisoformat(start_str) if start_str else date.today()
+        end   = date.fromisoformat(end_str)   if end_str   else start + timedelta(days=21)
+        if end < start:
+            end = start
+    except ValueError:
+        start = date.today()
+        end   = start + timedelta(days=21)
+
+    db = get_db()
+    # Shows whose load-in date (fallback: show_date, then earliest performance)
+    # falls inside the window.  "All shows" means no status filter beyond active.
+    shows = db.execute("""
+        SELECT s.id, s.name, s.venue, s.show_date, s.show_time,
+               s.load_in_date, s.load_in_time, s.load_out_date, s.load_out_time,
+               s.assets_approved, s.assets_approved_at,
+               u.display_name AS approver_name, u.username AS approver_username,
+               COALESCE(s.load_in_date, s.show_date,
+                        (SELECT MIN(perf_date) FROM show_performances sp
+                          WHERE sp.show_id = s.id)) AS effective_date
+        FROM shows s
+        LEFT JOIN users u ON u.id = s.assets_approved_by
+        WHERE COALESCE(s.status, 'active') = 'active'
+        ORDER BY effective_date NULLS LAST, s.id
+    """).fetchall()
+    shows = [dict(r) for r in shows]
+    # Filter to the date window (effective_date inside [start, end])
+    def _in_range(v):
+        if not v:
+            return False
+        try:
+            return start <= date.fromisoformat(str(v)[:10]) <= end
+        except ValueError:
+            return False
+    shows = [s for s in shows if _in_range(s.get('effective_date'))]
+
+    # Aggregate per-show asset + external-rental totals, counts, and rows.
+    for s in shows:
+        assets = db.execute("""
+            SELECT sa.*, at.name AS type_name, at.manufacturer, at.model,
+                   ac.name AS category_name,
+                   at.rental_cost AS catalog_daily_rate,
+                   at.weekly_rate AS catalog_weekly_rate
+            FROM show_assets sa
+            JOIN asset_types at ON at.id = sa.asset_type_id
+            JOIN asset_categories ac ON ac.id = at.category_id
+            WHERE sa.show_id = ? AND sa.is_hidden = 0
+            ORDER BY ac.name, at.name, sa.created_at
+        """, (s['id'],)).fetchall()
+        ext = db.execute("""
+            SELECT id, description, cost, pdf_filename,
+                   (pdf_data IS NOT NULL OR s3_key IS NOT NULL) AS has_pdf
+            FROM show_external_rentals WHERE show_id=? ORDER BY sort_order, id
+        """, (s['id'],)).fetchall()
+        s['assets']           = [dict(r) for r in assets]
+        s['external_rentals'] = [dict(r) for r in ext]
+        s['assets_total']     = sum(float(r['locked_price'] or 0) * int(r['quantity'] or 1)
+                                    for r in assets)
+        s['externals_total']  = sum(float(r['cost'] or 0) for r in ext)
+        s['total']            = s['assets_total'] + s['externals_total']
+        s['has_any']          = bool(assets) or bool(ext)
+
+    db.close()
+    return render_template(
+        'asset_approvals.html',
+        shows=shows,
+        range_start=start.isoformat(),
+        range_end=end.isoformat(),
+        user=get_current_user(),
+    )
+
+
+@app.route('/shows/<int:show_id>/assets/approve', methods=['POST'])
+@admin_required
+def show_assets_approve(show_id):
+    db = get_db()
+    row = db.execute('SELECT assets_approved FROM shows WHERE id=?', (show_id,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Show not found'}), 404
+    db.execute("""
+        UPDATE shows SET assets_approved=1, assets_approved_by=?,
+               assets_approved_at=CURRENT_TIMESTAMP WHERE id=?
+    """, (session['user_id'], show_id))
+    log_audit(db, 'ASSET_APPROVAL_GRANTED', 'show', show_id, show_id=show_id)
+    db.commit()
+    me = db.execute('SELECT display_name, username FROM users WHERE id=?',
+                    (session['user_id'],)).fetchone()
+    approver_name = (me['display_name'] if me else '') or (me['username'] if me else '')
+    approved_at = db.execute('SELECT assets_approved_at FROM shows WHERE id=?',
+                             (show_id,)).fetchone()['assets_approved_at']
+    db.close()
+    syslog_logger.info(f"ASSET_APPROVAL_GRANTED show_id={show_id} by={session.get('username')}")
+    return jsonify({'success': True,
+                    'approver_name': approver_name,
+                    'approved_at': approved_at})
+
+
+@app.route('/shows/<int:show_id>/assets/unapprove', methods=['POST'])
+@admin_required
+def show_assets_unapprove(show_id):
+    db = get_db()
+    row = db.execute('SELECT assets_approved FROM shows WHERE id=?', (show_id,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Show not found'}), 404
+    db.execute("""
+        UPDATE shows SET assets_approved=0, assets_approved_by=NULL,
+               assets_approved_at=NULL WHERE id=?
+    """, (show_id,))
+    log_audit(db, 'ASSET_APPROVAL_REVOKED', 'show', show_id, show_id=show_id)
+    db.commit()
+    db.close()
+    syslog_logger.info(f"ASSET_APPROVAL_REVOKED show_id={show_id} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/shows/<int:show_id>/assets/<int:sa_id>/price', methods=['PUT'])
+@admin_required
+def show_asset_price_override(show_id, sa_id):
+    """Approver-only price override — edits the per-show locked_price
+    without touching the catalog or other shows, and does NOT reset the
+    show's approval state."""
+    data = request.get_json() or {}
+    try:
+        new_price = float(data.get('locked_price'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'locked_price required'}), 400
+    db = get_db()
+    row = db.execute('SELECT locked_price FROM show_assets WHERE id=? AND show_id=?',
+                     (sa_id, show_id)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Not found'}), 404
+    old_price = float(row['locked_price'] or 0)
+    db.execute('UPDATE show_assets SET locked_price=? WHERE id=?',
+               (new_price, sa_id))
+    log_audit(db, 'ASSET_PRICE_OVERRIDE', 'show_asset', sa_id, show_id=show_id,
+              detail=f'old={old_price:.2f} new={new_price:.2f}')
+    db.commit()
+    db.close()
+    syslog_logger.info(
+        f"ASSET_PRICE_OVERRIDE show_id={show_id} sa_id={sa_id} "
+        f"old={old_price} new={new_price} by={session.get('username')}"
+    )
+    return jsonify({'success': True, 'locked_price': new_price})
+
 
 @app.route('/assets')
 @admin_required

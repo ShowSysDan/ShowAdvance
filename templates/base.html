@@ -112,9 +112,13 @@
       </a>
       {% endif %}
       {% if user.role == 'admin' %}
-      <a href="{{ url_for('assets_admin') }}" class="nav-item {% if request.endpoint in ['assets_admin','assets_retired','asset_reports'] %}active{% endif %}">
+      <a href="{{ url_for('assets_admin') }}" class="nav-item {% if request.endpoint in ['assets_admin','assets_retired','asset_reports','asset_approvals'] %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
         Asset Manager
+      </a>
+      <a href="{{ url_for('asset_approvals') }}" class="nav-item sub {% if request.endpoint == 'asset_approvals' %}active{% endif %}">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        Approvals
       </a>
       <a href="{{ url_for('asset_reports') }}" class="nav-item sub {% if request.endpoint == 'asset_reports' %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>

@@ -752,6 +752,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   <div class="form-section-header" style="display:flex;align-items:center;padding:12px 0 8px 0;gap:8px">
     <span class="section-icon">◈</span>
     <span style="font-weight:600;font-size:13px;letter-spacing:.05em">GEAR &amp; ASSETS</span>
+    <span id="assets-approval-badge" class="asset-approval-badge" style="display:none"></span>
     <div class="ml-auto" style="display:flex;gap:6px;align-items:center">
       <span id="assets-total-cost" style="font-size:12px;color:var(--text-dim);margin-right:8px"></span>
       <a href="/shows/{{ show.id }}/assets/invoice.pdf" target="_blank" class="btn btn-sm btn-ghost" title="Download PDF invoice">Invoice PDF</a>
@@ -923,7 +924,25 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const r = await fetch(`/shows/${SHOW_ID}/assets`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
     const data = await r.json();
     renderAssets(data.assets || [], data.external_rentals || []);
+    renderApprovalBadge(data.approval || {approved: false});
   };
+
+  function renderApprovalBadge(appr) {
+    const host = document.getElementById('assets-approval-badge');
+    if (!host) return;
+    host.style.display = '';
+    if (appr.approved) {
+      const when = appr.approved_at ? ` on ${appr.approved_at}` : '';
+      const who  = appr.approver_name ? ` by ${appr.approver_name}` : '';
+      host.className = 'asset-approval-badge approved';
+      host.textContent = `✓ APPROVED${who}${when}`;
+      host.title = 'Rental approved — any change to the assets will reset approval.';
+    } else {
+      host.className = 'asset-approval-badge pending';
+      host.textContent = '⚠ AWAITING APPROVAL';
+      host.title = 'Not yet signed off by the asset manager.';
+    }
+  }
 
   function renderAssets(assets, extRentals) {
     const tbody = document.getElementById('assets-tbody');
@@ -1604,6 +1623,27 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 }
 .labor-day-table { width: 100%; }
 .labor-day[data-work-date=""] .labor-day-label { color: var(--text-muted); }
+
+/* Asset approval badge in Assets tab header */
+.asset-approval-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.asset-approval-badge.approved {
+  background: rgba(34,197,94,0.12);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.35);
+}
+.asset-approval-badge.pending {
+  background: rgba(245,158,11,0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245,158,11,0.35);
+}
 
 /* Load-in/out range validation banner */
 .load-range-warning {

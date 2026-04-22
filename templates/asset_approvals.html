@@ -1,0 +1,407 @@
+{% extends "base.html" %}
+{% block title %}Asset Approvals — 3·2·1→Theater{% endblock %}
+
+{% block head %}
+<style>
+.approvals-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.approvals-toolbar .field-group { margin: 0; }
+.approvals-legend {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 14px;
+  align-items: center;
+}
+.approvals-legend .dot {
+  display: inline-block;
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: middle;
+}
+.approvals-legend .dot.ok      { background: #22c55e; }
+.approvals-legend .dot.pending { background: #f59e0b; }
+.approvals-legend .dot.empty   { background: var(--border); }
+
+.appr-show {
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.appr-show.is-approved { border-color: rgba(34,197,94,0.4); }
+.appr-show.is-pending  { border-color: rgba(245,158,11,0.4); }
+
+.appr-show-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-surface);
+  cursor: pointer;
+  user-select: none;
+}
+.appr-show-head:hover { background: var(--bg-hover); }
+.appr-show-name { font-weight: 600; font-size: 13px; }
+.appr-show-meta { font-size: 11px; color: var(--text-muted); }
+.appr-show-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+.appr-show-badge.approved {
+  background: rgba(34,197,94,0.12);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.35);
+}
+.appr-show-badge.pending {
+  background: rgba(245,158,11,0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245,158,11,0.35);
+}
+.appr-show-badge.empty {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+.appr-show-total {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent);
+}
+.appr-show-body {
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border-top: 1px solid var(--border);
+}
+.appr-show.collapsed .appr-show-body { display: none; }
+.appr-show-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.appr-sub-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  margin: 8px 0 6px;
+}
+.appr-empty-note {
+  padding: 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--bg-hover);
+  border-radius: var(--radius);
+  text-align: center;
+}
+.appr-table { width: 100%; font-size: 12px; }
+.appr-table th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.appr-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.appr-table tr:last-child td { border-bottom: none; }
+.appr-price-input {
+  width: 92px;
+  padding: 3px 6px;
+  font-size: 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono, monospace);
+}
+.appr-price-input.overridden {
+  border-color: var(--accent);
+  background: rgba(var(--accent-rgb, 0, 200, 255), 0.06);
+}
+.appr-line-total { text-align: right; font-variant-numeric: tabular-nums; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Asset Approvals</h1>
+    <p class="page-sub">Review and sign off on gear reservations for upcoming shows</p>
+  </div>
+</div>
+
+<div class="approvals-toolbar">
+  <div class="field-group">
+    <label class="field-label">FROM</label>
+    <input type="date" id="range-start" class="field-input" value="{{ range_start }}" style="width:160px">
+  </div>
+  <div class="field-group">
+    <label class="field-label">TO</label>
+    <input type="date" id="range-end" class="field-input" value="{{ range_end }}" style="width:160px">
+  </div>
+  <button class="btn btn-primary btn-sm" onclick="applyRange()">Apply</button>
+  <button class="btn btn-ghost btn-sm" onclick="presetRange(21)">Next 3 weeks</button>
+  <button class="btn btn-ghost btn-sm" onclick="presetRange(7)">Next week</button>
+  <button class="btn btn-ghost btn-sm" onclick="presetRange(42)">Next 6 weeks</button>
+  <div class="approvals-legend">
+    <span><span class="dot ok"></span>Approved</span>
+    <span><span class="dot pending"></span>Pending</span>
+    <span><span class="dot empty"></span>No requests</span>
+  </div>
+</div>
+
+{% if not shows %}
+<div class="form-section">
+  <div class="form-section-body" style="text-align:center;padding:32px">
+    <p class="text-dim">No shows have a load-in (or show date) between {{ range_start }} and {{ range_end }}.</p>
+  </div>
+</div>
+{% else %}
+
+{% for s in shows %}
+<div class="appr-show {% if s.assets_approved %}is-approved{% elif s.has_any %}is-pending{% endif %} collapsed"
+     data-show-id="{{ s.id }}"
+     data-approved="{{ 1 if s.assets_approved else 0 }}">
+  <div class="appr-show-head" onclick="toggleShow(this)">
+    <span class="appr-show-name">{{ s.name }}</span>
+    <span class="appr-show-meta">
+      {% if s.load_in_date %}Load-In {{ s.load_in_date }}{% if s.load_in_time %} · {{ s.load_in_time }}{% endif %}{% endif %}
+      {% if s.load_out_date %}&nbsp;→&nbsp;Load-Out {{ s.load_out_date }}{% if s.load_out_time %} · {{ s.load_out_time }}{% endif %}{% endif %}
+      {% if not s.load_in_date and s.show_date %}Show {{ s.show_date }}{% endif %}
+      {% if s.venue %}&nbsp;·&nbsp;{{ s.venue }}{% endif %}
+    </span>
+    {% if s.assets_approved %}
+      <span class="appr-show-badge approved" title="Approved{% if s.approver_name %} by {{ s.approver_name }}{% endif %}{% if s.assets_approved_at %} on {{ s.assets_approved_at }}{% endif %}">
+        ✓ Approved{% if s.approver_name %} · {{ s.approver_name }}{% endif %}
+      </span>
+    {% elif s.has_any %}
+      <span class="appr-show-badge pending">⚠ Pending</span>
+    {% else %}
+      <span class="appr-show-badge empty">No requests</span>
+    {% endif %}
+    <span class="appr-show-total">{% if s.total %}${{ '%.2f' | format(s.total) }}{% else %}—{% endif %}</span>
+  </div>
+  <div class="appr-show-body">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <a href="{{ url_for('show_page', show_id=s.id, tab='assets') }}" class="btn btn-ghost btn-xs" target="_blank">Open show ↗</a>
+      <span class="text-dim" style="font-size:11px">Change prices inline to override for this show only.</span>
+      <div class="appr-show-actions">
+        <button class="btn btn-xs btn-ghost"  onclick="openAddExternal({{ s.id }})">+ External Rental</button>
+        {% if s.assets_approved %}
+        <button class="btn btn-xs btn-ghost"  onclick="unapproveShow({{ s.id }})">Unapprove</button>
+        {% else %}
+        <button class="btn btn-xs btn-primary" onclick="approveShow({{ s.id }})" {% if not s.has_any %}disabled title="No assets requested"{% endif %}>✓ Approve</button>
+        {% endif %}
+      </div>
+    </div>
+
+    <div class="appr-sub-head"><span>◈</span> REQUESTED ASSETS</div>
+    {% if s.assets %}
+    <table class="appr-table">
+      <thead>
+        <tr>
+          <th>Category</th>
+          <th>Item</th>
+          <th style="width:60px;text-align:right">Qty</th>
+          <th style="width:200px">Rental Period</th>
+          <th style="width:120px;text-align:right">Unit Price</th>
+          <th style="width:100px;text-align:right">Line Total</th>
+          <th style="width:40px"></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for a in s.assets %}
+        {% set default_price = (a.catalog_daily_rate or 0) %}
+        {% set is_override = (a.locked_price|float) != (default_price|float) %}
+        <tr data-sa-id="{{ a.id }}" data-qty="{{ a.quantity or 1 }}">
+          <td class="text-dim">{{ a.category_name }}</td>
+          <td>{{ a.type_name }}{% if a.manufacturer or a.model %}<br><span class="text-dim" style="font-size:10px">{{ a.manufacturer }} {{ a.model }}</span>{% endif %}</td>
+          <td style="text-align:right">{{ a.quantity or 1 }}</td>
+          <td class="text-dim">{{ a.rental_start or '—' }} → {{ a.rental_end or '—' }}</td>
+          <td style="text-align:right">
+            <input type="number" step="0.01" min="0"
+                   class="field-input field-input-sm appr-price-input {% if is_override %}overridden{% endif %}"
+                   value="{{ '%.2f' | format(a.locked_price or 0) }}"
+                   data-original="{{ '%.2f' | format(a.locked_price or 0) }}"
+                   onchange="savePrice(this, {{ s.id }}, {{ a.id }})"
+                   title="Unit price override for this show only">
+          </td>
+          <td class="appr-line-total">${{ '%.2f' | format((a.locked_price or 0) * (a.quantity or 1)) }}</td>
+          <td>
+            <button class="btn btn-xs btn-danger-ghost" title="Remove from show"
+                    onclick="removeAsset({{ s.id }}, {{ a.id }})">×</button>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="appr-empty-note">No house assets requested for this show.</div>
+    {% endif %}
+
+    <div class="appr-sub-head" style="margin-top:14px"><span>◈</span> EXTERNAL RENTALS</div>
+    {% if s.external_rentals %}
+    <table class="appr-table">
+      <thead>
+        <tr>
+          <th>Description</th>
+          <th style="width:120px;text-align:right">Cost</th>
+          <th style="width:80px">PDF</th>
+          <th style="width:40px"></th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in s.external_rentals %}
+        <tr data-er-id="{{ r.id }}">
+          <td>{{ r.description }}</td>
+          <td class="appr-line-total">${{ '%.2f' | format(r.cost or 0) }}</td>
+          <td>{% if r.has_pdf %}<a href="{{ url_for('external_rental_pdf', show_id=s.id, er_id=r.id) }}" target="_blank" class="btn btn-xs btn-ghost">View</a>{% else %}<span class="text-dim">—</span>{% endif %}</td>
+          <td>
+            <button class="btn btn-xs btn-danger-ghost" title="Remove external rental"
+                    onclick="removeExternal({{ s.id }}, {{ r.id }})">×</button>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="appr-empty-note">No external rentals on this show.</div>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+
+{% endif %}
+
+<!-- External Rental Add Modal -->
+<div id="ext-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeExt()">
+  <div class="modal-card" style="max-width:520px">
+    <div class="modal-header">Add External Rental <button onclick="closeExt()" class="modal-close">×</button></div>
+    <form id="ext-form" onsubmit="submitExt(event)">
+      <div class="modal-body">
+        <input type="hidden" id="ext-show-id" value="">
+        <div class="field-group">
+          <label class="field-label">DESCRIPTION</label>
+          <input type="text" id="ext-desc" class="field-input" required placeholder="e.g. 4-way dimmer rental from Vendor Co.">
+        </div>
+        <div class="field-group">
+          <label class="field-label">COST ($)</label>
+          <input type="number" step="0.01" min="0" id="ext-cost" class="field-input" required>
+        </div>
+        <div class="field-group">
+          <label class="field-label">INVOICE / QUOTE PDF (optional)</label>
+          <input type="file" id="ext-pdf" accept="application/pdf" class="field-input">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-ghost" onclick="closeExt()">Cancel</button>
+        <button type="submit" class="btn btn-primary">Add Rental</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+function applyRange() {
+  const s = document.getElementById('range-start').value;
+  const e = document.getElementById('range-end').value;
+  const p = new URLSearchParams();
+  if (s) p.set('start', s);
+  if (e) p.set('end',   e);
+  window.location.search = '?' + p.toString();
+}
+function presetRange(days) {
+  const today = new Date();
+  const end = new Date(today); end.setDate(today.getDate() + days);
+  const fmt = d => d.toISOString().slice(0,10);
+  document.getElementById('range-start').value = fmt(today);
+  document.getElementById('range-end').value   = fmt(end);
+  applyRange();
+}
+function toggleShow(head) {
+  head.parentElement.classList.toggle('collapsed');
+}
+async function approveShow(showId) {
+  const r = await fetch(`/shows/${showId}/assets/approve`, {method: 'POST'});
+  const d = await r.json();
+  if (!r.ok) { alert(d.error || 'Approval failed'); return; }
+  location.reload();
+}
+async function unapproveShow(showId) {
+  if (!confirm('Revoke approval for this show?')) return;
+  const r = await fetch(`/shows/${showId}/assets/unapprove`, {method: 'POST'});
+  if (!r.ok) { alert('Unapprove failed'); return; }
+  location.reload();
+}
+async function savePrice(input, showId, saId) {
+  const newPrice = parseFloat(input.value);
+  if (isNaN(newPrice) || newPrice < 0) { input.value = input.dataset.original; return; }
+  const r = await fetch(`/shows/${showId}/assets/${saId}/price`, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({locked_price: newPrice}),
+  });
+  if (!r.ok) { alert('Price save failed'); input.value = input.dataset.original; return; }
+  input.dataset.original = newPrice.toFixed(2);
+  input.classList.add('overridden');
+  // Update the line total + show total client-side
+  const tr = input.closest('tr');
+  const qty = parseInt(tr.dataset.qty || '1', 10);
+  tr.querySelector('.appr-line-total').textContent = '$' + (newPrice * qty).toFixed(2);
+}
+async function removeAsset(showId, saId) {
+  if (!confirm('Remove this asset from the show? This will reset approval.')) return;
+  const r = await fetch(`/shows/${showId}/assets/${saId}`, {method: 'DELETE'});
+  if (!r.ok) { alert('Remove failed'); return; }
+  location.reload();
+}
+async function removeExternal(showId, erId) {
+  if (!confirm('Remove this external rental? This will reset approval.')) return;
+  const r = await fetch(`/shows/${showId}/external-rentals/${erId}`, {method: 'DELETE'});
+  if (!r.ok) { alert('Remove failed'); return; }
+  location.reload();
+}
+function openAddExternal(showId) {
+  document.getElementById('ext-show-id').value = showId;
+  document.getElementById('ext-desc').value = '';
+  document.getElementById('ext-cost').value = '';
+  document.getElementById('ext-pdf').value = '';
+  document.getElementById('ext-modal').style.display = 'flex';
+}
+function closeExt() { document.getElementById('ext-modal').style.display = 'none'; }
+async function submitExt(ev) {
+  ev.preventDefault();
+  const showId = document.getElementById('ext-show-id').value;
+  const fd = new FormData();
+  fd.append('description', document.getElementById('ext-desc').value);
+  fd.append('cost', document.getElementById('ext-cost').value);
+  const f = document.getElementById('ext-pdf').files[0];
+  if (f) fd.append('pdf', f);
+  const r = await fetch(`/shows/${showId}/external-rentals`, {method: 'POST', body: fd});
+  if (!r.ok) { alert('Add failed'); return; }
+  closeExt();
+  location.reload();
+}
+</script>
+{% endblock %}
