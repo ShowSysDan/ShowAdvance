@@ -1717,8 +1717,9 @@ def show_page(show_id):
             try: _p['perf_date'] = _pd.strftime('%Y-%m-%d')
             except AttributeError: _p['perf_date'] = str(_pd)
 
-    # Group performances by date for the production schedule — two perfs on the
-    # same calendar date share a single timeline.
+    # Group performances by date, then extend with every date in the
+    # load-in → load-out range so the schedule has a day tab for each
+    # calendar day of the production.
     schedule_days = []
     _date_to_idx = {}
     for _p in performances:
@@ -1729,13 +1730,50 @@ def show_page(show_id):
             _date_to_idx[key] = idx
             schedule_days.append({
                 'perf_date': _p.get('perf_date'),
+                'date_key': _p.get('perf_date') or key,
                 'perfs': [],
                 'perf_ids': [],
             })
         schedule_days[idx]['perfs'].append(_p)
         schedule_days[idx]['perf_ids'].append(_p['id'])
+
+    # Add any load-in → load-out calendar dates not already covered by a perf
+    def _iso(v):
+        s = str(v) if v is not None else ''
+        return s[:10] if s else ''
+    _li = _iso(show['load_in_date'])
+    _lo = _iso(show['load_out_date'])
+    if _li and _lo:
+        try:
+            from datetime import date as _date, timedelta as _td
+            _d1 = _date.fromisoformat(_li)
+            _d2 = _date.fromisoformat(_lo)
+            if _d2 >= _d1:
+                _cur = _d1
+                while _cur <= _d2:
+                    _k = _cur.isoformat()
+                    if _k not in _date_to_idx:
+                        _date_to_idx[_k] = len(schedule_days)
+                        schedule_days.append({
+                            'perf_date': _k,
+                            'date_key': _k,
+                            'perfs': [],
+                            'perf_ids': [],
+                        })
+                    _cur = _cur + _td(days=1)
+        except (ValueError, TypeError):
+            pass
+
+    # Sort days by calendar date (unscheduled/null keys sort last)
+    def _sort_key(d):
+        pd = d.get('perf_date')
+        return (0, pd) if pd else (1, d.get('date_key') or '')
+    schedule_days.sort(key=_sort_key)
+
     for d in schedule_days:
         d['primary_perf_id'] = d['perf_ids'][0] if d['perf_ids'] else None
+        if not d.get('date_key'):
+            d['date_key'] = d.get('perf_date') or f"__null_{d['primary_perf_id']}"
 
     # Export log
     exports = db.execute("""
@@ -2009,10 +2047,13 @@ def save_schedule(show_id):
         db.execute('DELETE FROM schedule_rows WHERE show_id = ?', (show_id,))
         for i, row in enumerate(data['rows']):
             perf_id = row.get('perf_id')  # None for single-day / first day
+            day_date = row.get('day_date') or None
+            if isinstance(day_date, str):
+                day_date = day_date.strip() or None
             db.execute("""
-                INSERT INTO schedule_rows (show_id, perf_id, sort_order, start_time, end_time, description, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (show_id, perf_id, i,
+                INSERT INTO schedule_rows (show_id, perf_id, day_date, sort_order, start_time, end_time, description, notes)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (show_id, perf_id, day_date, i,
                   row.get('start_time', ''), row.get('end_time', ''),
                   row.get('description', ''), row.get('notes', '')))
 
@@ -2852,21 +2893,73 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
         except Exception:
             pass
 
-    # Group schedule rows by perf_id; NULL rows go to the first performance
+    # Group schedule rows: prefer day_date when set, else perf_id (legacy).
+    rows_by_date = {}
     rows_by_perf = {}
     for row in all_sched_rows:
-        pid = row['perf_id']
-        rows_by_perf.setdefault(pid, []).append(dict(row))
+        rd = dict(row)
+        dd = rd.get('day_date')
+        if dd:
+            rows_by_date.setdefault(str(dd)[:10], []).append(rd)
+        else:
+            rows_by_perf.setdefault(rd.get('perf_id'), []).append(rd)
 
-    # Build per-day data for the PDF template
+    # Build per-day data for the PDF template.  Union of performance dates
+    # and the load-in → load-out range so the schedule covers every day of
+    # the production.
+    def _iso_pdf(v):
+        s = str(v) if v is not None else ''
+        return s[:10] if s else ''
+
+    li = _iso_pdf(show['load_in_date'])
+    lo = _iso_pdf(show['load_out_date'])
+    seen_dates = set()
     schedule_days = []
-    for i, p in enumerate(performances):
-        day_rows = rows_by_perf.get(p['id'], [])
-        if i == 0:  # First day absorbs any legacy NULL-keyed rows
-            day_rows = rows_by_perf.get(None, []) + day_rows
-        schedule_days.append({'perf': p, 'rows': day_rows, 'day_num': i + 1})
+    day_num = 1
+    perf_by_date = {}
+    for p in performances:
+        pd = _iso_pdf(p.get('perf_date'))
+        if pd:
+            perf_by_date.setdefault(pd, []).append(p)
 
-    if not schedule_days:  # Fallback: show with no performances recorded
+    ordered_dates = []
+    if li and lo:
+        try:
+            from datetime import date as _d, timedelta as _td
+            d1, d2 = _d.fromisoformat(li), _d.fromisoformat(lo)
+            if d2 >= d1:
+                cur = d1
+                while cur <= d2:
+                    ordered_dates.append(cur.isoformat())
+                    cur += _td(days=1)
+        except (ValueError, TypeError):
+            pass
+    for pd in sorted(perf_by_date.keys()):
+        if pd not in ordered_dates:
+            ordered_dates.append(pd)
+    ordered_dates.sort()
+
+    for pd in ordered_dates:
+        perfs_here = perf_by_date.get(pd, [])
+        primary = perfs_here[0] if perfs_here else {'perf_date': pd, 'perf_time': ''}
+        day_rows = list(rows_by_date.get(pd, []))
+        for p in perfs_here:
+            day_rows += rows_by_perf.get(p['id'], [])
+        if day_num == 1:
+            day_rows = rows_by_perf.get(None, []) + day_rows
+        schedule_days.append({'perf': primary, 'rows': day_rows, 'day_num': day_num})
+        seen_dates.add(pd)
+        day_num += 1
+
+    # Performances without a date (rare) fall back to legacy handling
+    for p in performances:
+        if not _iso_pdf(p.get('perf_date')):
+            schedule_days.append({'perf': p,
+                                  'rows': rows_by_perf.get(p['id'], []),
+                                  'day_num': day_num})
+            day_num += 1
+
+    if not schedule_days:  # Fallback: show with no performances & no load-in/out
         schedule_days = [{'perf': {'perf_date': show['show_date'], 'perf_time': show['show_time']},
                           'rows': rows_by_perf.get(None, []), 'day_num': 1}]
 
@@ -7129,6 +7222,28 @@ def assets_availability_bulk():
 
 # ─── Asset Manager — Show Assets (per-show tab) ───────────────────────────────
 
+# ─── Asset Approval — helpers ─────────────────────────────────────────────────
+
+def _reset_asset_approval(db, show_id, reason):
+    """If the show's assets were approved, flip back to unapproved and log it.
+
+    Called from every write path that changes a show's gear so an advance
+    update silently re-queues the show for approval.
+    """
+    row = db.execute(
+        'SELECT assets_approved FROM shows WHERE id=?', (show_id,)
+    ).fetchone()
+    if not row or not row['assets_approved']:
+        return
+    db.execute(
+        'UPDATE shows SET assets_approved=0, assets_approved_by=NULL, '
+        'assets_approved_at=NULL WHERE id=?',
+        (show_id,),
+    )
+    log_audit(db, 'ASSET_APPROVAL_RESET', 'show', show_id, show_id=show_id,
+              detail=f'reason={reason}')
+
+
 @app.route('/shows/<int:show_id>/assets', methods=['GET'])
 @login_required
 def show_assets_list(show_id):
@@ -7155,10 +7270,24 @@ def show_assets_list(show_id):
         SELECT * FROM show_external_rentals WHERE show_id=? ORDER BY sort_order, id
     """, (show_id,)).fetchall()
 
+    # Approval state
+    appr = db.execute("""
+        SELECT s.assets_approved, s.assets_approved_at,
+               u.display_name AS approver_name, u.username AS approver_username
+        FROM shows s LEFT JOIN users u ON u.id = s.assets_approved_by
+        WHERE s.id = ?
+    """, (show_id,)).fetchone()
+    approval = {
+        'approved': bool(appr['assets_approved']) if appr else False,
+        'approved_at': appr['assets_approved_at'] if appr else None,
+        'approver_name': (appr['approver_name'] or appr['approver_username']) if appr else None,
+    }
+
     db.close()
     return jsonify({
         'assets': [dict(r) for r in rows],
         'external_rentals': [{k: v for k, v in dict(r).items() if k != 'pdf_data'} for r in ext_rows],
+        'approval': approval,
     })
 
 
@@ -7217,6 +7346,7 @@ def show_asset_add(show_id):
     row = db.execute('SELECT * FROM show_assets ORDER BY id DESC LIMIT 1').fetchone()
     log_audit(db, 'ASSET_ADDED_TO_SHOW', 'show_asset', row['id'], show_id=show_id,
               detail=f'type_id={asset_type_id} qty={quantity}')
+    _reset_asset_approval(db, show_id, 'asset_added')
     db.commit()
     syslog_logger.info(f"ASSET_ADDED_TO_SHOW show_id={show_id} type_id={asset_type_id} qty={quantity} by={session.get('username')}")
     result = dict(row)
@@ -7265,6 +7395,7 @@ def show_asset_edit(show_id, sa_id):
     ))
     db.commit()
     log_audit(db, 'ASSET_SHOW_EDIT', 'show_asset', sa_id, show_id=show_id)
+    _reset_asset_approval(db, show_id, 'asset_edited')
     db.commit()
     db.close()
     return jsonify({'success': True})
@@ -7282,6 +7413,7 @@ def show_asset_remove(show_id, sa_id):
     db.commit()
     log_audit(db, 'ASSET_REMOVED_FROM_SHOW', 'show_asset', sa_id, show_id=show_id,
               detail=f'type_id={row["asset_type_id"]}')
+    _reset_asset_approval(db, show_id, 'asset_removed')
     db.commit()
     syslog_logger.info(f"ASSET_REMOVED_FROM_SHOW show_id={show_id} sa_id={sa_id} by={session.get('username')}")
     db.close()
@@ -7301,6 +7433,7 @@ def show_asset_toggle_hidden(show_id, sa_id):
     db.commit()
     log_audit(db, 'ASSET_HIDE_TOGGLE', 'show_asset', sa_id, show_id=show_id,
               detail=f'hidden={new_val}')
+    _reset_asset_approval(db, show_id, 'asset_visibility_toggled')
     db.commit()
     db.close()
     return jsonify({'success': True, 'is_hidden': new_val})
@@ -7348,6 +7481,7 @@ def external_rental_add(show_id):
         row = db.execute('SELECT * FROM show_external_rentals WHERE id=?', (er_id,)).fetchone()
     log_audit(db, 'EXTERNAL_RENTAL_ADD', 'show_external_rental', er_id, show_id=show_id,
               detail=description)
+    _reset_asset_approval(db, show_id, 'external_rental_added')
     db.commit()
     result = {k: v for k, v in dict(row).items() if k not in ('pdf_data', 's3_key')}
     db.close()
@@ -7370,6 +7504,7 @@ def external_rental_delete(show_id, er_id):
     db.execute('DELETE FROM show_external_rentals WHERE id=? AND show_id=?', (er_id, show_id))
     db.commit()
     log_audit(db, 'EXTERNAL_RENTAL_DELETE', 'show_external_rental', er_id, show_id=show_id)
+    _reset_asset_approval(db, show_id, 'external_rental_removed')
     db.commit()
     db.close()
     syslog_logger.info(f"EXTERNAL_RENTAL_DELETE show_id={show_id} er_id={er_id} by={session.get('username')}")
@@ -7402,6 +7537,164 @@ def external_rental_pdf(show_id, er_id):
 
 
 # ─── Asset Manager — Asset Page (admin view) ──────────────────────────────────
+
+# ─── Asset Manager — Approvals ────────────────────────────────────────────────
+
+@app.route('/assets/approvals')
+@admin_required
+def asset_approvals():
+    """Rental approval sub-page: shows whose load-in falls in a rolling
+    (or custom) window, with their requested assets and approval state."""
+    from datetime import date, timedelta
+    try:
+        start_str = (request.args.get('start') or '').strip()
+        end_str   = (request.args.get('end')   or '').strip()
+        start = date.fromisoformat(start_str) if start_str else date.today()
+        end   = date.fromisoformat(end_str)   if end_str   else start + timedelta(days=21)
+        if end < start:
+            end = start
+    except ValueError:
+        start = date.today()
+        end   = start + timedelta(days=21)
+
+    db = get_db()
+    # Shows whose load-in date (fallback: show_date, then earliest performance)
+    # falls inside the window.  "All shows" means no status filter beyond active.
+    shows = db.execute("""
+        SELECT s.id, s.name, s.venue, s.show_date, s.show_time,
+               s.load_in_date, s.load_in_time, s.load_out_date, s.load_out_time,
+               s.assets_approved, s.assets_approved_at,
+               u.display_name AS approver_name, u.username AS approver_username,
+               COALESCE(s.load_in_date, s.show_date,
+                        (SELECT MIN(perf_date) FROM show_performances sp
+                          WHERE sp.show_id = s.id)) AS effective_date
+        FROM shows s
+        LEFT JOIN users u ON u.id = s.assets_approved_by
+        WHERE COALESCE(s.status, 'active') = 'active'
+        ORDER BY effective_date NULLS LAST, s.id
+    """).fetchall()
+    shows = [dict(r) for r in shows]
+    # Filter to the date window (effective_date inside [start, end])
+    def _in_range(v):
+        if not v:
+            return False
+        try:
+            return start <= date.fromisoformat(str(v)[:10]) <= end
+        except ValueError:
+            return False
+    shows = [s for s in shows if _in_range(s.get('effective_date'))]
+
+    # Aggregate per-show asset + external-rental totals, counts, and rows.
+    for s in shows:
+        assets = db.execute("""
+            SELECT sa.*, at.name AS type_name, at.manufacturer, at.model,
+                   ac.name AS category_name,
+                   at.rental_cost AS catalog_daily_rate,
+                   at.weekly_rate AS catalog_weekly_rate
+            FROM show_assets sa
+            JOIN asset_types at ON at.id = sa.asset_type_id
+            JOIN asset_categories ac ON ac.id = at.category_id
+            WHERE sa.show_id = ? AND sa.is_hidden = 0
+            ORDER BY ac.name, at.name, sa.created_at
+        """, (s['id'],)).fetchall()
+        ext = db.execute("""
+            SELECT id, description, cost, pdf_filename,
+                   (pdf_data IS NOT NULL OR s3_key IS NOT NULL) AS has_pdf
+            FROM show_external_rentals WHERE show_id=? ORDER BY sort_order, id
+        """, (s['id'],)).fetchall()
+        s['assets']           = [dict(r) for r in assets]
+        s['external_rentals'] = [dict(r) for r in ext]
+        s['assets_total']     = sum(float(r['locked_price'] or 0) * int(r['quantity'] or 1)
+                                    for r in assets)
+        s['externals_total']  = sum(float(r['cost'] or 0) for r in ext)
+        s['total']            = s['assets_total'] + s['externals_total']
+        s['has_any']          = bool(assets) or bool(ext)
+
+    db.close()
+    return render_template(
+        'asset_approvals.html',
+        shows=shows,
+        range_start=start.isoformat(),
+        range_end=end.isoformat(),
+        user=get_current_user(),
+    )
+
+
+@app.route('/shows/<int:show_id>/assets/approve', methods=['POST'])
+@admin_required
+def show_assets_approve(show_id):
+    db = get_db()
+    row = db.execute('SELECT assets_approved FROM shows WHERE id=?', (show_id,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Show not found'}), 404
+    db.execute("""
+        UPDATE shows SET assets_approved=1, assets_approved_by=?,
+               assets_approved_at=CURRENT_TIMESTAMP WHERE id=?
+    """, (session['user_id'], show_id))
+    log_audit(db, 'ASSET_APPROVAL_GRANTED', 'show', show_id, show_id=show_id)
+    db.commit()
+    me = db.execute('SELECT display_name, username FROM users WHERE id=?',
+                    (session['user_id'],)).fetchone()
+    approver_name = (me['display_name'] if me else '') or (me['username'] if me else '')
+    approved_at = db.execute('SELECT assets_approved_at FROM shows WHERE id=?',
+                             (show_id,)).fetchone()['assets_approved_at']
+    db.close()
+    syslog_logger.info(f"ASSET_APPROVAL_GRANTED show_id={show_id} by={session.get('username')}")
+    return jsonify({'success': True,
+                    'approver_name': approver_name,
+                    'approved_at': approved_at})
+
+
+@app.route('/shows/<int:show_id>/assets/unapprove', methods=['POST'])
+@admin_required
+def show_assets_unapprove(show_id):
+    db = get_db()
+    row = db.execute('SELECT assets_approved FROM shows WHERE id=?', (show_id,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Show not found'}), 404
+    db.execute("""
+        UPDATE shows SET assets_approved=0, assets_approved_by=NULL,
+               assets_approved_at=NULL WHERE id=?
+    """, (show_id,))
+    log_audit(db, 'ASSET_APPROVAL_REVOKED', 'show', show_id, show_id=show_id)
+    db.commit()
+    db.close()
+    syslog_logger.info(f"ASSET_APPROVAL_REVOKED show_id={show_id} by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+@app.route('/shows/<int:show_id>/assets/<int:sa_id>/price', methods=['PUT'])
+@admin_required
+def show_asset_price_override(show_id, sa_id):
+    """Approver-only price override — edits the per-show locked_price
+    without touching the catalog or other shows, and does NOT reset the
+    show's approval state."""
+    data = request.get_json() or {}
+    try:
+        new_price = float(data.get('locked_price'))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'locked_price required'}), 400
+    db = get_db()
+    row = db.execute('SELECT locked_price FROM show_assets WHERE id=? AND show_id=?',
+                     (sa_id, show_id)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Not found'}), 404
+    old_price = float(row['locked_price'] or 0)
+    db.execute('UPDATE show_assets SET locked_price=? WHERE id=?',
+               (new_price, sa_id))
+    log_audit(db, 'ASSET_PRICE_OVERRIDE', 'show_asset', sa_id, show_id=show_id,
+              detail=f'old={old_price:.2f} new={new_price:.2f}')
+    db.commit()
+    db.close()
+    syslog_logger.info(
+        f"ASSET_PRICE_OVERRIDE show_id={show_id} sa_id={sa_id} "
+        f"old={old_price} new={new_price} by={session.get('username')}"
+    )
+    return jsonify({'success': True, 'locked_price': new_price})
+
 
 @app.route('/assets')
 @admin_required

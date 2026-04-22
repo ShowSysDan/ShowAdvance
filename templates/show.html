@@ -325,6 +325,7 @@
       <p class="field-note" style="margin:6px 0 0;font-size:11px;color:var(--text-muted)">
         Times use 24-hour format (e.g. 08:00, 23:00). Used to calculate asset rental costs — weekly rate applies when load period is 7+ days.
       </p>
+      <div id="load-range-warning" class="load-range-warning" style="display:none"></div>
     </div>
   </div>
 
@@ -426,8 +427,9 @@ const SHOW_VENUE = {{ show.venue | tojson }};
     {% for d in schedule_days %}
     <button type="button"
             class="btn btn-sm {% if loop.first %}btn-primary{% else %}btn-ghost{% endif %} sched-day-tab"
-            data-perf-id="{{ d.primary_perf_id }}"
-            onclick="switchSchedDay({{ d.primary_perf_id }}, this)">
+            data-day-key="{{ d.date_key }}"
+            data-perf-id="{{ d.primary_perf_id or '' }}"
+            onclick="switchSchedDay({{ d.date_key | tojson }}, this)">
       DAY {{ loop.index }}{% if d.perf_date %} · {{ (d.perf_date|string)[5:] | replace('-','/') }}{% endif %}
     </button>
     {% endfor %}
@@ -437,15 +439,19 @@ const SHOW_VENUE = {{ show.venue | tojson }};
   {# ── Per-day Timeline sections (one timeline per calendar date) ──────── #}
   {% for d in schedule_days %}
   {% set day_rows = [] %}
-  {% if loop.first %}
-    {# First day absorbs any legacy NULL-keyed rows #}
-    {% set day_rows = day_rows + (schedule_rows | selectattr('perf_id', 'none') | list) %}
-  {% endif %}
+  {# Rows explicitly stamped with this day's date #}
+  {% set day_rows = day_rows + (schedule_rows | selectattr('day_date', 'equalto', d.date_key) | list) %}
+  {# Legacy rows (no day_date) matched by perf_id #}
   {% for _pid in d.perf_ids %}
-    {% set day_rows = day_rows + (schedule_rows | selectattr('perf_id', 'equalto', _pid) | list) %}
+    {% set day_rows = day_rows + (schedule_rows | rejectattr('day_date') | selectattr('perf_id', 'equalto', _pid) | list) %}
   {% endfor %}
+  {% if loop.first %}
+    {# First day absorbs fully-orphan legacy rows (null day_date AND null perf_id) #}
+    {% set day_rows = day_rows + (schedule_rows | rejectattr('day_date') | selectattr('perf_id', 'none') | list) %}
+  {% endif %}
   <div class="sched-day-pane {% if not loop.first %}hidden{% endif %}"
-       data-perf-id="{{ d.primary_perf_id }}"
+       data-day-key="{{ d.date_key }}"
+       data-perf-id="{{ d.primary_perf_id or '' }}"
        style="{% if not loop.first %}display:none{% endif %}">
 
     <div class="form-section">
@@ -459,7 +465,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           {# Apply template dropdown #}
           {% if sched_templates %}
           <select class="field-input" style="width:auto;font-size:11px;padding:3px 6px;height:auto"
-                  onchange="applySchedTemplate(this.value, {{ d.primary_perf_id }}); this.value=''">
+                  onchange="applySchedTemplate(this.value, {{ d.date_key | tojson }}); this.value=''">
             <option value="">Apply template…</option>
             {% for t in sched_templates %}
             <option value="{{ t.id }}">{{ t.name }}</option>
@@ -469,11 +475,11 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           {# Copy from another day #}
           {% if schedule_days | length > 1 %}
           <select class="field-input" style="width:auto;font-size:11px;padding:3px 6px;height:auto"
-                  onchange="copySchedDay(this.value, {{ d.primary_perf_id }}); this.value=''">
+                  onchange="copySchedDay(this.value, {{ d.date_key | tojson }}); this.value=''">
             <option value="">Copy from…</option>
             {% for od in schedule_days %}
-            {% if od.primary_perf_id != d.primary_perf_id %}
-            <option value="{{ od.primary_perf_id }}">Day {{ loop.index }}{% if od.perf_date %} ({{ (od.perf_date|string)[5:] | replace('-','/') }}){% endif %}</option>
+            {% if od.date_key != d.date_key %}
+            <option value="{{ od.date_key }}">Day {{ loop.index }}{% if od.perf_date %} ({{ (od.perf_date|string)[5:] | replace('-','/') }}){% endif %}</option>
             {% endif %}
             {% endfor %}
           </select>
@@ -482,10 +488,10 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           {% set _times = d.perfs | selectattr('perf_time') | map(attribute='perf_time') | list %}
           {% if _times %}
           <button type="button" class="btn btn-sm btn-ghost"
-                  onclick='pullAdvanceTime({{ d.primary_perf_id }}, {{ _times | tojson }})'>Pull time{% if _times|length > 1 %}s{% endif %}</button>
+                  onclick='pullAdvanceTime({{ d.date_key | tojson }}, {{ _times | tojson }})'>Pull time{% if _times|length > 1 %}s{% endif %}</button>
           {% endif %}
-          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime({{ d.primary_perf_id }})" title="Sort rows by start time">⇅ Sort</button>
-          <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow({{ d.primary_perf_id }})">+ Add Row</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime({{ d.date_key | tojson }})" title="Sort rows by start time">⇅ Sort</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow({{ d.date_key | tojson }})">+ Add Row</button>
         </div>
         {% endif %}
       </div>
@@ -501,7 +507,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
               {% if not restricted %}<th style="width:40px"></th>{% endif %}
             </tr>
           </thead>
-          <tbody id="schedule-rows-{{ d.primary_perf_id }}">
+          <tbody id="schedule-rows-{{ d.date_key }}">
             {% if day_rows %}
               {% for row in day_rows %}
               <tr class="schedule-row">
@@ -528,8 +534,8 @@ const SHOW_VENUE = {{ show.venue | tojson }};
       </div>
       {% if not restricted %}
       <div class="form-section-footer">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow({{ d.primary_perf_id }})">+ Add Row</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedRowsByTime({{ d.primary_perf_id }})">⇅ Sort by time</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow({{ d.date_key | tojson }})">+ Add Row</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedRowsByTime({{ d.date_key | tojson }})">⇅ Sort by time</button>
       </div>
       {% endif %}
     </div>
@@ -746,6 +752,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   <div class="form-section-header" style="display:flex;align-items:center;padding:12px 0 8px 0;gap:8px">
     <span class="section-icon">◈</span>
     <span style="font-weight:600;font-size:13px;letter-spacing:.05em">GEAR &amp; ASSETS</span>
+    <span id="assets-approval-badge" class="asset-approval-badge" style="display:none"></span>
     <div class="ml-auto" style="display:flex;gap:6px;align-items:center">
       <span id="assets-total-cost" style="font-size:12px;color:var(--text-dim);margin-right:8px"></span>
       <a href="/shows/{{ show.id }}/assets/invoice.pdf" target="_blank" class="btn btn-sm btn-ghost" title="Download PDF invoice">Invoice PDF</a>
@@ -917,7 +924,25 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const r = await fetch(`/shows/${SHOW_ID}/assets`, {headers:{'X-Requested-With':'XMLHttpRequest'}});
     const data = await r.json();
     renderAssets(data.assets || [], data.external_rentals || []);
+    renderApprovalBadge(data.approval || {approved: false});
   };
+
+  function renderApprovalBadge(appr) {
+    const host = document.getElementById('assets-approval-badge');
+    if (!host) return;
+    host.style.display = '';
+    if (appr.approved) {
+      const when = appr.approved_at ? ` on ${appr.approved_at}` : '';
+      const who  = appr.approver_name ? ` by ${appr.approver_name}` : '';
+      host.className = 'asset-approval-badge approved';
+      host.textContent = `✓ APPROVED${who}${when}`;
+      host.title = 'Rental approved — any change to the assets will reset approval.';
+    } else {
+      host.className = 'asset-approval-badge pending';
+      host.textContent = '⚠ AWAITING APPROVAL';
+      host.title = 'Not yet signed off by the asset manager.';
+    }
+  }
 
   function renderAssets(assets, extRentals) {
     const tbody = document.getElementById('assets-tbody');
@@ -1598,6 +1623,41 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 }
 .labor-day-table { width: 100%; }
 .labor-day[data-work-date=""] .labor-day-label { color: var(--text-muted); }
+
+/* Asset approval badge in Assets tab header */
+.asset-approval-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.asset-approval-badge.approved {
+  background: rgba(34,197,94,0.12);
+  color: #22c55e;
+  border: 1px solid rgba(34,197,94,0.35);
+}
+.asset-approval-badge.pending {
+  background: rgba(245,158,11,0.12);
+  color: #f59e0b;
+  border: 1px solid rgba(245,158,11,0.35);
+}
+
+/* Load-in/out range validation banner */
+.load-range-warning {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: rgba(255, 165, 0, 0.08);
+  border: 1px solid rgba(255, 165, 0, 0.35);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.load-range-warning strong { color: #ff9500; }
+.load-range-warning ul { margin: 4px 0 0 18px; padding: 0; }
 </style>
 <script>
   const RESTRICTED = {{ 'true' if restricted else 'false' }};
@@ -2189,6 +2249,9 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       if (!byDate[d]) byDate[d] = [];
       byDate[d].push(lr);
     });
+    // Ensure a day block exists for every date in the load-in → load-out
+    // range, even if no labor rows have been added for it yet.
+    _loadRangeDates().forEach(d => { if (!(d in byDate)) byDate[d] = []; });
     const dates = Object.keys(byDate).sort((a, b) => {
       if (!a && b) return -1;
       if (a && !b) return 1;
@@ -2199,6 +2262,46 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       container.appendChild(block);
     });
     _sortDayBlocks();
+  }
+
+  /* Return list of YYYY-MM-DD strings spanning load-in → load-out (inclusive).
+     Returns [] if either date is missing or range is invalid. */
+  function _loadRangeDates() {
+    const liEl = document.getElementById('load-in-date');
+    const loEl = document.getElementById('load-out-date');
+    const li = (liEl?.value || '').trim();
+    const lo = (loEl?.value || '').trim();
+    if (!li || !lo) return [];
+    const d1 = new Date(li + 'T00:00:00');
+    const d2 = new Date(lo + 'T00:00:00');
+    if (isNaN(d1) || isNaN(d2) || d2 < d1) return [];
+    const out = [];
+    const cur = new Date(d1);
+    while (cur <= d2) {
+      out.push(cur.toISOString().slice(0, 10));
+      cur.setDate(cur.getDate() + 1);
+    }
+    return out;
+  }
+
+  /* Add empty labor day blocks for any dates in load-in → load-out that
+     don't yet have one.  Safe to call repeatedly. */
+  function ensureLaborDaysFromLoadRange() {
+    const container = document.getElementById('labor-days-container');
+    if (!container) return;
+    const dates = _loadRangeDates();
+    if (!dates.length) return;
+    let added = false;
+    dates.forEach(d => {
+      const existing = container.querySelector(
+        `.labor-day[data-work-date="${CSS.escape(d)}"]`
+      );
+      if (!existing) {
+        container.appendChild(_renderDayBlock(d, []));
+        added = true;
+      }
+    });
+    if (added) _sortDayBlocks();
   }
 
   async function loadLaborCost() {
@@ -2228,7 +2331,62 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
   document.addEventListener('DOMContentLoaded', () => {
     if (INITIAL_TAB === 'staffing') { initLaborTab(); loadLaborCost(); }
+    // When the user changes load-in / load-out in the Advance tab, extend the
+    // Labor tab with a day block for each newly-covered date and re-check
+    // the show-within-range validation warning.
+    ['load-in-date', 'load-in-time', 'load-out-date', 'load-out-time'].forEach(id => {
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.addEventListener('change', () => {
+        if (window._laborTabInited) ensureLaborDaysFromLoadRange();
+        validateShowWithinLoadRange();
+      });
+      el.addEventListener('input', () => validateShowWithinLoadRange());
+    });
+    validateShowWithinLoadRange();
   });
+
+  /* Validate every performance's date/time falls inside the load-in → load-out
+     window.  Shows an inline warning listing any that fall outside; hides the
+     warning when everything is in range or either bound is unset. */
+  function validateShowWithinLoadRange() {
+    const banner = document.getElementById('load-range-warning');
+    if (!banner) return;
+    const liD = (document.getElementById('load-in-date')?.value  || '').trim();
+    const liT = (document.getElementById('load-in-time')?.value  || '').trim();
+    const loD = (document.getElementById('load-out-date')?.value || '').trim();
+    const loT = (document.getElementById('load-out-time')?.value || '').trim();
+    const perfs = Array.isArray(SCHED_PERFORMANCES) ? SCHED_PERFORMANCES : [];
+    if (!liD || !loD || !perfs.length) { banner.style.display = 'none'; return; }
+
+    const _toDT = (d, t, fallbackT) => {
+      const tt = (t && /^\d{1,2}:\d{2}$/.test(t)) ? t : fallbackT;
+      const dt = new Date(`${d}T${tt.padStart(5,'0')}:00`);
+      return isNaN(dt) ? null : dt;
+    };
+    const start = _toDT(liD, liT, '00:00');
+    const end   = _toDT(loD, loT, '23:59');
+    if (!start || !end || end < start) { banner.style.display = 'none'; return; }
+
+    const offenders = [];
+    perfs.forEach(p => {
+      const pd = (p.perf_date || '').toString().slice(0, 10);
+      if (!pd) return;
+      const pt = (p.perf_time || '').toString().slice(0, 5);
+      const dt = _toDT(pd, pt, '00:00');
+      if (!dt) return;
+      if (dt < start || dt > end) {
+        offenders.push(`${pd}${pt ? ' · ' + pt : ''}`);
+      }
+    });
+    if (!offenders.length) { banner.style.display = 'none'; return; }
+    banner.innerHTML =
+      '<strong>⚠ Show date out of range.</strong> ' +
+      (offenders.length === 1 ? 'This performance falls' : 'These performances fall') +
+      ' outside the load-in → load-out window:' +
+      '<ul>' + offenders.map(s => `<li>${s}</li>`).join('') + '</ul>';
+    banner.style.display = '';
+  }
   window._laborTabInited = false;
   document.querySelectorAll('.tab-btn').forEach(btn => {
     btn.addEventListener('click', () => {
