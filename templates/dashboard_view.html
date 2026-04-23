@@ -152,6 +152,22 @@
 .ac-warn { background: rgba(251,191,36,.2); color: #FBBF24; }
 .ac-none { background: rgba(239,68,68,.15); color: #EF4444; }
 .ac-inf  { background: rgba(74,158,255,.15); color: #4A9EFF; }
+.ac-rsv  { background: rgba(148,163,184,.12); color: #94A3B8; border: 1px solid rgba(148,163,184,.2); }
+.ac-chip[onclick] { cursor:pointer; }
+.ac-chip[onclick]:hover { filter: brightness(1.2); }
+/* ── Type search dropdown ─────────────────────────────────────────── */
+.ac-type-search-drop {
+  position: absolute; top: 100%; left: 0; right: 0;
+  background: var(--bg-card); border: 1px solid var(--border);
+  border-radius: var(--radius); max-height: 180px; overflow-y: auto;
+  z-index: 50; box-shadow: 0 4px 12px rgba(0,0,0,.35); display: none;
+}
+.ac-type-search-opt {
+  padding: 6px 10px; font-size: 12px; cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  color: var(--text);
+}
+.ac-type-search-opt:hover { background: var(--bg-hover); }
 
 /* ── Widget section ──────────────────────────────────────────────── */
 .widget-section {
@@ -307,28 +323,65 @@ function buildWidgetEl(idx, wtype) {
     hdr.className = 'widget-date-row';
     hdr.style.cssText = 'justify-content:space-between;flex-wrap:wrap;gap:8px';
 
-    /* Left: type selector */
+    /* Left: type search box */
     const typeWrap = document.createElement('div');
     typeWrap.style.cssText = 'display:flex;align-items:center;gap:6px;flex:1;min-width:160px';
     const typeLbl = document.createElement('label');
     typeLbl.style.cssText = 'font-size:11px;color:var(--text-dim);white-space:nowrap';
     typeLbl.textContent = 'Asset:';
-    const sel = document.createElement('select');
-    sel.className = 'field-input field-input-sm';
-    sel.style.cssText = 'flex:1;max-width:220px';
-    ASSET_TYPES.forEach(t => {
-      const opt = document.createElement('option');
-      opt.value = t.id;
-      opt.textContent = (t.category_name ? t.category_name + ' · ' : '') + t.name;
-      if (w.asset_type_id == t.id) opt.selected = true;
-      sel.appendChild(opt);
-    });
-    sel.addEventListener('change', () => {
-      _currentWidgets[idx].asset_type_id = parseInt(sel.value);
-      saveWidgets();
-      loadWidget(idx);
-    });
-    typeWrap.append(typeLbl, sel);
+
+    const searchWrap = document.createElement('div');
+    searchWrap.style.cssText = 'position:relative;flex:1;max-width:260px';
+
+    const searchInput = document.createElement('input');
+    searchInput.type = 'text';
+    searchInput.className = 'field-input field-input-sm';
+    searchInput.style.cssText = 'width:100%';
+    searchInput.placeholder = 'Search asset type…';
+
+    const initType = ASSET_TYPES.find(t => t.id == w.asset_type_id) || ASSET_TYPES[0];
+    if (initType) searchInput.value = (initType.category_name ? initType.category_name + ' · ' : '') + initType.name;
+
+    const drop = document.createElement('div');
+    drop.className = 'ac-type-search-drop';
+
+    function buildDrop(query) {
+      drop.innerHTML = '';
+      const q = query.toLowerCase();
+      const matches = ASSET_TYPES.filter(t => {
+        const label = ((t.category_name || '') + ' ' + t.name).toLowerCase();
+        return !q || label.includes(q);
+      });
+      if (!matches.length) {
+        const none = document.createElement('div');
+        none.className = 'ac-type-search-opt';
+        none.style.color = 'var(--text-dim)';
+        none.textContent = 'No matches';
+        drop.appendChild(none);
+        return;
+      }
+      matches.forEach(t => {
+        const opt = document.createElement('div');
+        opt.className = 'ac-type-search-opt';
+        opt.textContent = (t.category_name ? t.category_name + ' · ' : '') + t.name;
+        opt.addEventListener('mousedown', e => {
+          e.preventDefault();
+          searchInput.value = opt.textContent;
+          _currentWidgets[idx].asset_type_id = t.id;
+          drop.style.display = 'none';
+          saveWidgets();
+          loadWidget(idx);
+        });
+        drop.appendChild(opt);
+      });
+    }
+
+    searchInput.addEventListener('focus', () => { buildDrop(searchInput.value); drop.style.display = 'block'; });
+    searchInput.addEventListener('input', () => { buildDrop(searchInput.value); drop.style.display = 'block'; });
+    searchInput.addEventListener('blur',  () => { setTimeout(() => { drop.style.display = 'none'; }, 150); });
+
+    searchWrap.append(searchInput, drop);
+    typeWrap.append(typeLbl, searchWrap);
 
     /* Right: month navigation */
     const navWrap = document.createElement('div');
@@ -678,12 +731,14 @@ async function loadAssetCalendarWidget(idx, section, loadEl, contentEl) {
   const from = new Date(year, month, 1).toISOString().slice(0,10);
   const to   = new Date(year, month + 1, 0).toISOString().slice(0,10);
   const data = await safeFetch(`/api/dashboard/asset-calendar?type_id=${typeId}&from=${from}&to=${to}`);
+  /* stash per-day show data so click handlers can access it */
+  (data.days || []).forEach(d => { _dayDataStore[idx + '_' + d.date] = d; });
   loadEl.style.display = 'none';
   contentEl.style.display = 'block';
-  contentEl.innerHTML = renderAssetCalendarMonth(data, year, month);
+  contentEl.innerHTML = renderAssetCalendarMonth(data, year, month, idx);
 }
 
-function renderAssetCalendarMonth(data, year, month) {
+function renderAssetCalendarMonth(data, year, month, idx) {
   const dayMap = {};
   (data.days || []).forEach(d => { dayMap[d.date] = d; });
   const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
@@ -716,13 +771,24 @@ function renderAssetCalendarMonth(data, year, month) {
     const dayData = dayMap[ds];
     let chip = '';
     if (data.unlimited) {
-      chip = '<div class="ac-chip ac-inf">∞ avail</div>';
+      chip = '<div class="ac-chip ac-inf" onclick="location.href=\'/assets\'" title="View assets">∞ avail</div>';
     } else if (dayData !== undefined) {
       const avail = dayData.available;
-      if (avail === null)  chip = '<div class="ac-chip ac-inf">∞</div>';
-      else if (avail <= 0) chip = '<div class="ac-chip ac-none">FULL</div>';
-      else if (avail <= 2) chip = `<div class="ac-chip ac-warn">${avail} left</div>`;
-      else                 chip = `<div class="ac-chip ac-ok">${avail} avail</div>`;
+      const rsv   = dayData.reserved || 0;
+      const hasShows = rsv > 0 && (dayData.shows || []).length > 0;
+      if (avail === null) {
+        chip = '<div class="ac-chip ac-inf" onclick="location.href=\'/assets\'" title="View assets">∞</div>';
+      } else if (avail <= 0) {
+        chip = `<div class="ac-chip ac-none" onclick="location.href='/assets'" title="View assets">FULL</div>`;
+      } else if (avail <= 2) {
+        chip = `<div class="ac-chip ac-warn" onclick="location.href='/assets'" title="View assets">${avail} left</div>`;
+      } else {
+        chip = `<div class="ac-chip ac-ok" onclick="location.href='/assets'" title="View assets">${avail} avail</div>`;
+      }
+      if (rsv > 0) {
+        const rsvClick = hasShows ? ` onclick="openDayPopup(${idx},'${ds}')" title="Show reserved"` : '';
+        chip += `<div class="ac-chip ac-rsv"${rsvClick}>${rsv} rsvd</div>`;
+      }
     }
     html += `<div class="dash-cal-cell${isToday?' today':''}">
       <div class="dash-cal-day-num">${d}</div>${chip}</div>`;
@@ -732,16 +798,70 @@ function renderAssetCalendarMonth(data, year, month) {
   for (let i = lastDow + 1; i < 7; i++) html += '<div class="dash-cal-cell other-month"></div>';
   html += '</div>';
   html += `<div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text-dim)">
-    <span><span style="display:inline-block;width:24px;height:11px;border-radius:2px;background:rgba(34,197,94,.2);vertical-align:middle;margin-right:4px"></span>Available</span>
+    <span><span style="display:inline-block;width:24px;height:11px;border-radius:2px;background:rgba(34,197,94,.2);vertical-align:middle;margin-right:4px"></span>Available (click → Assets)</span>
     <span><span style="display:inline-block;width:24px;height:11px;border-radius:2px;background:rgba(251,191,36,.2);vertical-align:middle;margin-right:4px"></span>Low (≤2)</span>
     <span><span style="display:inline-block;width:24px;height:11px;border-radius:2px;background:rgba(239,68,68,.15);vertical-align:middle;margin-right:4px"></span>Full/over</span>
+    <span><span style="display:inline-block;width:24px;height:11px;border-radius:2px;background:rgba(148,163,184,.12);vertical-align:middle;margin-right:4px"></span>Reserved (click → shows)</span>
   </div>`;
   html += '</div></div>';
   return html;
 }
 
+function openDayPopup(idx, dateStr) {
+  const dayData = _dayDataStore[idx + '_' + dateStr];
+  const shows = (dayData && dayData.shows) || [];
+  const existing = document.getElementById('ac-day-popup');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'ac-day-popup';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:9999';
+  overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+  const box = document.createElement('div');
+  box.style.cssText = 'background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 20px 16px;max-width:380px;width:90%;max-height:420px;overflow-y:auto';
+
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size:13px;font-weight:700;margin-bottom:12px;color:var(--text)';
+  title.textContent = 'Reserved on ' + dateStr;
+  box.appendChild(title);
+
+  if (!shows.length) {
+    const msg = document.createElement('div');
+    msg.style.cssText = 'font-size:12px;color:var(--text-dim);padding:8px 0';
+    msg.textContent = 'No shows found for this day.';
+    box.appendChild(msg);
+  } else {
+    shows.forEach(s => {
+      const row = document.createElement('div');
+      row.style.cssText = 'margin-bottom:8px;padding:8px 10px;background:var(--bg-hover);border-radius:4px;display:flex;justify-content:space-between;align-items:center';
+      const link = document.createElement('a');
+      link.href = '/shows/' + s.id;
+      link.style.cssText = 'font-size:12px;font-weight:600;color:var(--accent);text-decoration:none';
+      link.textContent = s.name;
+      link.addEventListener('click', () => overlay.remove());
+      const qty = document.createElement('span');
+      qty.style.cssText = 'font-size:11px;color:var(--text-dim);margin-left:8px;white-space:nowrap;flex-shrink:0';
+      qty.textContent = 'qty: ' + s.quantity;
+      row.append(link, qty);
+      box.appendChild(row);
+    });
+  }
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn btn-ghost btn-sm';
+  closeBtn.style.cssText = 'margin-top:12px;width:100%';
+  closeBtn.textContent = 'Close';
+  closeBtn.addEventListener('click', () => overlay.remove());
+  box.appendChild(closeBtn);
+
+  overlay.appendChild(box);
+  document.body.appendChild(overlay);
+}
+
 /* ── Add / Remove widgets ────────────────────────────────────────── */
 let _currentWidgets = WIDGETS.slice();
+const _dayDataStore = {}; /* key: "{idx}_{date}" → day object from API */
 
 function openAddWidget() {
   document.getElementById('add-widget-modal').style.display = 'flex';
