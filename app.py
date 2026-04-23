@@ -8926,8 +8926,8 @@ def api_dashboard_asset_calendar():
         reserve = row['reserve_count'] or 0
 
     reservations = [] if unlimited else db.execute(
-        'SELECT sa.quantity, sa.rental_start, sa.rental_end '
-        'FROM show_assets sa '
+        'SELECT sa.quantity, sa.rental_start, sa.rental_end, sa.show_id, s.name AS show_name '
+        'FROM show_assets sa JOIN shows s ON s.id = sa.show_id '
         'WHERE sa.asset_type_id=? AND sa.rental_end>=? AND sa.rental_start<=?',
         (type_id, date_from, date_to)
     ).fetchall()
@@ -8943,14 +8943,16 @@ def api_dashboard_asset_calendar():
     while cur <= end:
         ds = cur.isoformat()
         if unlimited:
-            days.append({'date': ds, 'available': None, 'reserved': 0})
+            days.append({'date': ds, 'available': None, 'reserved': 0, 'shows': []})
         else:
-            day_rsv = sum(
-                r['quantity'] for r in reservations
+            day_shows = [
+                {'id': r['show_id'], 'name': r['show_name'], 'quantity': r['quantity']}
+                for r in reservations
                 if r['rental_start'] and r['rental_end']
                 and str(r['rental_start']) <= ds <= str(r['rental_end'])
-            )
-            days.append({'date': ds, 'available': total - in_maint - reserve - day_rsv, 'reserved': day_rsv})
+            ]
+            day_rsv = sum(s['quantity'] for s in day_shows)
+            days.append({'date': ds, 'available': total - in_maint - reserve - day_rsv, 'reserved': day_rsv, 'shows': day_shows})
         cur += timedelta(days=1)
 
     return jsonify({
