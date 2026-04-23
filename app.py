@@ -3659,6 +3659,7 @@ def settings():
 
     db.close()
     _is_ca = session.get('is_content_admin', False) or session.get('user_role') == 'admin'
+    _can_manage_crew = _is_ca or session.get('is_scheduler', False) or session.get('is_labor_scheduler', False)
     form_sections = get_form_fields_for_template() if _is_ca else []
     sched_meta_fields = get_schedule_meta_fields() if _is_ca else []
 
@@ -3667,15 +3668,15 @@ def settings():
         'SELECT id, name FROM schedule_templates ORDER BY sort_order, name'
     ).fetchall()] if _is_ca else []
 
-    # Job positions data for settings tab
+    # Job positions data for settings tab — visible to content admins AND schedulers
     position_categories = [dict(c) for c in db3.execute(
         'SELECT * FROM position_categories WHERE is_venue=0 OR is_venue IS NULL ORDER BY sort_order, id'
-    ).fetchall()] if _is_ca else []
+    ).fetchall()] if _can_manage_crew else []
     positions_raw = db3.execute(
         'SELECT jp.*, pc.name as category_name FROM job_positions jp LEFT JOIN position_categories pc ON jp.category_id = pc.id ORDER BY jp.venue, pc.sort_order, jp.sort_order, jp.id'
-    ).fetchall() if _is_ca else []
+    ).fetchall() if _can_manage_crew else []
     job_positions = [dict(p) for p in positions_raw]
-    distinct_venues = _get_distinct_venues(db3) if _is_ca else []
+    distinct_venues = _get_distinct_venues(db3) if _can_manage_crew else []
 
     # Crew members with rate level info
     crew_members_list = [dict(m) for m in db3.execute(
@@ -3683,10 +3684,10 @@ def settings():
            FROM crew_members cm
            LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
            ORDER BY cm.sort_order, cm.name'''
-    ).fetchall()] if _is_ca else []
+    ).fetchall()] if _can_manage_crew else []
     pay_rate_levels = [dict(r) for r in db3.execute(
         'SELECT * FROM pay_rate_levels ORDER BY sort_order, name'
-    ).fetchall()] if _is_ca else []
+    ).fetchall()] if _can_manage_crew else []
     db3.close()
 
     db_settings = {
@@ -5668,7 +5669,7 @@ def api_position_categories():
 
 
 @app.route('/settings/position-categories/add', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def add_position_category():
     data = request.get_json(force=True) or {}
     name = data.get('name', '').strip()
@@ -5690,7 +5691,7 @@ def add_position_category():
 
 
 @app.route('/settings/position-categories/<int:cid>/edit', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def edit_position_category(cid):
     data = request.get_json(force=True) or {}
     name = data.get('name', '').strip()
@@ -5709,7 +5710,7 @@ def edit_position_category(cid):
 
 
 @app.route('/settings/position-categories/<int:cid>/delete', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def delete_position_category(cid):
     db = get_db()
     # Null out category_id on positions in this category
@@ -5725,7 +5726,7 @@ def delete_position_category(cid):
 
 
 @app.route('/settings/job-positions/add', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def add_job_position():
     data = request.get_json(force=True) or {}
     name = data.get('name', '').strip()
@@ -5751,7 +5752,7 @@ def add_job_position():
 
 
 @app.route('/settings/job-positions/<int:pid>/edit', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def edit_job_position(pid):
     data = request.get_json(force=True) or {}
     name = data.get('name', '').strip()
@@ -5777,7 +5778,7 @@ def edit_job_position(pid):
 
 
 @app.route('/settings/job-positions/<int:pid>/delete', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def delete_job_position(pid):
     db = get_db()
     before = _snapshot_row(db, 'job_positions', pid)
@@ -5791,7 +5792,7 @@ def delete_job_position(pid):
 
 
 @app.route('/settings/job-positions/reorder', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def reorder_job_positions():
     data = request.get_json(force=True) or {}
     position_ids = data.get('position_ids', [])
@@ -6250,11 +6251,18 @@ def crew_tracker():
         member_rows.append(m_dict)
 
     db.close()
+    can_edit = (
+        session.get('user_role') == 'admin'
+        or session.get('is_scheduler')
+        or session.get('is_labor_scheduler')
+        or session.get('is_content_admin')
+    )
     return render_template('crew_tracker.html',
                            categories=cats_with_positions,
                            uncategorized_positions=uncategorized,
                            all_positions=all_positions,
                            members=member_rows,
+                           can_edit=can_edit,
                            user=get_current_user())
 
 
@@ -6343,7 +6351,7 @@ def api_crew_members():
 
 
 @app.route('/settings/crew-members/add', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def add_crew_member():
     data = request.get_json(force=True) or {}
     name = data.get('name', '').strip()
@@ -6374,7 +6382,7 @@ def add_crew_member():
 
 
 @app.route('/settings/crew-members/<int:mid>/edit', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def edit_crew_member(mid):
     data = request.get_json(force=True) or {}
     name = data.get('name', '').strip()
@@ -6401,7 +6409,7 @@ def edit_crew_member(mid):
 
 
 @app.route('/settings/crew-members/<int:mid>/delete', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def delete_crew_member(mid):
     db = get_db()
     before = _snapshot_row(db, 'crew_members', mid)
@@ -6414,7 +6422,7 @@ def delete_crew_member(mid):
 
 
 @app.route('/settings/crew-members/reorder', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def reorder_crew_members():
     data = request.get_json(force=True) or {}
     member_ids = data.get('member_ids', [])
@@ -6427,7 +6435,7 @@ def reorder_crew_members():
 
 
 @app.route('/api/crew-qualifications/toggle', methods=['POST'])
-@content_admin_required
+@scheduler_required
 def toggle_crew_qualification():
     data = request.get_json(force=True) or {}
     crew_member_id = data.get('crew_member_id')
@@ -8763,14 +8771,13 @@ def ai_slots_status():
 # ─── Asset Availability Dashboard ─────────────────────────────────────────────
 
 @app.route('/api/dashboard/shows-calendar')
-@login_required
 def api_dashboard_shows_calendar():
-    """Return shows per day for a date range (for calendar widget)."""
+    """Return shows per day for a date range (for calendar widget). Public-safe."""
     from datetime import date as _date, timedelta
     date_from = request.args.get('from', '')
     date_to   = request.args.get('to', '')
     db = get_db()
-    accessible = get_accessible_shows(session['user_id'])
+    accessible = get_accessible_shows(session['user_id']) if session.get('user_id') else None
     params = []
     where_parts = ["s.status != 'archived'"]
     if date_from:
@@ -8830,7 +8837,6 @@ def api_dashboard_shows_calendar():
 
 
 @app.route('/api/dashboard/skills-summary')
-@login_required
 def api_dashboard_skills_summary():
     """Return technician skill coverage per position."""
     db = get_db()
@@ -8894,8 +8900,13 @@ def dashboards_list():
         ORDER BY d.user_id = ? DESC, d.name
     """, (session['user_id'], session['user_id'])).fetchall()
     db.close()
+    dashboards = []
+    for r in rows:
+        d = dict(r)
+        d['config'] = json.loads(d.get('config_json') or '{}')
+        dashboards.append(d)
     return render_template('dashboards.html',
-                           dashboards=[dict(r) for r in rows],
+                           dashboards=dashboards,
                            user=get_current_user())
 
 

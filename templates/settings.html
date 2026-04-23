@@ -20,6 +20,8 @@
   {% endif %}
   {% if user.role == 'admin' or is_content_admin %}
   <button class="tab-btn" onclick="switchSettingsTab('fields')">Form Fields</button>
+  {% endif %}
+  {% if user.role == 'admin' or is_content_admin or user.is_scheduler %}
   <button class="tab-btn" onclick="switchSettingsTab('positions')">Job Positions</button>
   <button class="tab-btn" onclick="switchSettingsTab('technicians')">Technicians</button>
   {% endif %}
@@ -84,15 +86,17 @@
         </select>
       </div>
       <table class="data-table" id="contacts-table">
-        <thead><tr><th>NAME</th><th>TITLE</th><th>DEPARTMENT</th><th>PHONE</th><th style="width:220px">EMAIL</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="System notification emails">SYSTEM</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
+        <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="System notification emails">SYSTEM</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
-            <td class="contact-name" data-field="name">{{ c.name }}</td>
-            <td class="text-dim" data-field="title">{{ c.title or '—' }}</td>
+            <td class="contact-name" data-field="name">
+              <div style="font-weight:500">{{ c.name }}</div>
+              {% if c.title %}<div class="text-dim" style="font-size:11px" data-field="title">{{ c.title }}</div>{% endif %}
+              {% if c.email %}<div style="font-size:11px;color:var(--accent)" data-field="email"><a href="mailto:{{ c.email }}" style="color:var(--accent)">{{ c.email }}</a></div>{% endif %}
+            </td>
             <td>{% if c.department %}<span class="dept-badge">{{ c.department }}</span>{% else %}—{% endif %}</td>
             <td class="mono text-sm" data-field="phone">{{ c.phone or '—' }}</td>
-            <td class="text-sm" data-field="email" style="word-break:break-all;max-width:220px">{{ c.email or '—' }}</td>
             {% if user.role == 'admin' %}
             <td style="text-align:center">
               <span class="recipient-indicator recipient-dot {{ 'on' if c.report_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="report"
@@ -913,7 +917,7 @@
 {% endif %}
 
 {# ── JOB POSITIONS ─────────────────────────────────────────────────────────── #}
-{% if user.role == 'admin' or is_content_admin %}
+{% if user.role == 'admin' or is_content_admin or user.is_scheduler %}
 <div id="stab-positions" class="stab-pane" style="display:none">
 
   <div style="display:grid;grid-template-columns:280px 1fr;gap:24px;align-items:start">
@@ -1042,7 +1046,7 @@
 
 
 {# ── CREW MEMBERS ──────────────────────────────────────────────────────────── #}
-{% if user.role == 'admin' or is_content_admin %}
+{% if user.role == 'admin' or is_content_admin or user.is_scheduler %}
 <div id="stab-technicians" class="stab-pane" style="display:none">
 
   <div class="two-col">
