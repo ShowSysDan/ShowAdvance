@@ -426,6 +426,8 @@ let _viewingComponentOf = null; // system type ID when navigated into a componen
 (async function init() {
   await loadTypes();
   renderFinderCats();
+  const typeId = parseInt(new URLSearchParams(window.location.search).get('type_id'));
+  if (typeId) await selectType(typeId);
 })();
 
 async function loadTypes() {

@@ -769,21 +769,22 @@ function renderAssetCalendarMonth(data, year, month, idx) {
     const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isToday = ds === todayStr;
     const dayData = dayMap[ds];
+    const assetHref = `/assets?type_id=${data.type_id}`;
     let chip = '';
     if (data.unlimited) {
-      chip = '<div class="ac-chip ac-inf" onclick="location.href=\'/assets\'" title="View assets">∞ avail</div>';
+      chip = `<div class="ac-chip ac-inf" onclick="location.href='${assetHref}'" title="View asset">∞ avail</div>`;
     } else if (dayData !== undefined) {
       const avail = dayData.available;
       const rsv   = dayData.reserved || 0;
       const hasShows = rsv > 0 && (dayData.shows || []).length > 0;
       if (avail === null) {
-        chip = '<div class="ac-chip ac-inf" onclick="location.href=\'/assets\'" title="View assets">∞</div>';
+        chip = `<div class="ac-chip ac-inf" onclick="location.href='${assetHref}'" title="View asset">∞</div>`;
       } else if (avail <= 0) {
-        chip = `<div class="ac-chip ac-none" onclick="location.href='/assets'" title="View assets">FULL</div>`;
+        chip = `<div class="ac-chip ac-none" onclick="location.href='${assetHref}'" title="View asset">FULL</div>`;
       } else if (avail <= 2) {
-        chip = `<div class="ac-chip ac-warn" onclick="location.href='/assets'" title="View assets">${avail} left</div>`;
+        chip = `<div class="ac-chip ac-warn" onclick="location.href='${assetHref}'" title="View asset">${avail} left</div>`;
       } else {
-        chip = `<div class="ac-chip ac-ok" onclick="location.href='/assets'" title="View assets">${avail} avail</div>`;
+        chip = `<div class="ac-chip ac-ok" onclick="location.href='${assetHref}'" title="View asset">${avail} avail</div>`;
       }
       if (rsv > 0) {
         const rsvClick = hasShows ? ` onclick="openDayPopup(${idx},'${ds}')" title="Show reserved"` : '';
