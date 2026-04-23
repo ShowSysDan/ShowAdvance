@@ -8964,6 +8964,7 @@ def api_dashboard_asset_calendar():
         'days':          days,
     })
 
+@app.route('/dashboards')
 @login_required
 def dashboards_list():
     db = get_db()
