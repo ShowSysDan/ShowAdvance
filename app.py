@@ -8890,7 +8890,80 @@ def api_dashboard_skills_summary():
     return jsonify({'total_crew': total_crew, 'categories': result})
 
 
-@app.route('/dashboards')
+@app.route('/api/dashboard/asset-calendar')
+def api_dashboard_asset_calendar():
+    """Per-day availability for one asset type — used by the asset calendar widget."""
+    from datetime import date as _date, timedelta
+    type_id   = request.args.get('type_id', type=int)
+    date_from = request.args.get('from')
+    date_to   = request.args.get('to')
+    if not type_id or not date_from or not date_to:
+        return jsonify({'error': 'type_id, from, to required'}), 400
+
+    db = get_db()
+    row = db.execute(
+        'SELECT at.*, ac.name AS category_name FROM asset_types at '
+        'JOIN asset_categories ac ON ac.id = at.category_id WHERE at.id = ?',
+        (type_id,)
+    ).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Not found'}), 404
+
+    unlimited = bool(row['is_system'] or row['is_package'] or
+                     (row['is_consumable'] and not row['track_quantity']))
+    total = in_maint = reserve = 0
+
+    if not unlimited:
+        total = db.execute(
+            "SELECT COUNT(*) FROM asset_items WHERE asset_type_id=? AND status!='retired'",
+            (type_id,)
+        ).fetchone()[0]
+        in_maint = db.execute(
+            "SELECT COUNT(*) FROM asset_items WHERE asset_type_id=? AND status='maintenance'",
+            (type_id,)
+        ).fetchone()[0]
+        reserve = row['reserve_count'] or 0
+
+    reservations = [] if unlimited else db.execute(
+        'SELECT sa.quantity, sa.rental_start, sa.rental_end '
+        'FROM show_assets sa '
+        'WHERE sa.asset_type_id=? AND sa.rental_end>=? AND sa.rental_start<=?',
+        (type_id, date_from, date_to)
+    ).fetchall()
+    db.close()
+
+    try:
+        cur = _date.fromisoformat(date_from)
+        end = _date.fromisoformat(date_to)
+    except ValueError:
+        return jsonify({'error': 'Invalid date'}), 400
+
+    days = []
+    while cur <= end:
+        ds = cur.isoformat()
+        if unlimited:
+            days.append({'date': ds, 'available': None, 'reserved': 0})
+        else:
+            day_rsv = sum(
+                r['quantity'] for r in reservations
+                if r['rental_start'] and r['rental_end']
+                and str(r['rental_start']) <= ds <= str(r['rental_end'])
+            )
+            days.append({'date': ds, 'available': total - in_maint - reserve - day_rsv, 'reserved': day_rsv})
+        cur += timedelta(days=1)
+
+    return jsonify({
+        'type_id':       type_id,
+        'type_name':     row['name'],
+        'category_name': row['category_name'],
+        'total':         total,
+        'maintenance':   in_maint,
+        'reserve':       reserve,
+        'unlimited':     unlimited,
+        'days':          days,
+    })
+
 @login_required
 def dashboards_list():
     db = get_db()

@@ -140,6 +140,19 @@
   white-space: nowrap;
 }
 
+/* ── Asset calendar availability chips ──────────────────────────── */
+.ac-chip {
+  font-size: 9px; font-weight: 700;
+  padding: 1px 4px; border-radius: 3px;
+  text-align: center; display: block;
+  margin-top: 2px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis;
+}
+.ac-ok   { background: rgba(34,197,94,.2);  color: #22C55E; }
+.ac-warn { background: rgba(251,191,36,.2); color: #FBBF24; }
+.ac-none { background: rgba(239,68,68,.15); color: #EF4444; }
+.ac-inf  { background: rgba(74,158,255,.15); color: #4A9EFF; }
+
 /* ── Widget section ──────────────────────────────────────────────── */
 .widget-section {
   margin-bottom: 24px;
@@ -218,11 +231,12 @@ const WIDGETS = [{ type: '{{ dash.layout }}' }];
 {% endif %}
 
 const WIDGET_LABELS = {
-  combined:    'All Assets',
-  by_category: 'Assets by Category',
-  by_show:     'Assets by Show',
-  calendar:    'Shows Calendar',
-  skills:      'Skill Coverage',
+  combined:       'All Assets',
+  by_category:    'Assets by Category',
+  by_show:        'Assets by Show',
+  calendar:       'Shows Calendar',
+  skills:         'Skill Coverage',
+  asset_calendar: 'Asset Availability Calendar',
 };
 
 /* ── Safe fetch: throws if not JSON ─────────────────────────────── */
@@ -251,7 +265,7 @@ function buildWidgetEl(idx, wtype) {
     section.appendChild(btn);
   }
 
-  const needsDates = !['skills'].includes(wtype);
+  const needsDates = !['skills', 'asset_calendar'].includes(wtype);
   if (needsDates) {
     const now = new Date();
     let fromDefault, toDefault;
@@ -281,6 +295,68 @@ function buildWidgetEl(idx, wtype) {
     fromInput.addEventListener('change', () => loadWidget(idx));
     toInput.addEventListener('change', () => loadWidget(idx));
     section.appendChild(dateRow);
+  }
+
+  if (wtype === 'asset_calendar') {
+    const w = _currentWidgets[idx] || {};
+    if (!w.asset_type_id && ASSET_TYPES.length > 0) w.asset_type_id = ASSET_TYPES[0].id;
+    section._calYear  = new Date().getFullYear();
+    section._calMonth = new Date().getMonth();
+
+    const hdr = document.createElement('div');
+    hdr.className = 'widget-date-row';
+    hdr.style.cssText = 'justify-content:space-between;flex-wrap:wrap;gap:8px';
+
+    /* Left: type selector */
+    const typeWrap = document.createElement('div');
+    typeWrap.style.cssText = 'display:flex;align-items:center;gap:6px;flex:1;min-width:160px';
+    const typeLbl = document.createElement('label');
+    typeLbl.style.cssText = 'font-size:11px;color:var(--text-dim);white-space:nowrap';
+    typeLbl.textContent = 'Asset:';
+    const sel = document.createElement('select');
+    sel.className = 'field-input field-input-sm';
+    sel.style.cssText = 'flex:1;max-width:220px';
+    ASSET_TYPES.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      opt.textContent = (t.category_name ? t.category_name + ' · ' : '') + t.name;
+      if (w.asset_type_id == t.id) opt.selected = true;
+      sel.appendChild(opt);
+    });
+    sel.addEventListener('change', () => {
+      _currentWidgets[idx].asset_type_id = parseInt(sel.value);
+      saveWidgets();
+      loadWidget(idx);
+    });
+    typeWrap.append(typeLbl, sel);
+
+    /* Right: month navigation */
+    const navWrap = document.createElement('div');
+    navWrap.style.cssText = 'display:flex;align-items:center;gap:4px';
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'btn btn-ghost btn-xs';
+    prevBtn.style.cssText = 'padding:2px 10px;font-size:16px;line-height:1';
+    prevBtn.textContent = '‹';
+    prevBtn.addEventListener('click', () => {
+      section._calMonth--;
+      if (section._calMonth < 0) { section._calMonth = 11; section._calYear--; }
+      loadWidget(idx);
+    });
+    const monthLbl = document.createElement('span');
+    monthLbl.style.cssText = 'font-size:12px;font-weight:600;min-width:110px;text-align:center;color:var(--text)';
+    section._monthLabel = monthLbl;
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'btn btn-ghost btn-xs';
+    nextBtn.style.cssText = 'padding:2px 10px;font-size:16px;line-height:1';
+    nextBtn.textContent = '›';
+    nextBtn.addEventListener('click', () => {
+      section._calMonth++;
+      if (section._calMonth > 11) { section._calMonth = 0; section._calYear++; }
+      loadWidget(idx);
+    });
+    navWrap.append(prevBtn, monthLbl, nextBtn);
+    hdr.append(typeWrap, navWrap);
+    section.appendChild(hdr);
   }
 
   /* Loading and content divs created as real elements — no innerHTML/querySelector needed */
@@ -323,9 +399,10 @@ async function loadWidget(idx) {
   contentEl.style.display = 'none';
 
   try {
-    if (wtype === 'calendar')    await loadCalendarWidget(idx, section, loadEl, contentEl);
-    else if (wtype === 'skills') await loadSkillsWidget(idx, section, loadEl, contentEl);
-    else                         await loadAvailWidget(idx, section, loadEl, contentEl);
+    if (wtype === 'calendar')           await loadCalendarWidget(idx, section, loadEl, contentEl);
+    else if (wtype === 'skills')        await loadSkillsWidget(idx, section, loadEl, contentEl);
+    else if (wtype === 'asset_calendar') await loadAssetCalendarWidget(idx, section, loadEl, contentEl);
+    else                                await loadAvailWidget(idx, section, loadEl, contentEl);
   } catch(e) {
     loadEl.innerHTML = `<span style="color:var(--red)">Error: ${escHtml(e.message)}</span>`;
     loadEl.style.display = 'block';
@@ -583,6 +660,86 @@ function renderSkills(data) {
   return html;
 }
 
+/* ── Asset calendar widget ───────────────────────────────────────── */
+const _CAL_MONTHS = ['January','February','March','April','May','June',
+                     'July','August','September','October','November','December'];
+
+async function loadAssetCalendarWidget(idx, section, loadEl, contentEl) {
+  const w = _currentWidgets[idx] || {};
+  const typeId = w.asset_type_id || (ASSET_TYPES[0] && ASSET_TYPES[0].id);
+  if (!typeId) {
+    loadEl.style.display = 'none'; contentEl.style.display = 'block';
+    contentEl.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">No asset types configured.</div>';
+    return;
+  }
+  const year  = section._calYear  ?? new Date().getFullYear();
+  const month = section._calMonth ?? new Date().getMonth();
+  if (section._monthLabel) section._monthLabel.textContent = `${_CAL_MONTHS[month]} ${year}`;
+  const from = new Date(year, month, 1).toISOString().slice(0,10);
+  const to   = new Date(year, month + 1, 0).toISOString().slice(0,10);
+  const data = await safeFetch(`/api/dashboard/asset-calendar?type_id=${typeId}&from=${from}&to=${to}`);
+  loadEl.style.display = 'none';
+  contentEl.style.display = 'block';
+  contentEl.innerHTML = renderAssetCalendarMonth(data, year, month);
+}
+
+function renderAssetCalendarMonth(data, year, month) {
+  const dayMap = {};
+  (data.days || []).forEach(d => { dayMap[d.date] = d; });
+  const DOW = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDow = (new Date(year, month, 1).getDay() + 6) % 7; // Mon=0
+  const todayStr = new Date().toISOString().slice(0,10);
+  const total = data.total || 0;
+
+  const subtitle = data.unlimited
+    ? '<span style="font-size:10px;font-weight:400;letter-spacing:0;text-transform:none;color:#4A9EFF;margin-left:8px">unlimited</span>'
+    : `<span style="font-size:10px;font-weight:400;letter-spacing:0;text-transform:none;color:var(--text-dim);margin-left:8px">${total} unit${total!==1?'s':''}`
+      + (data.maintenance > 0 ? ` · ${data.maintenance} in maint` : '')
+      + (data.reserve > 0 ? ` · ${data.reserve} reserve` : '') + '</span>';
+
+  let html = `<div class="form-section">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span>
+      ${data.category_name ? escHtml(data.category_name).toUpperCase() + ' &nbsp;·&nbsp; ' : ''}${escHtml(data.type_name||'')}
+      ${subtitle}
+    </div>
+    <div class="form-section-body">
+    <div class="dash-cal-grid">`;
+
+  DOW.forEach(d => { html += `<div class="dash-cal-dow">${d}</div>`; });
+  for (let i = 0; i < firstDow; i++) html += '<div class="dash-cal-cell other-month"></div>';
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const isToday = ds === todayStr;
+    const dayData = dayMap[ds];
+    let chip = '';
+    if (data.unlimited) {
+      chip = '<div class="ac-chip ac-inf">∞ avail</div>';
+    } else if (dayData !== undefined) {
+      const avail = dayData.available;
+      if (avail === null)  chip = '<div class="ac-chip ac-inf">∞</div>';
+      else if (avail <= 0) chip = '<div class="ac-chip ac-none">FULL</div>';
+      else if (avail <= 2) chip = `<div class="ac-chip ac-warn">${avail} left</div>`;
+      else                 chip = `<div class="ac-chip ac-ok">${avail} avail</div>`;
+    }
+    html += `<div class="dash-cal-cell${isToday?' today':''}">
+      <div class="dash-cal-day-num">${d}</div>${chip}</div>`;
+  }
+
+  const lastDow = (new Date(year, month, daysInMonth).getDay() + 6) % 7;
+  for (let i = lastDow + 1; i < 7; i++) html += '<div class="dash-cal-cell other-month"></div>';
+  html += '</div>';
+  html += `<div style="margin-top:8px;display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--text-dim)">
+    <span><span style="display:inline-block;width:24px;height:11px;border-radius:2px;background:rgba(34,197,94,.2);vertical-align:middle;margin-right:4px"></span>Available</span>
+    <span><span style="display:inline-block;width:24px;height:11px;border-radius:2px;background:rgba(251,191,36,.2);vertical-align:middle;margin-right:4px"></span>Low (≤2)</span>
+    <span><span style="display:inline-block;width:24px;height:11px;border-radius:2px;background:rgba(239,68,68,.15);vertical-align:middle;margin-right:4px"></span>Full/over</span>
+  </div>`;
+  html += '</div></div>';
+  return html;
+}
+
 /* ── Add / Remove widgets ────────────────────────────────────────── */
 let _currentWidgets = WIDGETS.slice();
 
@@ -595,7 +752,9 @@ function closeAddWidget() {
 
 async function confirmAddWidget() {
   const wtype = document.getElementById('add-widget-type').value;
-  _currentWidgets.push({ type: wtype });
+  const newW = { type: wtype };
+  if (wtype === 'asset_calendar' && ASSET_TYPES.length > 0) newW.asset_type_id = ASSET_TYPES[0].id;
+  _currentWidgets.push(newW);
   await saveWidgets();
   const idx = _currentWidgets.length - 1;
   const container = document.getElementById('widgets-container');
@@ -661,6 +820,7 @@ window.addEventListener('DOMContentLoaded', () => {
       <div class="field-group">
         <label class="field-label">WIDGET TYPE</label>
         <select id="add-widget-type" class="field-input">
+          <option value="asset_calendar">Asset Type Calendar — per-day availability</option>
           <option value="combined">All Assets — combined availability</option>
           <option value="by_category">Assets by Category</option>
           <option value="by_show">Assets by Show</option>
