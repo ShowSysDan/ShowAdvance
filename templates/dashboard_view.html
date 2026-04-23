@@ -242,9 +242,16 @@ function buildWidgetEl(idx, wtype) {
   section.dataset.idx = idx;
   section.dataset.wtype = wtype;
 
-  const needsDates = !['skills'].includes(wtype);
+  if (CAN_EDIT) {
+    const btn = document.createElement('button');
+    btn.className = 'widget-remove-btn';
+    btn.title = 'Remove widget';
+    btn.textContent = '×';
+    btn.addEventListener('click', () => removeWidget(idx));
+    section.appendChild(btn);
+  }
 
-  let headerExtra = '';
+  const needsDates = !['skills'].includes(wtype);
   if (needsDates) {
     const now = new Date();
     let fromDefault, toDefault;
@@ -257,26 +264,45 @@ function buildWidgetEl(idx, wtype) {
       const end = new Date(); end.setDate(end.getDate() + 90);
       toDefault = end.toISOString().slice(0,10);
     }
-    headerExtra = `<div class="widget-date-row">
-      <label style="font-size:11px;color:var(--text-dim);white-space:nowrap">Date range:</label>
-      <input type="date" class="field-input field-input-sm w-date-from" style="width:140px" value="${fromDefault}" onchange="loadWidget(${idx})">
-      <span style="color:var(--text-dim)">–</span>
-      <input type="date" class="field-input field-input-sm w-date-to" style="width:140px" value="${toDefault}" onchange="loadWidget(${idx})">
-    </div>`;
+    const dateRow = document.createElement('div');
+    dateRow.className = 'widget-date-row';
+    const fromInput = document.createElement('input');
+    fromInput.type = 'date'; fromInput.className = 'field-input field-input-sm w-date-from';
+    fromInput.style.width = '140px'; fromInput.value = fromDefault;
+    const toInput = document.createElement('input');
+    toInput.type = 'date'; toInput.className = 'field-input field-input-sm w-date-to';
+    toInput.style.width = '140px'; toInput.value = toDefault;
+    const lbl = document.createElement('label');
+    lbl.style.cssText = 'font-size:11px;color:var(--text-dim);white-space:nowrap';
+    lbl.textContent = 'Date range:';
+    const sep = document.createElement('span');
+    sep.style.color = 'var(--text-dim)'; sep.textContent = '–';
+    dateRow.append(lbl, fromInput, sep, toInput);
+    fromInput.addEventListener('change', () => loadWidget(idx));
+    toInput.addEventListener('change', () => loadWidget(idx));
+    section.appendChild(dateRow);
   }
 
-  const removeBtn = CAN_EDIT
-    ? `<button class="widget-remove-btn" onclick="removeWidget(${idx})" title="Remove widget">×</button>`
-    : '';
+  /* Loading and content divs created as real elements — no innerHTML/querySelector needed */
+  const loadDiv = document.createElement('div');
+  loadDiv.className = 'widget-loading';
+  loadDiv.style.cssText = 'text-align:center;padding:32px;color:var(--text-dim)';
+  const spinner = document.createElement('div');
+  spinner.className = 'loading-spinner';
+  spinner.style.cssText = 'margin:0 auto 10px';
+  loadDiv.appendChild(spinner);
+  loadDiv.appendChild(document.createTextNode('Loading…'));
+  section.appendChild(loadDiv);
 
-  section.innerHTML = `
-    ${removeBtn}
-    ${headerExtra}
-    <div class="widget-loading" style="text-align:center;padding:32px;color:var(--text-dim)">
-      <div class="loading-spinner" style="margin:0 auto 10px"></div>Loading…
-    </div>
-    <div class="widget-content" style="display:none"></div>
-  `;
+  const contentDiv = document.createElement('div');
+  contentDiv.className = 'widget-content';
+  contentDiv.style.display = 'none';
+  section.appendChild(contentDiv);
+
+  /* Store direct references so loadWidget never needs querySelector */
+  section._loadEl    = loadDiv;
+  section._contentEl = contentDiv;
+
   return section;
 }
 
@@ -288,18 +314,18 @@ function reloadAll() {
 async function loadWidget(idx) {
   const section = document.querySelector(`.widget-section[data-idx="${idx}"]`);
   if (!section) return;
-  const wtype = section.dataset.wtype;
-  const loadEl    = section.querySelector('.widget-loading');
-  const contentEl = section.querySelector('.widget-content');
+  const wtype    = section.dataset.wtype;
+  const loadEl   = section._loadEl;
+  const contentEl = section._contentEl;
   if (!loadEl || !contentEl) return;
 
   loadEl.style.display = 'block';
   contentEl.style.display = 'none';
 
   try {
-    if (wtype === 'calendar')       await loadCalendarWidget(idx, section, loadEl, contentEl);
-    else if (wtype === 'skills')    await loadSkillsWidget(idx, section, loadEl, contentEl);
-    else                            await loadAvailWidget(idx, section, wtype, loadEl, contentEl);
+    if (wtype === 'calendar')    await loadCalendarWidget(idx, section, loadEl, contentEl);
+    else if (wtype === 'skills') await loadSkillsWidget(idx, section, loadEl, contentEl);
+    else                         await loadAvailWidget(idx, section, wtype, loadEl, contentEl);
   } catch(e) {
     loadEl.innerHTML = `<span style="color:var(--red)">Error: ${escHtml(e.message)}</span>`;
     loadEl.style.display = 'block';
