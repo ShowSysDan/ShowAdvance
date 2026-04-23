@@ -325,7 +325,7 @@ async function loadWidget(idx) {
   try {
     if (wtype === 'calendar')    await loadCalendarWidget(idx, section, loadEl, contentEl);
     else if (wtype === 'skills') await loadSkillsWidget(idx, section, loadEl, contentEl);
-    else                         await loadAvailWidget(idx, section, wtype, loadEl, contentEl);
+    else                         await loadAvailWidget(idx, section, loadEl, contentEl);
   } catch(e) {
     loadEl.innerHTML = `<span style="color:var(--red)">Error: ${escHtml(e.message)}</span>`;
     loadEl.style.display = 'block';

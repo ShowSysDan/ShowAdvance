@@ -7326,8 +7326,8 @@ def assets_availability_bulk():
             by_show.append({
                 'id':       sr['id'],
                 'name':     sr['name'],
-                'show_date':sr['show_date'],
-                'assets':   [dict(a) for a in assets],
+                'show_date': str(sr['show_date']) if sr['show_date'] else None,
+                'assets':   [{k: (str(v) if hasattr(v, 'isoformat') else v) for k, v in dict(a).items()} for a in assets],
             })
     db.close()
     return jsonify({'by_type': by_type, 'by_show': by_show})
@@ -8805,16 +8805,18 @@ def api_dashboard_shows_calendar():
     day_map = {}
     for r in rows:
         dates_for_show = set()
-        if r['load_in_date']:  dates_for_show.add(r['load_in_date'])
-        if r['show_date']:     dates_for_show.add(r['show_date'])
-        if r['load_out_date']: dates_for_show.add(r['load_out_date'])
+        if r['load_in_date']:  dates_for_show.add(str(r['load_in_date']))
+        if r['show_date']:     dates_for_show.add(str(r['show_date']))
+        if r['load_out_date']: dates_for_show.add(str(r['load_out_date']))
+        li = str(r['load_in_date']) if r['load_in_date'] else None
+        sd = str(r['show_date'])    if r['show_date']    else None
+        lo = str(r['load_out_date'])if r['load_out_date']else None
         for d in dates_for_show:
             if date_from and d < date_from: continue
             if date_to   and d > date_to:   continue
             if d not in day_map: day_map[d] = []
             day_map[d].append({'id': r['id'], 'name': r['name'], 'venue': r['venue'],
-                               'load_in_date': r['load_in_date'], 'show_date': r['show_date'],
-                               'load_out_date': r['load_out_date']})
+                               'load_in_date': li, 'show_date': sd, 'load_out_date': lo})
 
     # Fill in all calendar days even if empty
     days = []
