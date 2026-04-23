@@ -272,10 +272,10 @@ function buildWidgetEl(idx, wtype) {
   section.innerHTML = `
     ${removeBtn}
     ${headerExtra}
-    <div class="widget-loading-${idx}" style="text-align:center;padding:32px;color:var(--text-dim)">
+    <div class="widget-loading" style="text-align:center;padding:32px;color:var(--text-dim)">
       <div class="loading-spinner" style="margin:0 auto 10px"></div>Loading…
     </div>
-    <div class="widget-content-${idx}" style="display:none"></div>
+    <div class="widget-content" style="display:none"></div>
   `;
   return section;
 }
@@ -289,8 +289,9 @@ async function loadWidget(idx) {
   const section = document.querySelector(`.widget-section[data-idx="${idx}"]`);
   if (!section) return;
   const wtype = section.dataset.wtype;
-  const loadEl   = section.querySelector(`.widget-loading-${idx}`);
-  const contentEl = section.querySelector(`.widget-content-${idx}`);
+  const loadEl    = section.querySelector('.widget-loading');
+  const contentEl = section.querySelector('.widget-content');
+  if (!loadEl || !contentEl) return;
 
   loadEl.style.display = 'block';
   contentEl.style.display = 'none';
