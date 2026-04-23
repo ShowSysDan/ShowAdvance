@@ -15,12 +15,6 @@
 .avail-maint{ background:rgba(148,163,184,.12);color:#94A3B8;border:1px solid rgba(148,163,184,.3) }
 
 /* ── Calendar ────────────────────────────────────────────────────── */
-.dash-cal-nav {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-bottom: 12px;
-}
 .dash-cal-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
@@ -145,25 +139,36 @@
   text-align: right;
   white-space: nowrap;
 }
-.dash-view-tabs {
-  display: flex;
-  gap: 4px;
-  margin-bottom: 16px;
+
+/* ── Widget section ──────────────────────────────────────────────── */
+.widget-section {
+  margin-bottom: 24px;
+  position: relative;
 }
-.dash-view-tab {
-  padding: 4px 14px;
-  font-size: 12px;
-  border-radius: 99px;
-  border: 1px solid var(--border);
-  background: transparent;
+.widget-remove-btn {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
   color: var(--text-dim);
   cursor: pointer;
-  transition: all .15s;
+  font-size: 16px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  opacity: 0.5;
+  transition: opacity .15s;
+  z-index: 2;
 }
-.dash-view-tab.active {
-  background: var(--accent);
-  color: #000;
-  border-color: var(--accent);
+.widget-remove-btn:hover { opacity: 1; color: var(--red); }
+
+/* ── Date range row per widget ───────────────────────────────────── */
+.widget-date-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 </style>
 {% endblock %}
@@ -173,23 +178,17 @@
   <div>
     <h1 class="page-title">{{ dash.name }}</h1>
     <p class="page-sub">
-      {% if dash.layout == 'calendar' %}Shows calendar{% elif dash.layout == 'skills' %}Technician skills overview{% else %}Asset availability — layout: {{ dash.layout }}{% endif %}
+      {% set wcount = config.get('widgets', [])|length %}
+      {{ wcount if wcount else 1 }} widget{{ 's' if wcount != 1 else '' }}
     </p>
   </div>
   <div style="display:flex;gap:8px;align-items:center">
     {% if not public %}
-    {% if dash.layout not in ('skills',) %}
-    <div class="field-group" style="margin:0;display:flex;gap:8px;align-items:center">
-      <label class="field-label" style="white-space:nowrap;margin:0">Show range:</label>
-      <input type="date" id="range-from" class="field-input field-input-sm" style="width:140px" onchange="loadData()">
-      <span style="color:var(--text-dim)">–</span>
-      <input type="date" id="range-to" class="field-input field-input-sm" style="width:140px" onchange="loadData()">
-    </div>
-    {% endif %}
-    <button class="btn btn-ghost btn-sm" onclick="loadData()">Refresh</button>
     {% if dash.user_id == user.id %}
-    <a href="/dashboards" class="btn btn-ghost btn-sm">← All Dashboards</a>
+    <button class="btn btn-ghost btn-sm" onclick="openAddWidget()">+ Add Widget</button>
     {% endif %}
+    <button class="btn btn-ghost btn-sm" onclick="reloadAll()">Refresh</button>
+    <a href="/dashboards" class="btn btn-ghost btn-sm">← Dashboards</a>
     {% endif %}
   </div>
 </div>
@@ -200,51 +199,131 @@
 </div>
 {% endif %}
 
-<div id="avail-loading" style="text-align:center;padding:40px;color:var(--text-dim)">
-  <div class="loading-spinner" style="margin:0 auto 12px"></div>
-  Loading…
-</div>
-
-<div id="avail-content" style="display:none"></div>
+<div id="widgets-container"></div>
 {% endblock %}
 
 {% block scripts %}
 <script>
 const ASSET_TYPES = {{ asset_types | tojson }};
 const CATEGORIES  = {{ categories | tojson }};
-const LAYOUT      = '{{ dash.layout }}';
+const DASH_ID     = {{ dash.id }};
+const CAN_EDIT    = {{ 'true' if (not public) and dash.user_id == user.id else 'false' }};
 
-async function loadData() {
-  document.getElementById('avail-loading').style.display = 'block';
-  document.getElementById('avail-content').style.display = 'none';
+/* Load widgets from config, backward-compatible with old single-layout dashboards */
+{% set raw_widgets = config.get('widgets') %}
+{% if raw_widgets %}
+const WIDGETS = {{ raw_widgets | tojson }};
+{% else %}
+const WIDGETS = [{ type: '{{ dash.layout }}' }];
+{% endif %}
+
+const WIDGET_LABELS = {
+  combined:    'All Assets',
+  by_category: 'Assets by Category',
+  by_show:     'Assets by Show',
+  calendar:    'Shows Calendar',
+  skills:      'Skill Coverage',
+};
+
+/* ── Safe fetch: throws if not JSON ─────────────────────────────── */
+async function safeFetch(url) {
+  const resp = await fetch(url);
+  const ct = resp.headers.get('content-type') || '';
+  if (!ct.includes('application/json')) {
+    throw new Error(`Server returned non-JSON response (status ${resp.status}). You may need to log in.`);
+  }
+  return resp.json();
+}
+
+/* ── Build widget HTML ───────────────────────────────────────────── */
+function buildWidgetEl(idx, wtype) {
+  const section = document.createElement('div');
+  section.className = 'widget-section';
+  section.dataset.idx = idx;
+  section.dataset.wtype = wtype;
+
+  const needsDates = !['skills'].includes(wtype);
+
+  let headerExtra = '';
+  if (needsDates) {
+    const now = new Date();
+    let fromDefault, toDefault;
+    if (wtype === 'calendar') {
+      const y = now.getFullYear(), m = now.getMonth();
+      fromDefault = new Date(y, m, 1).toISOString().slice(0,10);
+      toDefault   = new Date(y, m + 1, 0).toISOString().slice(0,10);
+    } else {
+      fromDefault = now.toISOString().slice(0,10);
+      const end = new Date(); end.setDate(end.getDate() + 90);
+      toDefault = end.toISOString().slice(0,10);
+    }
+    headerExtra = `<div class="widget-date-row">
+      <label style="font-size:11px;color:var(--text-dim);white-space:nowrap">Date range:</label>
+      <input type="date" class="field-input field-input-sm w-date-from" style="width:140px" value="${fromDefault}" onchange="loadWidget(${idx})">
+      <span style="color:var(--text-dim)">–</span>
+      <input type="date" class="field-input field-input-sm w-date-to" style="width:140px" value="${toDefault}" onchange="loadWidget(${idx})">
+    </div>`;
+  }
+
+  const removeBtn = CAN_EDIT
+    ? `<button class="widget-remove-btn" onclick="removeWidget(${idx})" title="Remove widget">×</button>`
+    : '';
+
+  section.innerHTML = `
+    ${removeBtn}
+    ${headerExtra}
+    <div class="widget-loading-${idx}" style="text-align:center;padding:32px;color:var(--text-dim)">
+      <div class="loading-spinner" style="margin:0 auto 10px"></div>Loading…
+    </div>
+    <div class="widget-content-${idx}" style="display:none"></div>
+  `;
+  return section;
+}
+
+/* ── Load all widgets ────────────────────────────────────────────── */
+function reloadAll() {
+  WIDGETS.forEach((w, i) => loadWidget(i));
+}
+
+async function loadWidget(idx) {
+  const section = document.querySelector(`.widget-section[data-idx="${idx}"]`);
+  if (!section) return;
+  const wtype = section.dataset.wtype;
+  const loadEl   = section.querySelector(`.widget-loading-${idx}`);
+  const contentEl = section.querySelector(`.widget-content-${idx}`);
+
+  loadEl.style.display = 'block';
+  contentEl.style.display = 'none';
+
   try {
-    if (LAYOUT === 'calendar')       await loadCalendar();
-    else if (LAYOUT === 'skills')    await loadSkills();
-    else                             await loadAvailability();
+    if (wtype === 'calendar')       await loadCalendarWidget(idx, section, loadEl, contentEl);
+    else if (wtype === 'skills')    await loadSkillsWidget(idx, section, loadEl, contentEl);
+    else                            await loadAvailWidget(idx, section, wtype, loadEl, contentEl);
   } catch(e) {
-    document.getElementById('avail-loading').textContent = 'Error: ' + e.message;
+    loadEl.innerHTML = `<span style="color:var(--red)">Error: ${escHtml(e.message)}</span>`;
+    loadEl.style.display = 'block';
   }
 }
 
-/* ── Availability (existing layouts) ────────────────────────────── */
-async function loadAvailability() {
-  const fromEl = document.getElementById('range-from');
-  const toEl   = document.getElementById('range-to');
-  const params = new URLSearchParams();
-  if (fromEl && fromEl.value) params.set('from', fromEl.value);
-  if (toEl   && toEl.value)   params.set('to',   toEl.value);
-  const resp = await fetch('/api/assets/availability?' + params.toString());
-  const data = await resp.json();
-  renderAvailability(data);
+function getWidgetDates(section) {
+  const fromEl = section.querySelector('.w-date-from');
+  const toEl   = section.querySelector('.w-date-to');
+  return { from: fromEl?.value || '', to: toEl?.value || '' };
 }
 
-function renderAvailability(data) {
-  const content = document.getElementById('avail-content');
-  document.getElementById('avail-loading').style.display = 'none';
-  content.style.display = 'block';
-  if (LAYOUT === 'by_category')      content.innerHTML = renderByCategory(data);
-  else if (LAYOUT === 'by_show')     content.innerHTML = renderByShow(data);
-  else                               content.innerHTML = renderCombined(data);
+/* ── Availability widgets ────────────────────────────────────────── */
+async function loadAvailWidget(idx, section, loadEl, contentEl) {
+  const { from, to } = getWidgetDates(section);
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to)   params.set('to',   to);
+  const data = await safeFetch('/api/assets/availability?' + params.toString());
+  loadEl.style.display = 'none';
+  contentEl.style.display = 'block';
+  const wtype = section.dataset.wtype;
+  if (wtype === 'by_category')  contentEl.innerHTML = renderByCategory(data);
+  else if (wtype === 'by_show') contentEl.innerHTML = renderByShow(data);
+  else                          contentEl.innerHTML = renderCombined(data);
 }
 
 function availPill(avail) {
@@ -267,8 +346,8 @@ function renderCombined(data) {
     const reserved = info.reserved ?? t.reserve_count ?? 0;
     const avail = info.available ?? null;
     html += `<tr>
-      <td class="text-dim">${t.category_name}</td>
-      <td><strong>${t.name}</strong>${t.manufacturer ? `<br><span class="text-dim mono" style="font-size:10px">${t.manufacturer} ${t.model||''}</span>` : ''}</td>
+      <td class="text-dim">${escHtml(t.category_name)}</td>
+      <td><strong>${escHtml(t.name)}</strong>${t.manufacturer ? `<br><span class="text-dim mono" style="font-size:10px">${escHtml(t.manufacturer)} ${escHtml(t.model||'')}</span>` : ''}</td>
       <td>${total}</td>
       <td>${maint > 0 ? `<span style="color:#FBBF24">${maint}</span>` : '—'}</td>
       <td>${reserved > 0 ? reserved : '—'}</td>
@@ -287,13 +366,13 @@ function renderByCategory(data) {
     const types = ASSET_TYPES.filter(t => t.category_id === cat.id);
     if (!types.length) continue;
     html += `<div class="form-section" style="margin-bottom:16px">
-      <div class="form-section-header"><span class="section-icon">◈</span> ${cat.name.toUpperCase()}</div>
+      <div class="form-section-header"><span class="section-icon">◈</span> ${escHtml(cat.name).toUpperCase()}</div>
       <div class="form-section-body no-pad"><table class="avail-table">
       <thead><tr><th>ITEM TYPE</th><th>TOTAL</th><th>MAINTENANCE</th><th>AVAILABLE</th></tr></thead><tbody>`;
     for (const t of types) {
       const info = byType[t.id] || {};
       html += `<tr>
-        <td><strong>${t.name}</strong></td>
+        <td><strong>${escHtml(t.name)}</strong></td>
         <td>${info.total ?? '—'}</td>
         <td>${(info.maintenance||0) > 0 ? `<span style="color:#FBBF24">${info.maintenance}</span>` : '—'}</td>
         <td>${availPill(info.available ?? null)}</td>
@@ -310,15 +389,15 @@ function renderByShow(data) {
   let html = '';
   for (const show of byShow) {
     html += `<div class="form-section" style="margin-bottom:16px">
-      <div class="form-section-header"><span class="section-icon">◈</span> ${show.name.toUpperCase()}
+      <div class="form-section-header"><span class="section-icon">◈</span> ${escHtml(show.name).toUpperCase()}
         ${show.show_date ? `<span class="text-dim" style="font-size:11px;font-weight:400;letter-spacing:0;text-transform:none;margin-left:8px">${show.show_date}</span>` : ''}
       </div>
       <div class="form-section-body no-pad"><table class="avail-table">
       <thead><tr><th>CATEGORY</th><th>ITEM TYPE</th><th>QTY</th><th>UNIT PRICE</th><th>LINE TOTAL</th></tr></thead><tbody>`;
     for (const item of show.assets || []) {
       html += `<tr>
-        <td class="text-dim">${item.category_name}</td>
-        <td>${item.type_name}</td>
+        <td class="text-dim">${escHtml(item.category_name)}</td>
+        <td>${escHtml(item.type_name)}</td>
         <td>${item.quantity}</td>
         <td>$${parseFloat(item.locked_price||0).toFixed(2)}</td>
         <td>$${(parseFloat(item.locked_price||0)*item.quantity).toFixed(2)}</td>
@@ -329,38 +408,22 @@ function renderByShow(data) {
   return html;
 }
 
-/* ── Calendar layout ─────────────────────────────────────────────── */
-let _calYear, _calMonth;
-let _calDaysData = {};
-
-async function loadCalendar() {
-  const now = new Date();
-  if (!_calYear) _calYear  = now.getFullYear();
-  if (!_calMonth) _calMonth = now.getMonth(); // 0-indexed
-
-  const fromEl = document.getElementById('range-from');
-  const toEl   = document.getElementById('range-to');
-  const from = fromEl?.value || new Date(_calYear, _calMonth, 1).toISOString().slice(0,10);
-  const to   = toEl?.value   || new Date(_calYear, _calMonth + 1, 0).toISOString().slice(0,10);
-
-  const resp = await fetch(`/api/dashboard/shows-calendar?from=${from}&to=${to}`);
-  const data = await resp.json();
-  _calDaysData = {};
-  (data.days || []).forEach(d => { _calDaysData[d.date] = d; });
-
-  renderCalendarLayout(from, to);
+/* ── Calendar widget ─────────────────────────────────────────────── */
+async function loadCalendarWidget(idx, section, loadEl, contentEl) {
+  const { from, to } = getWidgetDates(section);
+  const data = await safeFetch(`/api/dashboard/shows-calendar?from=${from}&to=${to}`);
+  const calDaysData = {};
+  (data.days || []).forEach(d => { calDaysData[d.date] = d; });
+  loadEl.style.display = 'none';
+  contentEl.style.display = 'block';
+  contentEl.innerHTML = renderCalendarLayout(from, to, calDaysData);
 }
 
-function renderCalendarLayout(from, to) {
-  const content = document.getElementById('avail-content');
-  document.getElementById('avail-loading').style.display = 'none';
-  content.style.display = 'block';
-
+function renderCalendarLayout(from, to, _calDaysData) {
   const fromDate = new Date(from + 'T00:00:00');
   const toDate   = new Date(to   + 'T00:00:00');
   const todayStr = new Date().toISOString().slice(0,10);
 
-  // Build week strip (next 7 days from fromDate)
   const weekDays = [];
   for (let i = 0; i < 7; i++) {
     const d = new Date(fromDate);
@@ -374,8 +437,6 @@ function renderCalendarLayout(from, to) {
   const MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 
   let html = '';
-
-  // Week strip
   html += '<div class="form-section" style="margin-bottom:16px"><div class="form-section-header"><span class="section-icon">◈</span> WEEK AT A GLANCE</div><div class="form-section-body">';
   html += '<div class="dash-week-strip">';
   for (const { date, d } of weekDays) {
@@ -390,7 +451,6 @@ function renderCalendarLayout(from, to) {
   }
   html += '</div></div></div>';
 
-  // Full calendar: group days by month
   const monthMap = {};
   const cur = new Date(fromDate);
   while (cur <= toDate) {
@@ -401,20 +461,14 @@ function renderCalendarLayout(from, to) {
     cur.setDate(cur.getDate() + 1);
   }
 
-  for (const [mk, { year, month, days }] of Object.entries(monthMap)) {
+  for (const [mk, { year, month }] of Object.entries(monthMap)) {
     html += `<div class="form-section" style="margin-bottom:16px">
       <div class="form-section-header"><span class="section-icon">◈</span> ${MONTHS[month].toUpperCase()} ${year}</div>
       <div class="form-section-body">`;
-
-    // Day-of-week headers
     html += '<div class="dash-cal-grid">';
     DOW.forEach(dw => { html += `<div class="dash-cal-dow">${dw}</div>`; });
-
-    // Leading blank cells
     const firstDay = new Date(year, month, 1).getDay();
     for (let i = 0; i < firstDay; i++) html += '<div class="dash-cal-cell other-month"></div>';
-
-    // Day cells for this month (only days in range)
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     for (let d = 1; d <= daysInMonth; d++) {
       const ds = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
@@ -435,45 +489,33 @@ function renderCalendarLayout(from, to) {
       }
       html += '</div>';
     }
-
-    // Trailing blank cells to fill last row
     const lastDay = new Date(year, month, daysInMonth).getDay();
     for (let i = lastDay + 1; i < 7; i++) html += '<div class="dash-cal-cell other-month"></div>';
-
-    html += '</div>'; // grid
+    html += '</div>';
     html += '<div style="margin-top:10px;font-size:11px;color:var(--text-dim);display:flex;gap:16px">';
     html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(74,158,255,.4);margin-right:4px"></span>Load-In (↓)</span>';
     html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(34,197,94,.4);margin-right:4px"></span>Show day (★)</span>';
     html += '<span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:rgba(245,158,11,.4);margin-right:4px"></span>Load-Out (↑)</span>';
     html += '</div>';
-    html += '</div></div>'; // form-section-body, form-section
+    html += '</div></div>';
   }
-
-  content.innerHTML = html;
+  return html;
 }
 
-function escHtml(s) {
-  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-}
-
-/* ── Skills layout ───────────────────────────────────────────────── */
-async function loadSkills() {
-  const resp = await fetch('/api/dashboard/skills-summary');
-  const data = await resp.json();
-  renderSkills(data);
+/* ── Skills widget ───────────────────────────────────────────────── */
+async function loadSkillsWidget(idx, section, loadEl, contentEl) {
+  const data = await safeFetch('/api/dashboard/skills-summary');
+  loadEl.style.display = 'none';
+  contentEl.style.display = 'block';
+  contentEl.innerHTML = renderSkills(data);
 }
 
 function renderSkills(data) {
-  const content = document.getElementById('avail-content');
-  document.getElementById('avail-loading').style.display = 'none';
-  content.style.display = 'block';
-
   const total = data.total_crew || 0;
   const cats  = data.categories || [];
 
   if (!total) {
-    content.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-dim)">No technicians configured. Add crew members in Settings → Technicians.</div>';
-    return;
+    return '<div style="padding:40px;text-align:center;color:var(--text-dim)">No technicians configured. Add crew members in Settings → Technicians.</div>';
   }
 
   let html = `<div class="form-section">
@@ -502,7 +544,6 @@ function renderSkills(data) {
     }
   }
 
-  // Summary: positions with zero coverage
   const zeroCoverage = cats.flatMap(c => c.positions).filter(p => p.qualified === 0);
   if (zeroCoverage.length) {
     html += `<div style="margin-top:16px;padding:10px 14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.25);border-radius:var(--radius);font-size:12px">
@@ -512,27 +553,100 @@ function renderSkills(data) {
   }
 
   html += '</div></div>';
-  content.innerHTML = html;
+  return html;
+}
+
+/* ── Add / Remove widgets ────────────────────────────────────────── */
+let _currentWidgets = WIDGETS.slice();
+
+function openAddWidget() {
+  document.getElementById('add-widget-modal').style.display = 'flex';
+}
+function closeAddWidget() {
+  document.getElementById('add-widget-modal').style.display = 'none';
+}
+
+async function confirmAddWidget() {
+  const wtype = document.getElementById('add-widget-type').value;
+  _currentWidgets.push({ type: wtype });
+  await saveWidgets();
+  const idx = _currentWidgets.length - 1;
+  const container = document.getElementById('widgets-container');
+  const el = buildWidgetEl(idx, wtype);
+  container.appendChild(el);
+  loadWidget(idx);
+  closeAddWidget();
+}
+
+async function removeWidget(idx) {
+  if (_currentWidgets.length <= 1) {
+    alert('A dashboard must have at least one widget.');
+    return;
+  }
+  if (!confirm('Remove this widget?')) return;
+  _currentWidgets.splice(idx, 1);
+  await saveWidgets();
+  // Re-render all widgets
+  renderWidgets();
+}
+
+async function saveWidgets() {
+  await fetch(`/dashboards/${DASH_ID}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name:      document.title.split('—')[0].trim(),
+      layout:    _currentWidgets[0]?.type || 'combined',
+      is_public: {{ 'true' if dash.is_public else 'false' }},
+      config:    { widgets: _currentWidgets },
+    }),
+  });
+}
+
+function renderWidgets() {
+  const container = document.getElementById('widgets-container');
+  container.innerHTML = '';
+  _currentWidgets.forEach((w, i) => {
+    container.appendChild(buildWidgetEl(i, w.type));
+    loadWidget(i);
+  });
+}
+
+function escHtml(s) {
+  return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
 /* ── Init ────────────────────────────────────────────────────────── */
 window.addEventListener('DOMContentLoaded', () => {
-  const fromEl = document.getElementById('range-from');
-  const toEl   = document.getElementById('range-to');
-  if (fromEl && toEl) {
-    const now = new Date();
-    if (LAYOUT === 'calendar') {
-      // Default to current month
-      const y = now.getFullYear(), m = now.getMonth();
-      fromEl.value = new Date(y, m, 1).toISOString().slice(0,10);
-      toEl.value   = new Date(y, m + 1, 0).toISOString().slice(0,10);
-    } else {
-      fromEl.value = now.toISOString().slice(0,10);
-      const end = new Date(); end.setDate(end.getDate() + 90);
-      toEl.value = end.toISOString().slice(0,10);
-    }
-  }
-  loadData();
+  renderWidgets();
 });
 </script>
+
+{% if not public and dash.user_id == user.id %}
+<!-- Add Widget Modal -->
+<div id="add-widget-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeAddWidget()">
+  <div class="modal-box" style="width:380px">
+    <div class="modal-header">
+      <span class="modal-title">Add Widget</span>
+      <button class="modal-close" onclick="closeAddWidget()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label class="field-label">WIDGET TYPE</label>
+        <select id="add-widget-type" class="field-input">
+          <option value="combined">All Assets — combined availability</option>
+          <option value="by_category">Assets by Category</option>
+          <option value="by_show">Assets by Show</option>
+          <option value="calendar">Shows Calendar</option>
+          <option value="skills">Skill Coverage</option>
+        </select>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost" onclick="closeAddWidget()">Cancel</button>
+      <button class="btn btn-primary" onclick="confirmAddWidget()">Add</button>
+    </div>
+  </div>
+</div>
+{% endif %}
 {% endblock %}

@@ -10,6 +10,7 @@
   margin-top: 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  isolation: isolate; /* contain sticky z-index stacking inside the scroll area */
 }
 
 .crew-grid {
@@ -104,6 +105,7 @@
   text-align: center;
   vertical-align: middle;
   height: 38px;
+  background: var(--bg-card); /* explicit so cells don't bleed through sticky name col */
 }
 .crew-grid tbody tr:nth-child(even) td {
   background: var(--bg-surface);
@@ -266,14 +268,16 @@
   </thead>
   <tbody id="crew-tbody">
     {% for m in members %}
-    <tr data-mid="{{ m.id }}" data-name="{{ m.name|lower }}">
+    <tr data-mid="{{ m.id }}" data-name="{{ m.name|lower }}" data-quals="{{ m.qualifications|tojson }}">
       <td class="name-col crew-name-cell">
         <div class="crew-actions">
           <span>{{ m.name }}</span>
+          {% if can_edit %}
           <button class="btn btn-xs btn-ghost"
                   data-name="{{ m.name }}" data-quals="{{ m.qualifications|tojson }}"
                   onclick="openEditModal(this)"
                   title="Edit qualifications" style="flex-shrink:0">✎</button>
+          {% endif %}
         </div>
       </td>
       {% for cat in categories %}
@@ -302,6 +306,7 @@
 
 {% endif %}
 
+{% if can_edit %}
 {# ── Edit Qualifications Modal ────────────────────────────────── #}
 <div id="crew-edit-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeEditModal()">
   <div class="modal-card" style="max-width:680px;max-height:85vh;overflow-y:auto">
@@ -316,6 +321,7 @@
     </div>
   </div>
 </div>
+{% endif %}
 
 <script>
 const _categories = {{ categories|tojson }};
@@ -379,14 +385,13 @@ function openEditModal(btn) {
             if (dot) dot.classList.toggle('qualified', wasChecked);
             showSaveToast('✗ ' + (d.error || 'Save failed'), 'error');
           } else {
-            // Keep button's data-quals in sync
+            // Sync row-level data-quals so filter/sort works
+            let rqs = JSON.parse(tr.dataset.quals || '[]');
+            if (d.has) { if (!rqs.includes(pos.id)) rqs.push(pos.id); }
+            else { rqs = rqs.filter(q => q !== pos.id); }
+            tr.dataset.quals = JSON.stringify(rqs);
             const editBtn = tr.querySelector('button[data-quals]');
-            if (editBtn) {
-              let qs = JSON.parse(editBtn.dataset.quals || '[]');
-              if (d.has) { if (!qs.includes(pos.id)) qs.push(pos.id); }
-              else { qs = qs.filter(q => q !== pos.id); }
-              editBtn.dataset.quals = JSON.stringify(qs);
-            }
+            if (editBtn) editBtn.dataset.quals = JSON.stringify(rqs);
             showSaveToast('✓ Saved');
           }
         } catch(e) {
@@ -431,7 +436,7 @@ function filterBySkill(posId) {
       visible++;
       return;
     }
-    const quals = JSON.parse(tr.querySelector('button[data-quals]')?.dataset.quals || '[]');
+    const quals = JSON.parse(tr.dataset.quals || '[]');
     const show = quals.includes(parseInt(posId));
     tr.style.display = show ? '' : 'none';
     if (show) visible++;
@@ -457,8 +462,8 @@ function sortCrewByCategory() {
   const tbody = document.getElementById('crew-tbody');
   const rows = Array.from(tbody.querySelectorAll('tr'));
   rows.sort((a, b) => {
-    const aQuals = JSON.parse(a.querySelector('button[data-quals]')?.dataset.quals || '[]');
-    const bQuals = JSON.parse(b.querySelector('button[data-quals]')?.dataset.quals || '[]');
+    const aQuals = JSON.parse(a.dataset.quals || '[]');
+    const bQuals = JSON.parse(b.dataset.quals || '[]');
     // Find primary category: category with most qualifications
     const primaryCat = quals => {
       const counts = {};

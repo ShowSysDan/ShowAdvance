@@ -26,7 +26,15 @@
       </div>
     </div>
     <div style="padding:12px 16px">
-      <div style="font-size:11px;color:var(--text-dim)">Layout: {{ d.layout }}</div>
+      {% set wlist = d.config.get('widgets', []) %}
+      <div style="font-size:11px;color:var(--text-dim)">
+        {% if wlist %}
+          {{ wlist|length }} widget{{ 's' if wlist|length != 1 else '' }}:
+          {{ wlist | map(attribute='type') | join(', ') }}
+        {% else %}
+          Layout: {{ d.layout }}
+        {% endif %}
+      </div>
       {% if d.is_public and d.public_slug %}
       <div style="font-size:11px;color:var(--text-dim);margin-top:4px">
         Public URL: <span class="mono" style="font-size:10px">/d/{{ d.public_slug }}</span>
@@ -93,7 +101,7 @@ async function createDash() {
   if (!name) { document.getElementById('new-dash-msg').style.display='block'; document.getElementById('new-dash-msg').textContent='Name required.'; return; }
   const resp = await fetch('/dashboards/new', {
     method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ name, layout, is_public: pub })
+    body: JSON.stringify({ name, layout, is_public: pub, config: { widgets: [{ type: layout }] } })
   });
   if (resp.ok) { const d = await resp.json(); window.location = '/dashboards/' + d.id; }
   else { const e = await resp.json(); alert(e.error || 'Error creating dashboard'); }
