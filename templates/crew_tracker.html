@@ -43,9 +43,21 @@
   font-weight: 500;
   background: var(--bg-card);
 }
-.crew-grid thead .name-col {
-  background: var(--bg-surface);
+/* Corner cells: sticky in BOTH directions within their own row,
+   so they never compete across rows for z-index. */
+.crew-grid thead tr:first-child th.name-col {
+  position: sticky;
+  top: 0;
+  left: 0;
   z-index: 30;
+  background: var(--bg-surface);
+}
+.crew-grid thead tr:nth-child(2) th.name-col {
+  position: sticky;
+  top: 32px;
+  left: 0;
+  z-index: 30;
+  background: var(--bg-surface);
 }
 .crew-grid tbody tr:nth-child(even) td.name-col {
   background: var(--bg-surface);
@@ -239,9 +251,9 @@
 <div class="crew-tracker-wrap">
 <table class="crew-grid" id="crew-grid">
   <thead>
-    {# Row 1: category spans #}
+    {# Row 1: category spans — corner cell is its own sticky-top cell in this row #}
     <tr>
-      <th class="name-col cat-header" rowspan="2"
+      <th class="name-col cat-header"
           style="text-align:left;vertical-align:middle;padding:0 12px;font-size:10px;color:var(--text-muted);border-left:none;">
         TECHNICIAN
       </th>
@@ -254,8 +266,9 @@
       <th class="cat-header" colspan="{{ uncategorized_positions|length }}">Other</th>
       {% endif %}
     </tr>
-    {# Row 2: position names #}
+    {# Row 2: position names — corner cell is its own sticky-top cell in this row #}
     <tr>
+      <th class="name-col" style="border-left:none;border-bottom:1px solid var(--border);"></th>
       {% for cat in categories %}
         {% for pos in cat.positions %}
         <th class="pos-header" data-pid="{{ pos.id }}"><span title="{{ pos.name }}">{{ pos.name }}</span></th>

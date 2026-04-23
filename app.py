@@ -7303,8 +7303,8 @@ def assets_availability_bulk():
     elif accessible_ids is not None and len(accessible_ids) == 0:
         db.close()
         return jsonify({'by_type': by_type, 'by_show': []})
-    if date_from: where.append("COALESCE(s.show_date,'9999') >= ?"); params.append(date_from)
-    if date_to:   where.append("COALESCE(s.show_date,'0000') <= ?"); params.append(date_to)
+    if date_from: where.append("COALESCE(s.show_date,'9999-12-31') >= ?"); params.append(date_from)
+    if date_to:   where.append("COALESCE(s.show_date,'0001-01-01') <= ?"); params.append(date_to)
     where_sql = ('WHERE ' + ' AND '.join(where)) if where else ''
     shows_raw = db.execute(f"""
         SELECT s.id, s.name, s.show_date FROM shows s {where_sql}
@@ -9130,10 +9130,10 @@ def asset_reports_data():
         params.append(int(asset_category_id))
 
     if date_from:
-        where.append("COALESCE(s.show_date, '9999') >= ?")
+        where.append("COALESCE(s.show_date, '9999-12-31') >= ?")
         params.append(date_from)
     if date_to:
-        where.append("COALESCE(s.show_date, '0000') <= ?")
+        where.append("COALESCE(s.show_date, '0001-01-01') <= ?")
         params.append(date_to)
 
     where_sql = ('WHERE ' + ' AND '.join(where)) if where else ''
