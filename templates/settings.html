@@ -2074,17 +2074,19 @@ async function loadFileManager() {
     const data = await resp.json();
     if (infoEl) infoEl.textContent = `Total: ${_fmtBytes(data.total_bytes)} across ${data.files.length} files`;
     if (!data.files.length) {
-      el.innerHTML = '<p class="text-dim" style="padding:16px;font-size:12px">No attachments found.</p>';
+      el.innerHTML = '<p class="text-dim" style="padding:16px;font-size:12px">No files found.</p>';
       return;
     }
-    el.innerHTML = `<table class="data-table"><thead><tr><th>SHOW</th><th>FILE</th><th>SIZE</th><th>UPLOADED BY</th><th>DATE</th><th></th></tr></thead><tbody>` +
+    const typeLabel = { attachment: 'Attachment', export: 'PDF Export', rental: 'Rental PDF' };
+    el.innerHTML = `<table class="data-table"><thead><tr><th>SHOW</th><th>TYPE</th><th>FILE</th><th>SIZE</th><th>UPLOADED BY</th><th>DATE</th><th></th></tr></thead><tbody>` +
       data.files.map(f => `<tr>
-        <td style="font-size:11px"><a href="/shows/${f.show_id}" style="color:var(--accent)">${f.show_name}</a></td>
-        <td style="font-size:11px"><a href="/shows/${f.show_id}/attachments/${f.id}/download">${f.filename}</a></td>
+        <td style="font-size:11px">${f.show_id ? `<a href="/shows/${f.show_id}" style="color:var(--accent)">${f.show_name}</a>` : `<span class="text-dim">${f.show_name}</span>`}</td>
+        <td style="font-size:11px" class="text-dim">${typeLabel[f.file_type] || f.file_type}</td>
+        <td style="font-size:11px">${f.download_url ? `<a href="${f.download_url}">${f.filename}</a>` : f.filename}</td>
         <td style="font-size:11px" class="text-dim">${_fmtBytes(f.file_size)}</td>
         <td style="font-size:11px">${f.uploader}</td>
         <td style="font-size:11px" class="text-dim">${fmtDate(f.created_at)}</td>
-        <td><button class="btn btn-xs btn-danger-ghost" onclick="adminDeleteFile(${f.show_id},${f.id},this)">×</button></td>
+        <td>${f.delete_url ? `<button class="btn btn-xs btn-danger-ghost" onclick="adminDeleteFile('${f.delete_url}',this)">×</button>` : ''}</td>
       </tr>`).join('') +
       '</tbody></table>';
   } catch(e) {
@@ -2092,9 +2094,9 @@ async function loadFileManager() {
   }
 }
 
-async function adminDeleteFile(showId, fileId, btn) {
+async function adminDeleteFile(deleteUrl, btn) {
   if (!confirm('Delete this file?')) return;
-  const resp = await fetch(`/shows/${showId}/attachments/${fileId}/delete`, {method:'POST'});
+  const resp = await fetch(deleteUrl, {method:'POST'});
   const d = await resp.json();
   if (d.success) btn.closest('tr').remove();
   else alert(d.error || 'Delete failed.');
