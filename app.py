@@ -4760,30 +4760,81 @@ def api_god_mode():
 @admin_required
 def api_file_manager():
     db = get_db()
-    rows = db.execute("""
+    files = []
+
+    for r in db.execute("""
         SELECT sa.id, sa.filename, sa.mime_type, sa.file_size, sa.created_at,
-               s.id as show_id, s.name as show_name,
+               s.id as show_id, COALESCE(s.name, 'Deleted Show') as show_name,
                u.display_name, u.username
         FROM show_attachments sa
-        JOIN shows s ON sa.show_id = s.id
+        LEFT JOIN shows s ON sa.show_id = s.id
         LEFT JOIN users u ON sa.uploaded_by = u.id
-        ORDER BY sa.created_at DESC
-    """).fetchall()
-    total_bytes = db.execute('SELECT SUM(file_size) FROM show_attachments').fetchone()[0] or 0
+    """).fetchall():
+        files.append({
+            'id':           r['id'],
+            'file_type':    'attachment',
+            'show_id':      r['show_id'],
+            'show_name':    r['show_name'],
+            'filename':     r['filename'],
+            'mime_type':    r['mime_type'],
+            'file_size':    r['file_size'] or 0,
+            'created_at':   r['created_at'],
+            'uploader':     r['display_name'] or r['username'] or 'Unknown',
+            'download_url': f"/shows/{r['show_id']}/attachments/{r['id']}/download" if r['show_id'] else None,
+            'delete_url':   f"/shows/{r['show_id']}/attachments/{r['id']}/delete" if r['show_id'] else None,
+        })
+
+    for r in db.execute("""
+        SELECT el.id, el.export_type, el.version, el.exported_at, el.s3_key,
+               COALESCE(NULLIF(el.filename,''), el.export_type || '_v' || CAST(el.version AS TEXT) || '.pdf') as filename,
+               CASE WHEN el.pdf_data IS NOT NULL THEN LENGTH(el.pdf_data) ELSE 0 END as file_size,
+               s.id as show_id, COALESCE(s.name, 'Deleted Show') as show_name,
+               u.display_name, u.username
+        FROM export_log el
+        LEFT JOIN shows s ON el.show_id = s.id
+        LEFT JOIN users u ON el.exported_by = u.id
+        WHERE el.pdf_data IS NOT NULL OR el.s3_key IS NOT NULL
+    """).fetchall():
+        files.append({
+            'id':           r['id'],
+            'file_type':    'export',
+            'show_id':      r['show_id'],
+            'show_name':    r['show_name'],
+            'filename':     r['filename'],
+            'mime_type':    'application/pdf',
+            'file_size':    r['file_size'] or 0,
+            'created_at':   r['exported_at'],
+            'uploader':     r['display_name'] or r['username'] or 'Unknown',
+            'download_url': f"/shows/{r['show_id']}/export/history/{r['id']}/download" if r['show_id'] else None,
+            'delete_url':   None,
+        })
+
+    for r in db.execute("""
+        SELECT er.id, er.pdf_filename, er.s3_key, er.created_at,
+               CASE WHEN er.pdf_data IS NOT NULL THEN LENGTH(er.pdf_data) ELSE 0 END as file_size,
+               s.id as show_id, COALESCE(s.name, 'Deleted Show') as show_name
+        FROM show_external_rentals er
+        LEFT JOIN shows s ON er.show_id = s.id
+        WHERE er.pdf_data IS NOT NULL OR er.s3_key IS NOT NULL
+    """).fetchall():
+        files.append({
+            'id':           r['id'],
+            'file_type':    'rental',
+            'show_id':      r['show_id'],
+            'show_name':    r['show_name'],
+            'filename':     r['pdf_filename'] or 'rental.pdf',
+            'mime_type':    'application/pdf',
+            'file_size':    r['file_size'] or 0,
+            'created_at':   r['created_at'],
+            'uploader':     '—',
+            'download_url': f"/shows/{r['show_id']}/external-rentals/{r['id']}/pdf" if r['show_id'] else None,
+            'delete_url':   None,
+        })
+
+    files.sort(key=lambda f: f['created_at'] or '', reverse=True)
+    total_bytes = sum(f['file_size'] for f in files)
     db.close()
-    return jsonify({
-        'files': [{
-            'id':         r['id'],
-            'show_id':    r['show_id'],
-            'show_name':  r['show_name'],
-            'filename':   r['filename'],
-            'mime_type':  r['mime_type'],
-            'file_size':  r['file_size'],
-            'created_at': r['created_at'],
-            'uploader':   r['display_name'] or r['username'] or 'Unknown',
-        } for r in rows],
-        'total_bytes': total_bytes,
-    })
+    return jsonify({'files': files, 'total_bytes': total_bytes})
 
 
 # ─── Schedule Templates ───────────────────────────────────────────────────────
