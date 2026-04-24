@@ -485,6 +485,8 @@ html[data-theme="light"] select.field-input {
 .data-table tr:last-child td { border-bottom: none; }
 .data-table tr:hover td { background: var(--bg-hover); }
 .table-toolbar { display: flex; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.contacts-table-wrap { overflow-y: auto; max-height: 560px; }
+.contacts-table-wrap .data-table th { position: sticky; top: 0; background: var(--bg-card); z-index: 1; }
 .action-btns { display: flex; gap: 4px; }
 
 .mono { font-family: var(--font-mono); font-size: 12px; }
