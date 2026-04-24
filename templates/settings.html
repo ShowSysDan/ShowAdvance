@@ -43,39 +43,10 @@
     <div class="form-section-header">
       <span class="section-icon">◈</span> CONTACTS DIRECTORY
       <span class="section-count ml-auto text-dim">{{ contacts|length }} contacts</span>
+      {% if user.role == 'admin' or is_content_admin %}
+      <button class="btn btn-sm btn-primary" onclick="document.getElementById('add-contact-modal').classList.remove('hidden')" style="margin-left:12px">+ Add Contact</button>
+      {% endif %}
     </div>
-
-    {% if user.role == 'admin' or is_content_admin %}
-    <div class="form-section-body" style="border-bottom:1px solid var(--border);">
-      <h3 class="sub-section-label">ADD CONTACT</h3>
-      <form method="post" action="{{ url_for('add_contact') }}" class="form-row cols-5 align-end">
-        <div class="field-group">
-          <label class="field-label">NAME *</label>
-          <input type="text" name="name" class="field-input" required placeholder="Full Name">
-        </div>
-        <div class="field-group">
-          <label class="field-label">TITLE</label>
-          <input type="text" name="title" class="field-input" placeholder="Job Title">
-        </div>
-        <div class="field-group">
-          <label class="field-label">DEPARTMENT</label>
-          <select name="department" class="field-input">
-            <option value="">— None —</option>
-            {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
-          </select>
-        </div>
-        <div class="field-group">
-          <label class="field-label">PHONE</label>
-          <input type="text" name="phone" class="field-input" placeholder="407-000-0000">
-        </div>
-        <div class="field-group">
-          <label class="field-label">EMAIL</label>
-          <input type="email" name="email" class="field-input" placeholder="name@dpc.org">
-        </div>
-        <button type="submit" class="btn btn-primary">Add</button>
-      </form>
-    </div>
-    {% endif %}
 
     <div class="form-section-body no-pad">
       <div class="table-toolbar">
@@ -1395,6 +1366,33 @@
 {# ── MODALS ────────────────────────────────────────────────────────────────── #}
 
 <!-- Edit Contact Modal -->
+{% if user.role == 'admin' or is_content_admin %}
+<div id="add-contact-modal" class="modal-overlay hidden" onclick="if(event.target===this)this.classList.add('hidden')">
+  <div class="modal-card">
+    <div class="modal-header">Add Contact <button onclick="document.getElementById('add-contact-modal').classList.add('hidden')" class="modal-close">×</button></div>
+    <form method="post" action="{{ url_for('add_contact') }}">
+    <div class="modal-body">
+      <div class="field-group"><label class="field-label">NAME *</label><input type="text" name="name" class="field-input" required placeholder="Full Name"></div>
+      <div class="field-group"><label class="field-label">TITLE</label><input type="text" name="title" class="field-input" placeholder="Job Title"></div>
+      <div class="field-group">
+        <label class="field-label">DEPARTMENT</label>
+        <select name="department" class="field-input">
+          <option value="">— None —</option>
+          {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
+        </select>
+      </div>
+      <div class="field-group"><label class="field-label">PHONE</label><input type="text" name="phone" class="field-input" placeholder="407-000-0000"></div>
+      <div class="field-group"><label class="field-label">EMAIL</label><input type="email" name="email" class="field-input" placeholder="name@dpc.org"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="document.getElementById('add-contact-modal').classList.add('hidden')">Cancel</button>
+      <button type="submit" class="btn btn-primary">Add Contact</button>
+    </div>
+    </form>
+  </div>
+</div>
+{% endif %}
+
 <div id="edit-modal" class="modal-overlay hidden" onclick="if(event.target===this)closeEditModal()">
   <div class="modal-card">
     <div class="modal-header">Edit Contact <button onclick="closeEditModal()" class="modal-close">×</button></div>
