@@ -85,13 +85,14 @@
           {% for d in departments %}<option value="{{ d }}">{{ d }}</option>{% endfor %}
         </select>
       </div>
+      <div class="contacts-table-wrap">
       <table class="data-table" id="contacts-table">
         <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="System notification emails">SYSTEM</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
-            <td class="contact-name" data-field="name">
-              <div style="font-weight:500">{{ c.name }}</div>
+            <td class="contact-name">
+              <div style="font-weight:500" data-field="name">{{ c.name }}</div>
               {% if c.title %}<div class="text-dim" style="font-size:11px" data-field="title">{{ c.title }}</div>{% endif %}
               {% if c.email %}<div style="font-size:11px;color:var(--accent)" data-field="email"><a href="mailto:{{ c.email }}" style="color:var(--accent)">{{ c.email }}</a></div>{% endif %}
             </td>
@@ -127,6 +128,7 @@
           {% endfor %}
         </tbody>
       </table>
+      </div>
     </div>
   </div>
 </div>
@@ -1770,10 +1772,10 @@ function filterContacts(val) {
 function editContact(btn, id) {
   const row = btn.closest('tr');
   document.getElementById('edit-id').value    = id;
-  document.getElementById('edit-name').value  = row.querySelector('[data-field=name]').textContent.trim();
-  document.getElementById('edit-title').value = row.querySelector('[data-field=title]').textContent.replace('—','').trim();
-  document.getElementById('edit-phone').value = row.querySelector('[data-field=phone]').textContent.replace('—','').trim();
-  document.getElementById('edit-email').value = row.querySelector('[data-field=email]').textContent.replace('—','').trim();
+  document.getElementById('edit-name').value  = row.querySelector('[data-field=name]')?.textContent.trim() || '';
+  document.getElementById('edit-title').value = row.querySelector('[data-field=title]')?.textContent.replace('—','').trim() || '';
+  document.getElementById('edit-phone').value = row.querySelector('[data-field=phone]')?.textContent.replace('—','').trim() || '';
+  document.getElementById('edit-email').value = row.querySelector('[data-field=email]')?.textContent.replace('—','').trim() || '';
   document.getElementById('edit-dept').value  = row.dataset.dept || '';
   const recipientChk = document.getElementById('edit-recipient');
   if (recipientChk) recipientChk.checked = row.dataset.recipient === '1';
