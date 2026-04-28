@@ -2418,9 +2418,19 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const perfs = Array.isArray(SCHED_PERFORMANCES) ? SCHED_PERFORMANCES : [];
     if (!liD || !loD || !perfs.length) { banner.style.display = 'none'; return; }
 
+    /* Accept '14:00', '1400', '7:30', '730' and similar — return canonical 'HH:MM' or '' */
+    const _normTime = (raw) => {
+      const s = String(raw || '').trim();
+      if (!s) return '';
+      let m = s.match(/^(\d{1,2}):(\d{2})$/);
+      if (m) return String(m[1]).padStart(2, '0') + ':' + m[2];
+      m = s.match(/^(\d{1,2})(\d{2})$/);
+      if (m) return String(m[1]).padStart(2, '0') + ':' + m[2];
+      return '';
+    };
     const _toDT = (d, t, fallbackT) => {
-      const tt = (t && /^\d{1,2}:\d{2}$/.test(t)) ? t : fallbackT;
-      const dt = new Date(`${d}T${tt.padStart(5,'0')}:00`);
+      const tt = _normTime(t) || fallbackT;
+      const dt = new Date(`${d}T${tt}:00`);
       return isNaN(dt) ? null : dt;
     };
     const start = _toDT(liD, liT, '00:00');
@@ -2431,7 +2441,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     perfs.forEach(p => {
       const pd = (p.perf_date || '').toString().slice(0, 10);
       if (!pd) return;
-      const pt = (p.perf_time || '').toString().slice(0, 5);
+      const pt = _normTime(p.perf_time);
       const dt = _toDT(pd, pt, '00:00');
       if (!dt) return;
       if (dt < start || dt > end) {
