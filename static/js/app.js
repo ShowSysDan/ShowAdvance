@@ -1143,13 +1143,13 @@ function openSectionModal(sid) {
   const modal = document.getElementById('section-modal');
   if (!modal) return;
   if (sid) {
-    const row = document.querySelector(`.section-row[data-id="${sid}"]`);
-    if (row) {
-      modal.querySelector('[name="label"]').value = row.dataset.label || '';
-      modal.querySelector('[name="icon"]').value  = row.dataset.icon  || '◈';
+    const btn = document.querySelector(`.form-section[data-section-id="${sid}"] .form-section-header button[data-id="${sid}"]`);
+    if (btn) {
+      modal.querySelector('[name="label"]').value = btn.dataset.label || '';
+      modal.querySelector('[name="icon"]').value  = btn.dataset.icon  || '◈';
       const collEl = modal.querySelector('[name="collapsible"]');
-      if (collEl) collEl.checked = (row.dataset.collapsible === '1');
-      const defOpen = row.dataset.defaultOpen !== '0';
+      if (collEl) collEl.checked = (btn.dataset.collapsible === '1');
+      const defOpen = btn.dataset.defaultOpen !== '0';
       modal.querySelectorAll('[name="default_open"]').forEach(r => {
         r.checked = (r.value === (defOpen ? '1' : '0'));
       });
