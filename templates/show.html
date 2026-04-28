@@ -219,6 +219,7 @@
 {#                          ADVANCE SHEET TAB                                   #}
 {# ════════════════════════════════════════════════════════════════════════════ #}
 <div id="tab-advance" class="tab-pane {% if tab == 'advance' %}active{% endif %}">
+<aside id="advance-side-nav" class="form-side-nav" aria-label="Advance form sections"></aside>
 <form id="advance-form" autocomplete="off">
 
   {# ── Show Dates & Times ───────────────────────────────────────────────────── #}
@@ -289,7 +290,7 @@
   </div>
 
   {# ── Load-In / Load-Out ──────────────────────────────────────────────────── #}
-  <div class="form-section">
+  <div class="form-section" id="loadinout-section">
     <div class="form-section-header">
       <span class="section-icon">◈</span> LOAD-IN / LOAD-OUT
     </div>
@@ -2674,6 +2675,83 @@ async function emailPdf(showId, pdfType, btn) {
   }).catch(() => {}).finally(() => setTimeout(pollAiSlots, 5000));
 })();
 {% endif %}
+
+/* ── Floating section nav for the Advance form ─────────────────── */
+(function initAdvanceSideNav() {
+  const nav = document.getElementById('advance-side-nav');
+  const advancePane = document.getElementById('tab-advance');
+  if (!nav || !advancePane) return;
+
+  const sections = Array.from(advancePane.querySelectorAll(':scope > form .form-section'));
+  if (!sections.length) return;
+
+  const titleEl = document.createElement('div');
+  titleEl.className = 'form-side-nav-title';
+  titleEl.textContent = 'Sections';
+  nav.appendChild(titleEl);
+
+  const items = [];
+  sections.forEach((sec, i) => {
+    if (!sec.id) sec.id = 'adv-sec-' + (sec.dataset.key || i);
+    const headerEl = sec.querySelector('.form-section-header');
+    if (!headerEl) return;
+
+    const iconEl = headerEl.querySelector('.section-icon');
+    const iconText = (iconEl && iconEl.textContent.trim()) || '◈';
+    let label = '';
+    headerEl.childNodes.forEach(n => {
+      if (n.nodeType === Node.TEXT_NODE) label += n.textContent;
+    });
+    label = label.trim();
+    if (!label) return;
+
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'form-side-nav-link';
+    btn.dataset.target = sec.id;
+    const iconSpan = document.createElement('span');
+    iconSpan.className = 'nav-icon';
+    iconSpan.textContent = iconText;
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'nav-label';
+    labelSpan.textContent = label;
+    btn.appendChild(iconSpan);
+    btn.appendChild(labelSpan);
+    btn.addEventListener('click', () => {
+      sec.classList.remove('collapsed');
+      const y = sec.getBoundingClientRect().top + window.scrollY - 80;
+      window.scrollTo({ top: y, behavior: 'smooth' });
+      setActive(btn);
+    });
+    nav.appendChild(btn);
+    items.push({ btn, sec });
+  });
+
+  function setActive(activeBtn) {
+    nav.querySelectorAll('.form-side-nav-link').forEach(b => {
+      b.classList.toggle('active', b === activeBtn);
+    });
+  }
+
+  let ticking = false;
+  function updateActiveOnScroll() {
+    if (!advancePane.classList.contains('active')) return;
+    const probe = window.scrollY + 140;
+    let current = items[0];
+    for (const it of items) {
+      if (it.sec.offsetTop <= probe) current = it;
+      else break;
+    }
+    if (current) setActive(current.btn);
+  }
+  window.addEventListener('scroll', () => {
+    if (!ticking) {
+      requestAnimationFrame(() => { updateActiveOnScroll(); ticking = false; });
+      ticking = true;
+    }
+  }, { passive: true });
+  updateActiveOnScroll();
+})();
 
 </script>
 {% endblock %}

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <style>
-  @page { size: letter; margin: 0.6in 0.55in 0.95in; }
+  @page { size: letter; margin: 0.6in 0.55in 1.05in; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; font-size: 8.5pt; color: #1a1a1a; line-height: 1.35; }
 
@@ -38,6 +38,8 @@
 
   /* ── Footer ── */
   .doc-footer { position: fixed; bottom: 0.35in; left: 0.55in; right: 0.55in; font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .doc-footer span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .doc-footer .page-num { flex: 0 0 auto; }
   .doc-footer .page-num::before { content: "Page " counter(page) " of " counter(pages); }
 
   /* ── Checkbox indicator ── */
