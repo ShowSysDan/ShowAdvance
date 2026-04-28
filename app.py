@@ -7388,6 +7388,57 @@ def assets_availability_bulk():
 
 # ─── Asset Approval — helpers ─────────────────────────────────────────────────
 
+def _get_asset_notification_recipients(db, exclude_user_id=None):
+    """Return [(display_name, email)] for users who can manage assets.
+
+    Mirrors the access rules of asset_manager_required: admins, staff,
+    members of an 'admin_group' user group, and users with the
+    is_asset_manager flag. Skips users without an email and the optional
+    exclude_user_id (typically the actor that triggered the event, so they
+    don't receive an email about their own action).
+    """
+    rows = db.execute("""
+        SELECT DISTINCT u.id, u.username, u.display_name, u.email
+        FROM users u
+        LEFT JOIN user_group_members ugm ON ugm.user_id = u.id
+        LEFT JOIN user_groups ug ON ug.id = ugm.group_id
+        WHERE u.email IS NOT NULL AND u.email != ''
+          AND (
+            u.role IN ('admin', 'staff')
+            OR u.is_asset_manager = 1
+            OR ug.group_type = 'admin_group'
+          )
+    """).fetchall()
+    out = []
+    seen = set()
+    for r in rows:
+        if exclude_user_id is not None and r['id'] == exclude_user_id:
+            continue
+        if r['email'] in seen:
+            continue
+        seen.add(r['email'])
+        out.append(((r['display_name'] or r['username']), r['email']))
+    return out
+
+
+def _notify_asset_recipients(db, subject, body_text, exclude_user_id=None):
+    """Send a system notification to all asset-permission holders.
+
+    Failures are swallowed so that the triggering action still succeeds; each
+    recipient send is independent.
+    """
+    try:
+        recipients = _get_asset_notification_recipients(db, exclude_user_id)
+    except Exception as exc:
+        app.logger.error(f'asset notify recipient lookup failed: {exc}')
+        return
+    for _name, _email in recipients:
+        try:
+            _send_simple_email(_email, subject, body_text)
+        except Exception as exc:
+            app.logger.error(f'asset notify send to {_email} failed: {exc}')
+
+
 def _reset_asset_approval(db, show_id, reason):
     """If the show's assets were approved, flip back to unapproved and log it.
 
@@ -7395,7 +7446,7 @@ def _reset_asset_approval(db, show_id, reason):
     update silently re-queues the show for approval.
     """
     row = db.execute(
-        'SELECT assets_approved FROM shows WHERE id=?', (show_id,)
+        'SELECT s.assets_approved, s.name FROM shows s WHERE s.id=?', (show_id,)
     ).fetchone()
     if not row or not row['assets_approved']:
         return
@@ -7406,6 +7457,24 @@ def _reset_asset_approval(db, show_id, reason):
     )
     log_audit(db, 'ASSET_APPROVAL_RESET', 'show', show_id, show_id=show_id,
               detail=f'reason={reason}')
+    show_name = row['name'] or f'Show #{show_id}'
+    actor = session.get('display_name') or session.get('username') or 'Someone'
+    try:
+        approvals_url = url_for('asset_approvals', _external=True)
+    except Exception:
+        approvals_url = ''
+    body = (
+        f'Show "{show_name}" is now waiting for asset approval again.\n\n'
+        f'Trigger: {reason}\n'
+        f'Changed by: {actor}\n\n'
+        + (f'Review pending approvals:\n{approvals_url}\n' if approvals_url else '')
+    )
+    _notify_asset_recipients(
+        db,
+        f'3·2·1→THEATER: Show Waiting for Asset Approval — {show_name}',
+        body,
+        exclude_user_id=session.get('user_id'),
+    )
 
 
 @app.route('/shows/<int:show_id>/assets', methods=['GET'])
@@ -7521,19 +7590,16 @@ def show_asset_add(show_id):
             _trow = db.execute('SELECT name FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
             _type_name = _trow['name'] if _trow else f'Type #{asset_type_id}'
             _show_name = show['name'] if show else f'Show #{show_id}'
-            _admin_emails = [r['email'] for r in db.execute(
-                "SELECT email FROM users WHERE role='admin' AND email != '' AND email IS NOT NULL"
-            ).fetchall()]
-            for _ae in _admin_emails:
-                _send_simple_email(
-                    _ae,
-                    f'3\u00b72\u00b71\u2192THEATER: Asset Over-Allocated \u2014 {_type_name}',
-                    f'Asset "{_type_name}" is now over-allocated for show "{_show_name}".\n\n'
-                    f'Current availability: {_avail["available"]} (negative = over-allocated)\n'
-                    f'Total units: {_avail.get("total_items","?")}, In maintenance: {_avail.get("in_maintenance",0)}, '
-                    f'Reserved spares: {_avail.get("reserve_count",0)}\n\n'
-                    f'Review the show\'s assets tab for details.',
-                )
+            _notify_asset_recipients(
+                db,
+                f'3\u00b72\u00b71\u2192THEATER: Asset Over-Allocated \u2014 {_type_name}',
+                f'Asset "{_type_name}" is now over-allocated for show "{_show_name}".\n\n'
+                f'Current availability: {_avail["available"]} (negative = over-allocated)\n'
+                f'Total units: {_avail.get("total_items","?")}, In maintenance: {_avail.get("in_maintenance",0)}, '
+                f'Reserved spares: {_avail.get("reserve_count",0)}\n\n'
+                f'Review the show\'s assets tab for details.',
+                exclude_user_id=session.get('user_id'),
+            )
     except Exception:
         pass
     db.close()
@@ -7788,7 +7854,7 @@ def asset_approvals():
 @asset_manager_required
 def show_assets_approve(show_id):
     db = get_db()
-    row = db.execute('SELECT assets_approved FROM shows WHERE id=?', (show_id,)).fetchone()
+    row = db.execute('SELECT assets_approved, name FROM shows WHERE id=?', (show_id,)).fetchone()
     if not row:
         db.close()
         return jsonify({'error': 'Show not found'}), 404
@@ -7803,6 +7869,23 @@ def show_assets_approve(show_id):
     approver_name = (me['display_name'] if me else '') or (me['username'] if me else '')
     approved_at = db.execute('SELECT assets_approved_at FROM shows WHERE id=?',
                              (show_id,)).fetchone()['assets_approved_at']
+    show_name = row['name'] or f'Show #{show_id}'
+    try:
+        approvals_url = url_for('asset_approvals', _external=True)
+    except Exception:
+        approvals_url = ''
+    body = (
+        f'Show "{show_name}" has been marked as asset-approved.\n\n'
+        f'Approved by: {approver_name or "(unknown)"}\n'
+        f'Approved at: {approved_at}\n\n'
+        + (f'View approvals:\n{approvals_url}\n' if approvals_url else '')
+    )
+    _notify_asset_recipients(
+        db,
+        f'3·2·1→THEATER: Show Assets Approved — {show_name}',
+        body,
+        exclude_user_id=session.get('user_id'),
+    )
     db.close()
     syslog_logger.info(f"ASSET_APPROVAL_GRANTED show_id={show_id} by={session.get('username')}")
     return jsonify({'success': True,
