@@ -1328,6 +1328,10 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       <div class="ml-auto" style="display:flex;gap:6px">
         <a href="/shows/{{ show.id }}/post-show-invoice.pdf" target="_blank" class="btn btn-sm btn-ghost" title="Combined assets + labor invoice">Combined Invoice PDF</a>
         <a href="{{ url_for('export_postnotes', show_id=show.id) }}" class="btn btn-sm btn-ghost" target="_blank">Export PDF</a>
+        <button type="button" class="btn btn-sm btn-ghost" title="Generate PDF and email to report recipients"
+                onclick="emailPdf({{ show.id }}, 'postnotes', this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" style="margin-right:4px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email PDF
+        </button>
       </div>
     </div>
     <div class="form-section-body">
@@ -1341,6 +1345,19 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
           <span>{{ show.show_date or '—' }}</span> · <span>{{ show.show_time | hhmm or '—' }}</span>
         {% endif %}
         · <span>{{ show.venue or '—' }}</span>
+      </div>
+
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">CAST COUNT</label>
+          <input type="number" min="0" step="1" class="field-input notes-field" data-key="cast_count"
+                 value="{{ note('cast_count') }}" placeholder="e.g. 12" {% if restricted %}disabled{% endif %}>
+        </div>
+        <div class="field-group">
+          <label class="field-label">CREW COUNT</label>
+          <input type="number" min="0" step="1" class="field-input notes-field" data-key="crew_count"
+                 value="{{ note('crew_count') }}" placeholder="e.g. 8" {% if restricted %}disabled{% endif %}>
+        </div>
       </div>
 
       <div class="form-row cols-2">
@@ -2646,7 +2663,12 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   }
 
 async function emailPdf(showId, pdfType, btn) {
-  const label = pdfType === 'advance' ? 'Advance Sheet' : 'Production Schedule';
+  const labels = {
+    advance: 'Advance Sheet',
+    schedule: 'Production Schedule',
+    postnotes: 'Post-Show Report',
+  };
+  const label = labels[pdfType] || 'PDF';
   if (!confirm(`Generate and email the ${label} PDF to all report recipients?`)) return;
   const orig = btn.innerHTML;
   btn.disabled = true;

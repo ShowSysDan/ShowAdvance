@@ -72,6 +72,17 @@
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
       <div class="field-row">
+        <div class="field-lbl">Cast Count</div>
+        <div class="field-val">{{ n('cast_count') or '—' }}</div>
+      </div>
+      <div class="field-row">
+        <div class="field-lbl">Crew Count</div>
+        <div class="field-val">{{ n('crew_count') or '—' }}</div>
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px">
+      <div class="field-row">
         <div class="field-lbl">Production Manager</div>
         <div class="field-val">{{ a('production_manager') or '—' }}</div>
       </div>

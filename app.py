@@ -915,6 +915,8 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         recip_col = 'advance_recipient'
     elif pdf_type == 'schedule':
         recip_col = 'production_recipient'
+    elif pdf_type == 'postnotes':
+        recip_col = 'report_recipient'
     else:
         recip_col = 'report_recipient'
     recipients = [
@@ -933,6 +935,10 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         with app.app_context():
             if pdf_type == 'advance':
                 _, pdf_version, show_dict, pdf_bytes, pdf_log_id = _build_advance_pdf(
+                    show_id, exported_by_id=exported_by_id, base_url='/'
+                )
+            elif pdf_type == 'postnotes':
+                _, pdf_version, show_dict, pdf_bytes, pdf_log_id = _build_postnotes_pdf(
                     show_id, exported_by_id=exported_by_id, base_url='/'
                 )
             else:
@@ -977,7 +983,12 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         except Exception:
             pm_name = ''
 
-    type_label  = 'Advance Sheet' if pdf_type == 'advance' else 'Production Schedule'
+    if pdf_type == 'advance':
+        type_label = 'Advance Sheet'
+    elif pdf_type == 'postnotes':
+        type_label = 'Post-Show Report'
+    else:
+        type_label = 'Production Schedule'
     subject_parts = ['3·2·1→Theater', type_label, show_name]
     if show_date:
         subject_parts.append(show_date)
@@ -3162,8 +3173,8 @@ def download_export_history(show_id, log_id):
 @app.route('/shows/<int:show_id>/email/<pdf_type>', methods=['POST'])
 @login_required
 def email_pdf(show_id, pdf_type):
-    """Manually trigger a PDF email for advance or schedule."""
-    if pdf_type not in ('advance', 'schedule'):
+    """Manually trigger a PDF email for advance, schedule, or post-show notes."""
+    if pdf_type not in ('advance', 'schedule', 'postnotes'):
         return jsonify({'success': False, 'error': 'Invalid PDF type.'}), 400
     if not can_access_show(session['user_id'], show_id):
         return jsonify({'success': False, 'error': 'Access denied.'}), 403
@@ -3182,14 +3193,23 @@ def email_pdf(show_id, pdf_type):
     return jsonify({'success': ok, 'message': msg, 'recipients': count})
 
 
-@app.route('/shows/<int:show_id>/export/postnotes')
-@login_required
-def export_postnotes(show_id):
-    if not can_access_show(session['user_id'], show_id):
-        abort(403)
+def _build_postnotes_pdf(show_id, exported_by_id=None, base_url=None):
+    """
+    Build the post-show notes PDF.  Works both in a request context (base_url=None
+    reads from request.url_root) and in a background context (pass base_url='/').
+    Logs the export to export_log so post-show PDF exports are tracked alongside
+    advance/schedule exports.
+    exported_by_id defaults to session['user_id'] when not supplied.
+    """
+    if exported_by_id is None:
+        exported_by_id = session.get('user_id')
+    if base_url is None:
+        base_url = request.url_root
+
     db = get_db()
     show = db.execute('SELECT * FROM shows WHERE id=?', (show_id,)).fetchone()
     if not show:
+        db.close()
         abort(404)
     note_rows = db.execute(
         'SELECT field_key, field_value FROM post_show_notes WHERE show_id=?', (show_id,)
@@ -3203,6 +3223,20 @@ def export_postnotes(show_id):
         'SELECT * FROM schedule_rows WHERE show_id=? ORDER BY sort_order,id', (show_id,)
     ).fetchall()
     logo_data = get_app_setting('logo_data', '')
+
+    # Version is one more than the count of prior postnotes exports for this show
+    prior = db.execute(
+        "SELECT COUNT(*) AS c FROM export_log WHERE show_id=? AND export_type='postnotes'",
+        (show_id,)
+    ).fetchone()
+    new_v = (prior['c'] if prior else 0) + 1
+    log_cur = db.execute(
+        """INSERT INTO export_log (show_id, export_type, version, exported_by)
+           VALUES (?, 'postnotes', ?, ?)""",
+        (show_id, new_v, exported_by_id)
+    )
+    log_id = log_cur.lastrowid
+    db.commit()
     db.close()
 
     html = render_template('pdf/postnotes_pdf.html',
@@ -3211,21 +3245,57 @@ def export_postnotes(show_id):
                            advance_data=advance_data,
                            schedule_rows=sched_rows,
                            logo_data=logo_data,
+                           version=new_v,
                            export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
-    safe_name = show['name'].replace(' ', '_').replace('/', '-')
-    filename = f"PostNotes_{safe_name}_{show['show_date'] or 'nodate'}.pdf"
+
     try:
-        from weasyprint import HTML
-        pdf = HTML(string=html, base_url=request.url_root).write_pdf()
-        resp = make_response(pdf)
+        from weasyprint import HTML as WP_HTML
+        pdf_bytes = WP_HTML(string=html, base_url=base_url).write_pdf()
+    except Exception as e:
+        app.logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=postnotes error={e}")
+        pdf_bytes = None
+
+    syslog_logger.info(
+        f"PDF_EXPORT show_id={show_id} type=postnotes v={new_v} by={exported_by_id}"
+    )
+    return html, new_v, dict(show), pdf_bytes, log_id
+
+
+@app.route('/shows/<int:show_id>/export/postnotes')
+@login_required
+def export_postnotes(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    html, version, show, pdf_bytes, log_id = _build_postnotes_pdf(show_id)
+    safe_name = show['name'].replace(' ', '_').replace('/', '-')
+    filename = f"PostNotes_{safe_name}_{show.get('show_date','nodate')}_v{version}.pdf"
+    if pdf_bytes:
+        resp = make_response(pdf_bytes)
         resp.headers['Content-Type'] = 'application/pdf'
         resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
+        # Push to S3 in background for archival
+        if s3_storage.is_configured():
+            _s3_key = f"exports/{show_id}/postnotes/v{version}.pdf"
+            _pdf = pdf_bytes
+            _lid = log_id
+            def _push_postnotes():
+                try:
+                    s3_storage.upload_file(_s3_key, _pdf, 'application/pdf')
+                    with app.app_context():
+                        db2 = get_db()
+                        db2.execute('UPDATE export_log SET s3_key=? WHERE id=?', (_s3_key, _lid))
+                        db2.commit()
+                        db2.close()
+                except Exception as e:
+                    app.logger.error(f"S3 push failed for postnotes PDF log_id={_lid}: {e}")
+                    syslog_logger.error(f"S3_PUSH_FAILED context=postnotes_export show_id={show_id} log_id={_lid} error={e}")
+            threading.Thread(target=_push_postnotes, daemon=True).start()
         return resp
-    except Exception as e:
-        app.logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=postnotes error={e}")
-        resp = make_response(html)
-        resp.headers['Content-Type'] = 'text/html'
-        return resp
+    # Fallback to HTML if weasyprint failed
+    app.logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=postnotes")
+    resp = make_response(html)
+    resp.headers['Content-Type'] = 'text/html'
+    return resp
 
 
 # ─── Show Management ──────────────────────────────────────────────────────────
