@@ -1566,9 +1566,9 @@
       <div class="options-group" style="display:none">
         <div class="field-group">
           <label class="field-label">OPTIONS (one per line)</label>
-          <textarea name="options_text" class="field-input field-textarea" rows="5" placeholder="-&#10;Concert&#10;Pit | venue=Walt Disney Theater&#10;Stage | venue=Steinmetz Hall"></textarea>
+          <textarea name="options_text" class="field-input field-textarea" rows="5" placeholder="-&#10;Concert&#10;Pit | venue=Walt Disney Theater&#10;Stage | venue=Steinmetz Hall,Pugh Theater"></textarea>
           <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px">
-            Append <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">| field_key=value</code> to limit when an option is visible (same syntax as the field-level "Conditional show when"). Options without a condition are always visible.
+            Append <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">| field_key=value</code> to limit when an option is visible. To match more than one trigger value, comma-separate them: <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">| venue=Steinmetz Hall,Pugh Theater</code>. Same syntax works in the field-level "Conditional show when" box. Options without a condition are always visible.
           </p>
         </div>
         <div class="field-group" style="margin-top:4px">
@@ -1588,8 +1588,8 @@
         </div>
       </div>
       <div class="field-group">
-        <label class="field-label">CONDITIONAL SHOW WHEN (e.g. runner_needed=Yes)</label>
-        <input type="text" name="conditional_show_when" class="field-input" placeholder="field_key=Value" style="font-family:var(--font-mono);font-size:12px">
+        <label class="field-label">CONDITIONAL SHOW WHEN <span class="text-dim" style="font-size:10px">(e.g. runner_needed=Yes — comma-separate to allow multiple: venue=Steinmetz Hall,Pugh Theater)</span></label>
+        <input type="text" name="conditional_show_when" class="field-input" placeholder="field_key=Value or field_key=ValueA,ValueB" style="font-family:var(--font-mono);font-size:12px">
       </div>
       <div class="form-row cols-2">
         <div class="field-group">

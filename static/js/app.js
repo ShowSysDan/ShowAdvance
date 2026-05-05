@@ -883,11 +883,13 @@ function _evaluateAllConditionalsImpl() {
     const eq = cond.indexOf('=');
     if (eq === -1) return;
     const key = cond.slice(0, eq).trim();
-    const val = cond.slice(eq + 1).trim();
+    // Right side may be a single value or a comma-separated list — element
+    // is shown when the trigger field equals any of these.
+    const allowed = cond.slice(eq + 1).split(',').map(v => v.trim()).filter(Boolean);
     const trigger = document.querySelector(`[data-key="${key}"]`);
     if (!trigger) return;
     const currentVal = trigger.type === 'checkbox' ? (trigger.checked ? 'true' : 'false') : trigger.value;
-    const matches = (currentVal === val);
+    const matches = allowed.includes(currentVal);
     if (el.tagName === 'OPTION') {
       // Hide the option entirely (display:none works on <option> in modern
       // browsers; also flip the disabled attr for older Safari).
