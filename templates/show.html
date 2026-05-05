@@ -23,7 +23,11 @@
 
 {# ─── Dynamic field renderer ─────────────────────────────────────────────── #}
 {% macro render_adv_field(field) %}
-{% set span = 'span 12' if field.width_hint == 'full' else ('span 4' if field.width_hint == 'third' else ('span 3' if field.width_hint == 'quarter' else 'span 6')) %}
+{% set span = 'span 12' if field.width_hint == 'full'
+              else ('span 4' if field.width_hint == 'third'
+              else ('span 3' if field.width_hint == 'quarter'
+              else ('span 2' if field.width_hint == 'sixth'
+              else 'span 6'))) %}
 {% set cur = adv(field.field_key) %}
 
 {% if field.field_type == 'checkbox' %}
