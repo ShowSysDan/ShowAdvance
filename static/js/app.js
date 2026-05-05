@@ -370,15 +370,56 @@ function bindAdvanceForm() {
     list.dataset.mlBound = '1';
     const hidden = list.querySelector('.adv-field');
     if (!hidden) return;
+    const popover = list.closest('.multi-check-popover');
+    const summary = popover ? popover.querySelector('.multi-check-summary') : null;
+    const updateSummary = () => {
+      if (!summary) return;
+      const selected = Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
+      if (selected.length === 0) {
+        summary.textContent = '— Select —';
+        summary.classList.add('is-empty');
+      } else {
+        summary.textContent = selected.length <= 2 ? selected.join(', ') : `${selected.length} selected`;
+        summary.classList.remove('is-empty');
+      }
+    };
     // restore
     let vals = [];
     try { vals = JSON.parse(hidden.value || '[]'); } catch(e) { if (hidden.value) vals = [hidden.value]; }
     list.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = vals.includes(cb.value); });
+    updateSummary();
     // update on change
     list.addEventListener('change', () => {
       const selected = Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
       hidden.value = JSON.stringify(selected);
+      updateSummary();
       scheduleSave();
+    });
+  });
+
+  // Multi-select popover toggle (click trigger to open, outside-click / Esc to close)
+  form.querySelectorAll('.multi-check-popover').forEach(pop => {
+    if (pop.dataset.popBound) return;
+    pop.dataset.popBound = '1';
+    const trigger = pop.querySelector('.multi-check-trigger');
+    const list = pop.querySelector('.multi-check-list');
+    if (!trigger || !list) return;
+    const setOpen = (open) => {
+      list.hidden = !open;
+      trigger.setAttribute('aria-expanded', open ? 'true' : 'false');
+      pop.classList.toggle('is-open', open);
+    };
+    trigger.addEventListener('click', (e) => {
+      if (trigger.disabled) return;
+      e.stopPropagation();
+      setOpen(list.hidden);
+    });
+    list.addEventListener('click', (e) => e.stopPropagation());
+    document.addEventListener('click', (e) => {
+      if (!list.hidden && !pop.contains(e.target)) setOpen(false);
+    });
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !list.hidden) setOpen(false);
     });
   });
 }

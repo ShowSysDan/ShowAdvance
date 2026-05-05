@@ -71,13 +71,19 @@
       </select>
 
     {% elif field.field_type == 'select' and field.allow_multi %}
-      <div class="multi-check-list{% if restricted %} multi-check-disabled{% endif %}" data-key="{{ field.field_key }}">
-        <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur|e }}">
-        {% for opt in field.options %}
-        <label class="multi-check-item">
-          <input type="checkbox" value="{{ opt }}" {% if restricted %}disabled{% endif %}>{{ opt }}
-        </label>
-        {% endfor %}
+      <div class="multi-check-popover{% if restricted %} multi-check-disabled{% endif %}">
+        <button type="button" class="field-input multi-check-trigger" aria-haspopup="listbox" aria-expanded="false" {% if restricted %}disabled{% endif %}>
+          <span class="multi-check-summary">— Select —</span>
+          <span class="multi-check-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="multi-check-list{% if restricted %} multi-check-disabled{% endif %}" data-key="{{ field.field_key }}" hidden>
+          <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur|e }}">
+          {% for opt in field.options %}
+          <label class="multi-check-item">
+            <input type="checkbox" value="{{ opt }}" {% if restricted %}disabled{% endif %}>{{ opt }}
+          </label>
+          {% endfor %}
+        </div>
       </div>
 
     {% elif field.field_type == 'select' %}
