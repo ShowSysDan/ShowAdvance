@@ -136,7 +136,7 @@
           {# Handles: text, textarea, date, time, number, select, contact_dropdown, and any future types #}
           <tr>
             <td class="lbl">{{ field.label }}</td>
-            <td class="val">{% if val.startswith('[') %}{{ val[1:-1].replace('"','').replace(',', ', ') }}{% else %}{{ val }}{% endif %}</td>
+            <td class="val">{{ val | multi }}</td>
           </tr>
           {% endif %}
         {% endfor %}
