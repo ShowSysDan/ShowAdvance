@@ -107,8 +107,10 @@
       </select>
 
     {% elif field.field_type == 'arts_group_dropdown' %}
+      {# autocomplete="on" overrides the form-level autocomplete="off" so
+         Chrome/Edge will actually display the <datalist> suggestions. #}
       <input type="text" class="field-input adv-field" data-key="{{ field.field_key }}"
-             value="{{ cur }}" list="arts-groups-datalist"
+             value="{{ cur }}" list="arts-groups-datalist" autocomplete="on"
              placeholder="{{ field.placeholder or 'Type or pick an arts group…' }}"
              {% if restricted %}disabled{% endif %}>
       <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">Pick from the list or type a new name — new names are saved automatically.</p>
