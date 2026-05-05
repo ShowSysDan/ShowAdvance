@@ -195,6 +195,15 @@ def multi_filter(value, sep=', '):
     s = s.strip()
     if not s or s in ('-', '—', 'None', 'none', '[]'):
         return ''
+    # When this filter receives output from a Jinja macro, HTML entities
+    # have already been escaped (e.g. '"' → '&#34;'/'&quot;'). Unescape
+    # so JSON.loads can still recognize the list.
+    if '&' in s:
+        try:
+            import html as _html
+            s = _html.unescape(s)
+        except Exception:
+            pass
     if s.startswith('[') and s.endswith(']'):
         try:
             parsed = json.loads(s)
