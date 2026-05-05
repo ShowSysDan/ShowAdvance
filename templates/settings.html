@@ -43,6 +43,55 @@
   <div class="form-section">
     <div class="form-section-header">
       <span class="section-icon">◈</span> CONTACTS DIRECTORY
+      <span class="help-popover">
+        <button type="button" class="help-popover-btn" onclick="toggleHelpPopover('email-routing-help', event)" aria-label="How email routing works">?</button>
+        <div id="email-routing-help" class="help-popover-panel" hidden style="min-width:480px;max-width:560px">
+          <button type="button" class="pop-close" onclick="toggleHelpPopover('email-routing-help', event)">×</button>
+          <h4>Email Routing — Who Gets What</h4>
+          <p style="margin:0 0 8px">A contact receives a given email only if their email address is filled in <em>and</em> at least one of the columns below is checked.</p>
+          <table>
+            <thead><tr><th>Outgoing email</th><th>Triggered by</th><th>Required column(s)</th></tr></thead>
+            <tbody>
+              <tr>
+                <td><strong>Advance Sheet PDF</strong></td>
+                <td>Manual export (Show → Files → Email) <em>or</em> the scheduled "advance N days before show" run.</td>
+                <td><span class="dept-badge">ADVANCE</span> or <span class="dept-badge">ALL</span></td>
+              </tr>
+              <tr>
+                <td><strong>Production Schedule PDF</strong></td>
+                <td>Manual export <em>or</em> either of the two scheduled schedule sends.</td>
+                <td><span class="dept-badge">PROD</span> or <span class="dept-badge">ALL</span></td>
+              </tr>
+              <tr>
+                <td><strong>Other report PDFs</strong> (anything that isn't advance/schedule)</td>
+                <td>Manual export when the type is generic.</td>
+                <td><span class="dept-badge">ALL</span></td>
+              </tr>
+              <tr>
+                <td><strong>System notifications</strong> — asset add/edit/retire</td>
+                <td>Asset events fire automatically.</td>
+                <td><em>n/a</em> — sent to <strong>users</strong> with admin/staff role or "Asset Mgr" flag, not to contacts.</td>
+              </tr>
+              <tr>
+                <td><strong>Account flow</strong> — registration confirmation, approval/decline, password reset</td>
+                <td>User-initiated.</td>
+                <td><em>n/a</em> — sent to the user's own address from the Users tab, not contacts.</td>
+              </tr>
+              <tr>
+                <td><strong>New-registration alert</strong></td>
+                <td>Pending registration arrives.</td>
+                <td><em>n/a</em> — sent to all <strong>admin users</strong> with an email on file.</td>
+              </tr>
+              <tr>
+                <td><strong>Test email</strong></td>
+                <td>Settings → Email → "Send Test".</td>
+                <td><em>n/a</em> — to the address you type into the test box.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted)">Schedules for advance + schedule auto-emails (days before show, send hour) live in <strong>Settings → Email → Auto-email Schedule</strong>. Without an SMTP host or direct-MX configuration set there, no automatic email is sent.</p>
+        </div>
+      </span>
       <span class="section-count ml-auto text-dim">{{ contacts|length }} contacts</span>
       {% if user.role == 'admin' or is_content_admin %}
       <button class="btn btn-sm btn-primary" onclick="document.getElementById('add-contact-modal').classList.remove('hidden')" style="margin-left:12px">+ Add Contact</button>
@@ -59,7 +108,7 @@
       </div>
       <div class="contacts-table-wrap">
       <table class="data-table" id="contacts-table">
-        <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="System notification emails">SYSTEM</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
+        <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
@@ -82,10 +131,6 @@
             <td style="text-align:center">
               <span class="recipient-indicator recipient-dot {{ 'on' if c.production_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="production"
                     title="{% if c.production_recipient %}Receives production/schedule emails{% else %}Not a production recipient{% endif %}"></span>
-            </td>
-            <td style="text-align:center">
-              <span class="recipient-indicator recipient-dot {{ 'on' if c.system_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="system"
-                    title="{% if c.system_recipient %}Receives system notification emails{% else %}Not a system recipient{% endif %}"></span>
             </td>
             {% endif %}
             {% if user.role == 'admin' or is_content_admin %}
@@ -1463,10 +1508,6 @@
             <input type="checkbox" id="edit-production-recipient" style="accent-color:var(--accent)">
             <span style="font-size:12px">Production / schedule emails</span>
           </label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="edit-system-recipient" style="accent-color:var(--accent)">
-            <span style="font-size:12px">System notification emails</span>
-          </label>
         </div>
       </div>
       {% endif %}
@@ -1566,9 +1607,12 @@
       <div class="options-group" style="display:none">
         <div class="field-group">
           <label class="field-label">OPTIONS (one per line)</label>
-          <textarea name="options_text" class="field-input field-textarea" rows="5" placeholder="-&#10;Concert&#10;Pit | venue=Walt Disney Theater&#10;Stage | venue=Steinmetz Hall"></textarea>
+          <textarea name="options_text" class="field-input field-textarea" rows="5" placeholder="-&#10;Concert&#10;Pit | venue=Walt Disney Theater&#10;Stage | venue=Steinmetz Hall,Pugh Theater"></textarea>
           <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px">
-            Append <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">| field_key=value</code> to limit when an option is visible (same syntax as the field-level "Conditional show when"). Options without a condition are always visible.
+            Append <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">| field_key=value</code> to limit when an option is visible.
+            Comma-separate to match any of several values: <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">| venue=Steinmetz Hall,Pugh Theater</code>.
+            Use <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">!=</code> to invert: <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">| venue!=Walt Disney Theater</code> shows the option for every venue <em>except</em> WDT.
+            Same syntax works in the field-level "Conditional show when" box. Options without a condition are always visible.
           </p>
         </div>
         <div class="field-group" style="margin-top:4px">
@@ -1588,8 +1632,27 @@
         </div>
       </div>
       <div class="field-group">
-        <label class="field-label">CONDITIONAL SHOW WHEN (e.g. runner_needed=Yes)</label>
-        <input type="text" name="conditional_show_when" class="field-input" placeholder="field_key=Value" style="font-family:var(--font-mono);font-size:12px">
+        <label class="field-label">CONDITIONAL SHOW WHEN
+          <span class="help-popover">
+            <button type="button" class="help-popover-btn" onclick="toggleHelpPopover('cond-help', event)" aria-label="Conditional syntax help">?</button>
+            <div id="cond-help" class="help-popover-panel" hidden>
+              <button type="button" class="pop-close" onclick="toggleHelpPopover('cond-help', event)">×</button>
+              <h4>Conditional Show-When Syntax</h4>
+              <p style="margin:0 0 8px">Hides this whole field unless another field's value matches. The same syntax also works on individual <strong>options</strong> inside a select dropdown — append <code>| field_key=value</code> after an option's label.</p>
+              <table>
+                <thead><tr><th>Pattern</th><th>Behavior</th></tr></thead>
+                <tbody>
+                  <tr><td><code>runner_needed=Yes</code></td><td>Show when <code>runner_needed</code> equals <em>Yes</em>.</td></tr>
+                  <tr><td><code>venue=Steinmetz Hall,Pugh Theater</code></td><td>Show when value is <em>any</em> of the comma-separated list.</td></tr>
+                  <tr><td><code>venue!=Walt Disney Theater</code></td><td>Show when value is <em>anything except</em> WDT (also covers empty).</td></tr>
+                  <tr><td><code>venue!=A,B,C</code></td><td>Show when value is none of A, B, C.</td></tr>
+                </tbody>
+              </table>
+              <p style="margin:8px 0 0;font-size:11px;color:var(--text-muted)">The trigger field must exist on the same form. Field keys (not labels) are case-sensitive — match exactly the FIELD KEY shown above. For yes/no toggles use <code>Yes</code> / <code>No</code>; for checkboxes use <code>true</code> / <code>false</code>.</p>
+            </div>
+          </span>
+        </label>
+        <input type="text" name="conditional_show_when" class="field-input" placeholder="field_key=Value, field_key=A,B, or field_key!=Value" style="font-family:var(--font-mono);font-size:12px">
       </div>
       <div class="form-row cols-2">
         <div class="field-group">
@@ -1833,10 +1896,8 @@ function editContact(btn, id) {
   if (recipientChk) recipientChk.checked = row.dataset.recipient === '1';
   const advChk  = document.getElementById('edit-advance-recipient');
   const prodChk = document.getElementById('edit-production-recipient');
-  const sysChk  = document.getElementById('edit-system-recipient');
   if (advChk)  advChk.checked  = row.querySelector('[data-email-type=advance]')?.classList.contains('on') || false;
   if (prodChk) prodChk.checked = row.querySelector('[data-email-type=production]')?.classList.contains('on') || false;
-  if (sysChk)  sysChk.checked  = row.querySelector('[data-email-type=system]')?.classList.contains('on') || false;
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -1854,7 +1915,6 @@ async function saveContact() {
     report_recipient: recipientChk ? recipientChk.checked : undefined,
     advance_recipient: document.getElementById('edit-advance-recipient')?.checked || false,
     production_recipient: document.getElementById('edit-production-recipient')?.checked || false,
-    system_recipient: document.getElementById('edit-system-recipient')?.checked || false,
   };
   const resp = await fetch(`/settings/contacts/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)

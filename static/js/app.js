@@ -296,6 +296,31 @@ function scheduleSave() {
   saveTimer = setTimeout(() => saveActive(), 1500);
 }
 
+/* ── Help Popovers ─────────────────────────────────────────────── */
+function toggleHelpPopover(id, ev) {
+  if (ev) ev.stopPropagation();
+  const panel = document.getElementById(id);
+  if (!panel) return;
+  const willOpen = panel.hasAttribute('hidden');
+  // Close any other open help panels first.
+  document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(p => {
+    if (p !== panel) p.setAttribute('hidden', '');
+  });
+  if (willOpen) panel.removeAttribute('hidden');
+  else panel.setAttribute('hidden', '');
+}
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(panel => {
+    if (!panel.parentElement.contains(e.target)) panel.setAttribute('hidden', '');
+  });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.help-popover-panel:not([hidden])')
+      .forEach(p => p.setAttribute('hidden', ''));
+  }
+});
+
 /* ── Toast Notification ─────────────────────────────────────────── */
 function showSaveToast(msg, type) {
   const toast = document.getElementById('save-toast');
@@ -880,14 +905,26 @@ function _evaluateAllConditionalsImpl() {
   const _affectedSelects = new Set();
   document.querySelectorAll('[data-show-when]').forEach(el => {
     const cond = el.dataset.showWhen;
-    const eq = cond.indexOf('=');
-    if (eq === -1) return;
-    const key = cond.slice(0, eq).trim();
-    const val = cond.slice(eq + 1).trim();
+    // Operator: '!=' negates ('show unless trigger equals any of these');
+    // '=' is the default (show when trigger equals one of these).
+    let key, rhs, invert;
+    const neq = cond.indexOf('!=');
+    if (neq !== -1) {
+      key = cond.slice(0, neq).trim();
+      rhs = cond.slice(neq + 2);
+      invert = true;
+    } else {
+      const eq = cond.indexOf('=');
+      if (eq === -1) return;
+      key = cond.slice(0, eq).trim();
+      rhs = cond.slice(eq + 1);
+      invert = false;
+    }
+    const allowed = rhs.split(',').map(v => v.trim()).filter(Boolean);
     const trigger = document.querySelector(`[data-key="${key}"]`);
     if (!trigger) return;
     const currentVal = trigger.type === 'checkbox' ? (trigger.checked ? 'true' : 'false') : trigger.value;
-    const matches = (currentVal === val);
+    const matches = invert ? !allowed.includes(currentVal) : allowed.includes(currentVal);
     if (el.tagName === 'OPTION') {
       // Hide the option entirely (display:none works on <option> in modern
       // browsers; also flip the disabled attr for older Safari).

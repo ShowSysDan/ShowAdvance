@@ -4027,8 +4027,8 @@ def add_contact():
     name = request.form.get('name','').strip()
     cur = db.execute("""
         INSERT INTO contacts (name, title, department, phone, email,
-                              report_recipient, advance_recipient, production_recipient, system_recipient)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              report_recipient, advance_recipient, production_recipient)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     """, (name,
           request.form.get('title','').strip(),
           request.form.get('department','').strip(),
@@ -4036,8 +4036,7 @@ def add_contact():
           request.form.get('email','').strip(),
           1 if request.form.get('report_recipient') else 0,
           1 if request.form.get('advance_recipient') else 0,
-          1 if request.form.get('production_recipient') else 0,
-          1 if request.form.get('system_recipient') else 0))
+          1 if request.form.get('production_recipient') else 0))
     cid_new = cur.lastrowid
     log_audit_change(db, 'CONTACT_ADD', 'contact', cid_new, detail=name,
                      table='contacts')
@@ -4055,14 +4054,13 @@ def edit_contact(cid):
     before = _snapshot_row(db, 'contacts', cid)
     db.execute("""
         UPDATE contacts SET name=?, title=?, department=?, phone=?, email=?,
-                            report_recipient=?, advance_recipient=?, production_recipient=?, system_recipient=?
+                            report_recipient=?, advance_recipient=?, production_recipient=?
         WHERE id=?
     """, (data.get('name',''), data.get('title',''), data.get('department',''),
           data.get('phone',''), data.get('email',''),
           1 if data.get('report_recipient') else 0,
           1 if data.get('advance_recipient') else 0,
           1 if data.get('production_recipient') else 0,
-          1 if data.get('system_recipient') else 0,
           cid))
     after = _snapshot_row(db, 'contacts', cid)
     log_audit(db, 'CONTACT_EDIT', 'contact', cid, detail=data.get('name',''),
@@ -5772,7 +5770,7 @@ def toggle_contact_recipient(cid):
     email_type = data.get('email_type', 'report')
     val = 1 if data.get('recipient') else 0
     allowed_cols = {'report': 'report_recipient', 'advance': 'advance_recipient',
-                    'production': 'production_recipient', 'system': 'system_recipient'}
+                    'production': 'production_recipient'}
     col = allowed_cols.get(email_type, 'report_recipient')
     db = get_db()
     db.execute(f'UPDATE contacts SET {col}=? WHERE id=?', (val, cid))
