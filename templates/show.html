@@ -83,8 +83,10 @@
         <div class="multi-check-list{% if restricted %} multi-check-disabled{% endif %}" data-key="{{ field.field_key }}" hidden>
           <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur|e }}">
           {% for opt in field.options %}
-          <label class="multi-check-item">
-            <input type="checkbox" value="{{ opt }}" {% if restricted %}disabled{% endif %}>{{ opt }}
+            {% set _opt_val = opt.value if opt is mapping else opt %}
+            {% set _opt_when = opt.show_when if opt is mapping else None %}
+          <label class="multi-check-item" {% if _opt_when %}data-show-when="{{ _opt_when }}"{% endif %}>
+            <input type="checkbox" value="{{ _opt_val }}" {% if restricted %}disabled{% endif %}>{{ _opt_val }}
           </label>
           {% endfor %}
         </div>
@@ -93,7 +95,14 @@
     {% elif field.field_type == 'select' %}
       <select class="field-input adv-field" data-key="{{ field.field_key }}" {% if restricted %}disabled{% endif %}>
         {% for opt in field.options %}
-        <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
+          {# Each option is either a plain string or {"value": "...", "show_when": "field_key=value"}. #}
+          {% if opt is mapping %}
+          <option value="{{ opt.value }}"
+                  {% if opt.show_when %}data-show-when="{{ opt.show_when }}"{% endif %}
+                  {% if cur == opt.value %}selected{% endif %}>{{ opt.value }}</option>
+          {% else %}
+          <option value="{{ opt }}" {% if cur == opt %}selected{% endif %}>{{ opt }}</option>
+          {% endif %}
         {% endfor %}
       </select>
 

@@ -1566,7 +1566,10 @@
       <div class="options-group" style="display:none">
         <div class="field-group">
           <label class="field-label">OPTIONS (one per line)</label>
-          <textarea name="options_text" class="field-input field-textarea" rows="4" placeholder="-&#10;Option A&#10;Option B"></textarea>
+          <textarea name="options_text" class="field-input field-textarea" rows="5" placeholder="-&#10;Concert&#10;Pit | venue=Walt Disney Theater&#10;Stage | venue=Steinmetz Hall"></textarea>
+          <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px">
+            Append <code style="background:var(--bg-hover);padding:1px 4px;border-radius:3px">| field_key=value</code> to limit when an option is visible (same syntax as the field-level "Conditional show when"). Options without a condition are always visible.
+          </p>
         </div>
         <div class="field-group" style="margin-top:4px">
           <label class="checkbox-label">
