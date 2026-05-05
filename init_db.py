@@ -136,6 +136,13 @@ CREATE TABLE IF NOT EXISTS form_sections (
     asset_category_id INTEGER REFERENCES asset_categories(id) ON DELETE SET NULL
 );
 
+CREATE TABLE IF NOT EXISTS arts_groups (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    name       TEXT UNIQUE NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS form_fields (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     section_id INTEGER NOT NULL REFERENCES form_sections(id) ON DELETE CASCADE,
@@ -809,9 +816,8 @@ APP_SETTINGS_SEED = [
     ('syslog_host',           '127.0.0.1'),
     ('syslog_port',           '514'),
     ('syslog_facility',       'LOG_LOCAL0'),
-    # Venue / Channel lists (JSON arrays)
+    # Venue list (JSON array)
     ('venue_list',            json.dumps(["Judson's Live", "Walt Disney Theater", "Alexis & Jim Pugh Theater", "Dr. Phillips CenterStage"])),
-    ('radio_channel_list',    json.dumps(["16/Judson's", "17/Walt Disney", "18/Alexis", "19/CenterStage"])),
     # WiFi defaults
     ('wifi_network',          ''),
     ('wifi_password',         ''),
@@ -1530,6 +1536,13 @@ def migrate_db():
             description TEXT DEFAULT '',
             notes       TEXT DEFAULT ''
         );
+
+        CREATE TABLE IF NOT EXISTS arts_groups (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT UNIQUE NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
 
     # Remove WiFi fields from schedule_meta_fields — WiFi is now global-only
@@ -1723,6 +1736,13 @@ CREATE TABLE IF NOT EXISTS form_sections (
     icon TEXT DEFAULT '◈',
     default_open INTEGER DEFAULT 1,
     asset_category_id INTEGER REFERENCES asset_categories(id) ON DELETE SET NULL
+);
+
+CREATE TABLE IF NOT EXISTS arts_groups (
+    id         SERIAL PRIMARY KEY,
+    name       TEXT UNIQUE NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS form_fields (
@@ -2390,6 +2410,12 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".job_positions ADD COLUMN IF NOT EXISTS venue TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_sections ADD COLUMN IF NOT EXISTS default_open INTEGER DEFAULT 1',
             f'ALTER TABLE "{app_schema}".form_sections ADD COLUMN IF NOT EXISTS asset_category_id INTEGER REFERENCES "{app_schema}".asset_categories(id) ON DELETE SET NULL',
+            f'''CREATE TABLE IF NOT EXISTS "{app_schema}".arts_groups (
+                id SERIAL PRIMARY KEY,
+                name TEXT UNIQUE NOT NULL,
+                sort_order INTEGER DEFAULT 0,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )''',
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS perf_id INTEGER DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS day_date TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS assets_approved INTEGER DEFAULT 0',

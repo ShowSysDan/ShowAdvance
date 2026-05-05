@@ -102,6 +102,13 @@
         {% endfor %}
       </select>
 
+    {% elif field.field_type == 'arts_group_dropdown' %}
+      <input type="text" class="field-input adv-field" data-key="{{ field.field_key }}"
+             value="{{ cur }}" list="arts-groups-datalist"
+             placeholder="{{ field.placeholder or 'Type or pick an arts group…' }}"
+             {% if restricted %}disabled{% endif %}>
+      <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">Pick from the list or type a new name — new names are saved automatically.</p>
+
     {% elif field.field_type == 'textarea' %}
       <textarea class="field-input field-textarea adv-field" data-key="{{ field.field_key }}"
                 rows="3" placeholder="{{ field.placeholder }}" {% if restricted %}disabled{% endif %}>{{ cur }}</textarea>
@@ -227,6 +234,14 @@
 <div id="tab-advance" class="tab-pane {% if tab == 'advance' %}active{% endif %}">
 <aside id="advance-side-nav" class="form-side-nav" aria-label="Advance form sections"></aside>
 <form id="advance-form" autocomplete="off">
+
+  {# Shared <datalist> for arts_group_dropdown fields. New entries typed by users
+     are auto-created server-side on save. #}
+  <datalist id="arts-groups-datalist">
+    {% for g in (arts_groups if arts_groups is defined else []) %}
+    <option value="{{ g.name }}"></option>
+    {% endfor %}
+  </datalist>
 
   {# ── Show Dates & Times ───────────────────────────────────────────────────── #}
   <div class="form-section" id="performances-section">

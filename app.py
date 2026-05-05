@@ -1250,6 +1250,7 @@ UNDO_TABLE_MAP = {
     'crew_member':          'crew_members',
     'warehouse_location':   'warehouse_locations',
     'asset_category':       'asset_categories',
+    'arts_group':           'arts_groups',
     'asset_type':           'asset_types',
     'asset_item':           'asset_items',
     'show_asset':           'show_assets',
@@ -1832,6 +1833,10 @@ def show_page(show_id):
     all_users = [{'id': u['id'], 'username': u['username'],
                   'display_name': u['display_name'] or u['username']} for u in all_users_rows]
 
+    arts_groups = [dict(r) for r in db.execute(
+        'SELECT id, name FROM arts_groups ORDER BY sort_order, name'
+    ).fetchall()]
+
     db.close()
 
     form_sections = get_form_fields_for_template()
@@ -1876,6 +1881,7 @@ def show_page(show_id):
                            notes_data=notes_data,
                            exports=exports,
                            contacts_by_dept=contacts_by_dept,
+                           arts_groups=arts_groups,
                            departments=DEPARTMENTS,
                            form_sections=form_sections,
                            last_saved_display_name=last_saved_display_name,
@@ -1906,11 +1912,32 @@ def save_advance(show_id):
     data = request.get_json(force=True) or {}
     db = get_db()
 
+    # Field keys whose type is arts_group_dropdown — any new value gets
+    # auto-created in the global arts_groups table on save.
+    arts_group_keys = {
+        r['field_key'] for r in db.execute(
+            "SELECT field_key FROM form_fields WHERE field_type='arts_group_dropdown'"
+        ).fetchall()
+    }
+
     for key, value in data.items():
         db.execute("""
             INSERT OR REPLACE INTO advance_data (show_id, field_key, field_value, updated_at)
             VALUES (?, ?, ?, CURRENT_TIMESTAMP)
         """, (show_id, key, str(value) if value is not None else ''))
+        if key in arts_group_keys:
+            name = (str(value) if value is not None else '').strip()
+            if name:
+                try:
+                    max_order = db.execute(
+                        'SELECT MAX(sort_order) FROM arts_groups'
+                    ).fetchone()[0] or 0
+                    db.execute(
+                        'INSERT OR IGNORE INTO arts_groups (name, sort_order) VALUES (?, ?)',
+                        (name, max_order + 10)
+                    )
+                except Exception as e:
+                    app.logger.warning(f'arts_groups upsert failed for {name!r}: {e}')
 
     # Sync core show fields
     if 'show_name' in data and data['show_name']:
@@ -3705,6 +3732,12 @@ def settings():
         'SELECT id, name FROM asset_categories ORDER BY sort_order, name'
     ).fetchall()] if _is_ca else []
 
+    # Arts groups (touring companies / artists) — global free-text dropdown
+    # used by the arts_group_dropdown form field type.
+    arts_groups = [dict(r) for r in db3.execute(
+        'SELECT id, name, sort_order FROM arts_groups ORDER BY sort_order, name'
+    ).fetchall()] if _is_ca else []
+
     # Job positions data for settings tab — visible to content admins AND schedulers
     position_categories = [dict(c) for c in db3.execute(
         'SELECT * FROM position_categories WHERE is_venue=0 OR is_venue IS NULL ORDER BY sort_order, id'
@@ -3790,6 +3823,7 @@ def settings():
                            groups=groups_data,
                            form_sections=form_sections,
                            asset_categories=asset_categories,
+                           arts_groups=arts_groups,
                            sched_meta_fields=sched_meta_fields,
                            syslog_settings=safe_settings,
                            db_settings=db_settings if _is_admin else {},
@@ -5030,24 +5064,75 @@ def venues_settings():
     return jsonify({'venues': venues})
 
 
-@app.route('/settings/radio-channels', methods=['GET', 'POST'])
-@admin_required
-def radio_channels_settings():
+@app.route('/settings/arts-groups', methods=['GET'])
+@login_required
+def arts_groups_list():
     db = get_db()
-    if request.method == 'POST':
-        data = request.get_json(force=True) or {}
-        channel_list = data.get('channel_list', [])
-        db.execute("INSERT OR REPLACE INTO app_settings (key, value) VALUES ('radio_channel_list', ?)",
-                   (json.dumps(channel_list),))
-        log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='radio_channel_list')
-        db.commit(); db.close()
-        syslog_logger.info(f"SETTINGS_CHANGE detail=radio_channels by={session.get('username')}")
-        return jsonify({'success': True})
-    else:
-        raw = db.execute("SELECT value FROM app_settings WHERE key='radio_channel_list'").fetchone()
+    rows = db.execute(
+        'SELECT id, name, sort_order FROM arts_groups ORDER BY sort_order, name'
+    ).fetchall()
+    db.close()
+    return jsonify({'arts_groups': [dict(r) for r in rows]})
+
+
+@app.route('/settings/arts-groups/add', methods=['POST'])
+@content_admin_required
+def arts_groups_add():
+    data = request.get_json(force=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name required.'}), 400
+    db = get_db()
+    max_order = db.execute('SELECT MAX(sort_order) FROM arts_groups').fetchone()[0] or 0
+    try:
+        cur = db.execute(
+            'INSERT INTO arts_groups (name, sort_order) VALUES (?, ?)',
+            (name, max_order + 10)
+        )
+        gid = cur.lastrowid
+        log_audit(db, 'ARTS_GROUP_ADD', 'arts_group', gid, detail=name)
+        db.commit()
+        syslog_logger.info(f"ARTS_GROUP_ADD id={gid} name={name!r} by={session.get('username')}")
+        return jsonify({'success': True, 'id': gid, 'name': name})
+    except sqlite3.IntegrityError:
+        return jsonify({'success': False, 'error': f'"{name}" already exists.'}), 400
+    finally:
         db.close()
-        channel_list = json.loads(raw['value']) if raw else []
-        return jsonify({'channel_list': channel_list})
+
+
+@app.route('/settings/arts-groups/<int:gid>/edit', methods=['POST'])
+@content_admin_required
+def arts_groups_edit(gid):
+    data = request.get_json(force=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Name required.'}), 400
+    db = get_db()
+    before = _snapshot_row(db, 'arts_groups', gid)
+    try:
+        db.execute('UPDATE arts_groups SET name=? WHERE id=?', (name, gid))
+        after = _snapshot_row(db, 'arts_groups', gid)
+        log_audit(db, 'ARTS_GROUP_EDIT', 'arts_group', gid, detail=name,
+                  before=before, after=after)
+        db.commit()
+        syslog_logger.info(f"ARTS_GROUP_EDIT id={gid} name={name!r} by={session.get('username')}")
+        return jsonify({'success': True})
+    except sqlite3.IntegrityError:
+        return jsonify({'success': False, 'error': f'"{name}" already exists.'}), 400
+    finally:
+        db.close()
+
+
+@app.route('/settings/arts-groups/<int:gid>/delete', methods=['POST'])
+@content_admin_required
+def arts_groups_delete(gid):
+    db = get_db()
+    before = _snapshot_row(db, 'arts_groups', gid)
+    log_audit(db, 'ARTS_GROUP_DELETE', 'arts_group', gid, before=before)
+    db.execute('DELETE FROM arts_groups WHERE id=?', (gid,))
+    db.commit(); db.close()
+    syslog_logger.info(f"ARTS_GROUP_DELETE id={gid} by={session.get('username')}")
+    return jsonify({'success': True})
 
 
 @app.route('/settings/logo', methods=['POST'])
