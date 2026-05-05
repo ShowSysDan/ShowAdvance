@@ -865,14 +865,49 @@ async function savePostNotes() {
 }
 
 /* ── Conditional Fields ──────────────────────────────────────────── */
+let _evalCondDepth = 0;
 function evaluateAllConditionals() {
+  // Recursion guard: dispatching change events on auto-reset selects below
+  // can re-enter via the form-level change listener.
+  if (_evalCondDepth >= 4) return;
+  _evalCondDepth++;
+  try { return _evaluateAllConditionalsImpl(); }
+  finally { _evalCondDepth--; }
+}
+function _evaluateAllConditionalsImpl() {
+  // Track <select>s whose currently-selected option got hidden so we can
+  // reset them in a second pass.
+  const _affectedSelects = new Set();
   document.querySelectorAll('[data-show-when]').forEach(el => {
-    const cond  = el.dataset.showWhen;
-    const [key, val] = cond.split('=');
+    const cond = el.dataset.showWhen;
+    const eq = cond.indexOf('=');
+    if (eq === -1) return;
+    const key = cond.slice(0, eq).trim();
+    const val = cond.slice(eq + 1).trim();
     const trigger = document.querySelector(`[data-key="${key}"]`);
     if (!trigger) return;
     const currentVal = trigger.type === 'checkbox' ? (trigger.checked ? 'true' : 'false') : trigger.value;
-    el.style.display = (currentVal === val) ? '' : 'none';
+    const matches = (currentVal === val);
+    if (el.tagName === 'OPTION') {
+      // Hide the option entirely (display:none works on <option> in modern
+      // browsers; also flip the disabled attr for older Safari).
+      el.hidden = !matches;
+      el.disabled = !matches;
+      el.style.display = matches ? '' : 'none';
+      const sel = el.parentElement;
+      if (sel && sel.tagName === 'SELECT' && !matches && sel.value === el.value) {
+        _affectedSelects.add(sel);
+      }
+    } else {
+      el.style.display = matches ? '' : 'none';
+    }
+  });
+  // Selects whose value just got hidden — reset to the first visible option
+  // (or empty) and fire a change so any downstream conditionals re-run.
+  _affectedSelects.forEach(sel => {
+    const firstVisible = Array.from(sel.options).find(o => !o.hidden && !o.disabled);
+    sel.value = firstVisible ? firstVisible.value : '';
+    sel.dispatchEvent(new Event('change', {bubbles: true}));
   });
 }
 
@@ -1185,7 +1220,17 @@ function _populateFieldModal(field) {
   }
   if (field.options && field.options.length) {
     const optEl = modal.querySelector('[name="options_text"]');
-    if (optEl) optEl.value = field.options.join('\n');
+    if (optEl) {
+      // Options can be plain strings or {value, show_when} objects.
+      optEl.value = field.options.map(o => {
+        if (typeof o === 'string') return o;
+        if (o && typeof o === 'object') {
+          const v = o.value || '';
+          return o.show_when ? `${v} | ${o.show_when}` : v;
+        }
+        return String(o ?? '');
+      }).join('\n');
+    }
   }
   _toggleFieldTypeOptions(field.field_type);
 }
@@ -1216,9 +1261,16 @@ async function saveField() {
     if (el.type === 'checkbox') data[el.name] = el.checked;
     else data[el.name] = el.value;
   });
-  // Parse options
+  // Parse options. Each line is either "Label" or "Label | field_key=value"
+  // (the latter renders as a conditional <option> in the advance form).
   const optText = modal.querySelector('[name="options_text"]')?.value || '';
-  data.options = optText.split('\n').map(s => s.trim()).filter(Boolean);
+  data.options = optText.split('\n').map(s => s.trim()).filter(Boolean).map(line => {
+    const idx = line.indexOf('|');
+    if (idx === -1) return line;
+    const value = line.slice(0, idx).trim();
+    const cond  = line.slice(idx + 1).trim();
+    return cond ? {value, show_when: cond} : value;
+  });
   if (data.section_id) data.section_id = Number(data.section_id);
 
   const url = _editFieldId
