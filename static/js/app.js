@@ -880,16 +880,26 @@ function _evaluateAllConditionalsImpl() {
   const _affectedSelects = new Set();
   document.querySelectorAll('[data-show-when]').forEach(el => {
     const cond = el.dataset.showWhen;
-    const eq = cond.indexOf('=');
-    if (eq === -1) return;
-    const key = cond.slice(0, eq).trim();
-    // Right side may be a single value or a comma-separated list — element
-    // is shown when the trigger field equals any of these.
-    const allowed = cond.slice(eq + 1).split(',').map(v => v.trim()).filter(Boolean);
+    // Operator: '!=' negates ('show unless trigger equals any of these');
+    // '=' is the default (show when trigger equals one of these).
+    let key, rhs, invert;
+    const neq = cond.indexOf('!=');
+    if (neq !== -1) {
+      key = cond.slice(0, neq).trim();
+      rhs = cond.slice(neq + 2);
+      invert = true;
+    } else {
+      const eq = cond.indexOf('=');
+      if (eq === -1) return;
+      key = cond.slice(0, eq).trim();
+      rhs = cond.slice(eq + 1);
+      invert = false;
+    }
+    const allowed = rhs.split(',').map(v => v.trim()).filter(Boolean);
     const trigger = document.querySelector(`[data-key="${key}"]`);
     if (!trigger) return;
     const currentVal = trigger.type === 'checkbox' ? (trigger.checked ? 'true' : 'false') : trigger.value;
-    const matches = allowed.includes(currentVal);
+    const matches = invert ? !allowed.includes(currentVal) : allowed.includes(currentVal);
     if (el.tagName === 'OPTION') {
       // Hide the option entirely (display:none works on <option> in modern
       // browsers; also flip the disabled attr for older Safari).
