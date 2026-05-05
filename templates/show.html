@@ -9,13 +9,14 @@
 {% macro note(key, default='') %}{{ notes_data.get(key, default) }}{% endmacro %}
 
 {% macro contact_select(key, label, dept) %}
+{% set _cv = advance_data.get(key, '') %}
 <div class="field-group">
   <label class="field-label">{{ label }}</label>
   <select name="{{ key }}" class="field-input adv-field" data-key="{{ key }}" {% if restricted %}disabled{% endif %}>
     <option value="">— Select —</option>
-    <option value="-" {% if adv(key) == '-' %}selected{% endif %}>N/A</option>
+    <option value="-" {% if _cv == '-' %}selected{% endif %}>N/A</option>
     {% for c in contacts_by_dept.get(dept, []) %}
-    <option value="{{ c.name }}" {% if adv(key) == c.name %}selected{% endif %}>{{ c.name }}{% if c.title %} · {{ c.title }}{% endif %}</option>
+    <option value="{{ c.name }}" {% if _cv == c.name %}selected{% endif %}>{{ c.name }}{% if c.title %} · {{ c.title }}{% endif %}</option>
     {% endfor %}
   </select>
 </div>
@@ -28,7 +29,11 @@
               else ('span 3' if field.width_hint == 'quarter'
               else ('span 2' if field.width_hint == 'sixth'
               else 'span 6'))) %}
-{% set cur = adv(field.field_key) %}
+{# Read the raw value directly from advance_data — going through the adv()
+   macro auto-escapes HTML entities (apostrophes, ampersands, etc.) into
+   a Markup string, which then fails equality checks against unescaped
+   option values like "Judson's Live". #}
+{% set cur = advance_data.get(field.field_key, '') %}
 
 {% if field.field_type == 'checkbox' %}
   <label class="checkbox-label adv-field-wrapper" style="grid-column:{{ span }}" {% if field.conditional_show_when %}data-show-when="{{ field.conditional_show_when }}"{% endif %}>
