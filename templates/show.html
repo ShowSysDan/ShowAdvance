@@ -23,7 +23,11 @@
 
 {# ─── Dynamic field renderer ─────────────────────────────────────────────── #}
 {% macro render_adv_field(field) %}
-{% set span = 'span 12' if field.width_hint == 'full' else ('span 4' if field.width_hint == 'third' else ('span 3' if field.width_hint == 'quarter' else 'span 6')) %}
+{% set span = 'span 12' if field.width_hint == 'full'
+              else ('span 4' if field.width_hint == 'third'
+              else ('span 3' if field.width_hint == 'quarter'
+              else ('span 2' if field.width_hint == 'sixth'
+              else 'span 6'))) %}
 {% set cur = adv(field.field_key) %}
 
 {% if field.field_type == 'checkbox' %}
@@ -71,13 +75,19 @@
       </select>
 
     {% elif field.field_type == 'select' and field.allow_multi %}
-      <div class="multi-check-list{% if restricted %} multi-check-disabled{% endif %}" data-key="{{ field.field_key }}">
-        <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur|e }}">
-        {% for opt in field.options %}
-        <label class="multi-check-item">
-          <input type="checkbox" value="{{ opt }}" {% if restricted %}disabled{% endif %}>{{ opt }}
-        </label>
-        {% endfor %}
+      <div class="multi-check-popover{% if restricted %} multi-check-disabled{% endif %}">
+        <button type="button" class="field-input multi-check-trigger" aria-haspopup="listbox" aria-expanded="false" {% if restricted %}disabled{% endif %}>
+          <span class="multi-check-summary">— Select —</span>
+          <span class="multi-check-caret" aria-hidden="true">▾</span>
+        </button>
+        <div class="multi-check-list{% if restricted %} multi-check-disabled{% endif %}" data-key="{{ field.field_key }}" hidden>
+          <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur|e }}">
+          {% for opt in field.options %}
+          <label class="multi-check-item">
+            <input type="checkbox" value="{{ opt }}" {% if restricted %}disabled{% endif %}>{{ opt }}
+          </label>
+          {% endfor %}
+        </div>
       </div>
 
     {% elif field.field_type == 'select' %}
@@ -95,6 +105,30 @@
         <option value="{{ c.name }}" {% if cur == c.name %}selected{% endif %}>{{ c.name }}{% if c.title %} · {{ c.title }}{% endif %}</option>
         {% endfor %}
       </select>
+
+    {% elif field.field_type == 'arts_group_dropdown' %}
+      <input type="text" class="field-input adv-field" data-key="{{ field.field_key }}"
+             value="{{ cur }}" list="arts-groups-datalist"
+             placeholder="{{ field.placeholder or 'Type or pick an arts group…' }}"
+             {% if restricted %}disabled{% endif %}>
+      <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">Pick from the list or type a new name — new names are saved automatically.</p>
+
+    {% elif field.field_type == 'file_upload' %}
+      <div class="adv-file-upload" data-field-key="{{ field.field_key }}">
+        {% if not restricted %}
+        <input type="text" class="field-input adv-file-desc" placeholder="{{ field.placeholder or 'Description (optional)' }}"
+               style="margin-bottom:6px;font-size:12px">
+        <label class="btn btn-sm btn-ghost adv-file-pick" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+          <input type="file" class="adv-file-input" style="display:none"
+                 accept=".pdf,application/pdf,image/*,.doc,.docx,.txt"
+                 onchange="uploadAdvField(this)">
+          ⤴ Upload file
+        </label>
+        <span class="adv-file-status text-dim" style="font-size:11px;margin-left:8px"></span>
+        {% endif %}
+        <ul class="adv-file-list" style="list-style:none;padding:0;margin:6px 0 0;font-size:12px"></ul>
+      </div>
+      <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">PDFs, images, and Word documents are appended to the advance PDF on export.</p>
 
     {% elif field.field_type == 'textarea' %}
       <textarea class="field-input field-textarea adv-field" data-key="{{ field.field_key }}"
@@ -221,6 +255,14 @@
 <div id="tab-advance" class="tab-pane {% if tab == 'advance' %}active{% endif %}">
 <aside id="advance-side-nav" class="form-side-nav" aria-label="Advance form sections"></aside>
 <form id="advance-form" autocomplete="off">
+
+  {# Shared <datalist> for arts_group_dropdown fields. New entries typed by users
+     are auto-created server-side on save. #}
+  <datalist id="arts-groups-datalist">
+    {% for g in (arts_groups if arts_groups is defined else []) %}
+    <option value="{{ g.name }}"></option>
+    {% endfor %}
+  </datalist>
 
   {# ── Show Dates & Times ───────────────────────────────────────────────────── #}
   <div class="form-section" id="performances-section">

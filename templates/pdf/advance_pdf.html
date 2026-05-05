@@ -36,6 +36,14 @@
   .notes-lbl { font-size: 7pt; font-weight: bold; color: #555; text-transform: uppercase; letter-spacing: 0.04em; padding: 5px 7px 1px; border-top: 1px solid #e8e8e8; }
   .notes-val { white-space: pre-wrap; font-size: 8pt; color: #222; padding: 2px 7px 6px; }
 
+  /* ── Rented-assets sub-block (per section) ── */
+  .rentals-lbl { font-size: 7pt; font-weight: bold; color: #555; text-transform: uppercase; letter-spacing: 0.04em; padding: 5px 7px 2px; border-top: 1px solid #e8e8e8; }
+  .rentals-table { width: 100%; border-collapse: collapse; }
+  .rentals-table td { padding: 2.5px 7px; border-bottom: 1px solid #f0f0f0; vertical-align: top; font-size: 8pt; color: #222; }
+  .rentals-table tr:last-child td { border-bottom: none; }
+  .rentals-table .qty { width: 36px; font-weight: bold; color: #555; white-space: nowrap; }
+  .rentals-table .meta { color: #777; font-size: 7.5pt; }
+
   /* ── Footer ── */
   .doc-footer { position: fixed; bottom: 0.35in; left: 0.55in; right: 0.55in; font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
   .doc-footer span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -85,6 +93,7 @@
 
 {# ── Dynamic Sections ─────────────────────────────────────────── #}
 {% if form_sections %}
+  {% set abs_map = assets_by_section if assets_by_section is defined else {} %}
   {% for section in form_sections %}
     {# Collect all non-empty values for this section #}
     {% set ns = namespace(has_content=false, notes_fields=[], regular_rows=[]) %}
@@ -100,10 +109,11 @@
       {% endif %}
     {% endfor %}
 
-    {% if ns.has_content %}
+    {% set section_rentals = abs_map.get(section.id, []) %}
+    {% if ns.has_content or section_rentals %}
     <div class="section">
       <div class="section-head">{{ section.label }}</div>
-      {% if ns.regular_rows %}
+      {% if ns.regular_rows and ns.has_content %}
       <table class="two-col-table">
         {% for field in ns.regular_rows %}
           {# Gracefully handle any field type — unknown types render as plain text #}
@@ -139,6 +149,24 @@
         <div class="notes-val">{{ val }}</div>
         {% endif %}
       {% endfor %}
+      {% if section_rentals %}
+      <div class="rentals-lbl">Rented Assets</div>
+      <table class="rentals-table">
+        {% for r in section_rentals %}
+        <tr>
+          <td class="qty">{{ r.quantity }}×</td>
+          <td>
+            {{ r.type_name }}
+            {% set meta_bits = [] %}
+            {% if r.manufacturer %}{% set _ = meta_bits.append(r.manufacturer) %}{% endif %}
+            {% if r.model %}{% set _ = meta_bits.append(r.model) %}{% endif %}
+            {% if meta_bits %}<span class="meta"> · {{ meta_bits|join(' · ') }}</span>{% endif %}
+            {% if r.notes %}<span class="meta"> — {{ r.notes }}</span>{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% endif %}
     </div>
     {% endif %}
   {% endfor %}
