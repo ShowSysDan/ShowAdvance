@@ -423,6 +423,73 @@ function bindAdvanceForm() {
       if (e.key === 'Escape' && !list.hidden) setOpen(false);
     });
   });
+
+  // Arts-group composite picker: <select> with "+ Add new…" that swaps in
+  // a text input. Hidden .adv-field carries the canonical value.
+  form.querySelectorAll('.arts-group-picker').forEach(picker => {
+    if (picker.dataset.agpBound) return;
+    picker.dataset.agpBound = '1';
+    const hidden    = picker.querySelector('.arts-group-value');
+    const select    = picker.querySelector('.arts-group-select');
+    const newRow    = picker.querySelector('.arts-group-new-row');
+    const newInput  = picker.querySelector('.arts-group-new-input');
+    const cancelBtn = picker.querySelector('.arts-group-new-cancel');
+    if (!hidden || !select) return;
+
+    const showSelect = (selectedVal) => {
+      newRow.style.display = 'none';
+      select.style.display = '';
+      if (selectedVal !== undefined) select.value = selectedVal;
+    };
+    const showNewInput = () => {
+      select.style.display = 'none';
+      newRow.style.display = 'flex';
+      newInput.value = '';
+      newInput.focus();
+    };
+    const commitNew = () => {
+      const v = (newInput.value || '').trim();
+      if (!v) { showSelect(hidden.value || ''); return; }
+      // Inject as an option so it shows selected; on next page reload the
+      // server-side INSERT OR IGNORE will canonicalize it.
+      let opt = Array.from(select.options).find(o => o.value === v);
+      if (!opt) {
+        opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        // Insert before the "+ Add new…" sentinel if present.
+        const sentinel = Array.from(select.options).find(o => o.value === '__new__');
+        if (sentinel) select.insertBefore(opt, sentinel);
+        else select.appendChild(opt);
+      }
+      hidden.value = v;
+      showSelect(v);
+      scheduleSave();
+    };
+
+    select.addEventListener('change', () => {
+      if (select.value === '__new__') {
+        showNewInput();
+      } else {
+        hidden.value = select.value;
+        scheduleSave();
+      }
+    });
+    if (newInput) {
+      newInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); commitNew(); }
+        else if (e.key === 'Escape') { e.preventDefault(); showSelect(hidden.value || ''); }
+      });
+      newInput.addEventListener('blur', commitNew);
+    }
+    if (cancelBtn) {
+      cancelBtn.addEventListener('mousedown', (e) => {
+        // mousedown so it fires before newInput's blur handler.
+        e.preventDefault();
+        showSelect(hidden.value || '');
+      });
+    }
+  });
 }
 
 function collectAdvanceData() {

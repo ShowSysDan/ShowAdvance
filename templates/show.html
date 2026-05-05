@@ -107,13 +107,31 @@
       </select>
 
     {% elif field.field_type == 'arts_group_dropdown' %}
-      {# autocomplete="on" overrides the form-level autocomplete="off" so
-         Chrome/Edge will actually display the <datalist> suggestions. #}
-      <input type="text" class="field-input adv-field" data-key="{{ field.field_key }}"
-             value="{{ cur }}" list="arts-groups-datalist" autocomplete="on"
-             placeholder="{{ field.placeholder or 'Type or pick an arts group…' }}"
-             {% if restricted %}disabled{% endif %}>
-      <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">Pick from the list or type a new name — new names are saved automatically.</p>
+      {# Composite picker: a real <select> (so users see the native caret)
+         feeds a hidden .adv-field input. Choosing "+ Add new…" swaps in a
+         text input. New typed values are auto-created server-side on save. #}
+      {% set _ag_names = (arts_groups if arts_groups is defined else []) | map(attribute='name') | list %}
+      {% set _ag_is_custom = cur and cur not in _ag_names and cur != '-' %}
+      <div class="arts-group-picker" data-key="{{ field.field_key }}">
+        <input type="hidden" class="adv-field arts-group-value" data-key="{{ field.field_key }}" value="{{ cur }}">
+        <select class="field-input arts-group-select" {% if restricted %}disabled{% endif %}>
+          <option value="">— Select —</option>
+          {% for g in (arts_groups if arts_groups is defined else []) %}
+          <option value="{{ g.name }}" {% if cur == g.name %}selected{% endif %}>{{ g.name }}</option>
+          {% endfor %}
+          {% if _ag_is_custom %}
+          <option value="{{ cur }}" selected>{{ cur }}</option>
+          {% endif %}
+          {% if not restricted %}
+          <option value="__new__">+ Add new…</option>
+          {% endif %}
+        </select>
+        <div class="arts-group-new-row" style="display:none;margin-top:6px;gap:6px;align-items:center">
+          <input type="text" class="field-input arts-group-new-input" placeholder="New arts group name…" style="flex:1">
+          <button type="button" class="btn btn-sm btn-ghost arts-group-new-cancel">✕</button>
+        </div>
+      </div>
+      <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">Pick from the list or choose <strong>+ Add new…</strong> to type a new arts group — new names are saved automatically.</p>
 
     {% elif field.field_type == 'file_upload' %}
       <div class="adv-file-upload" data-field-key="{{ field.field_key }}">
@@ -255,16 +273,6 @@
 {#                          ADVANCE SHEET TAB                                   #}
 {# ════════════════════════════════════════════════════════════════════════════ #}
 <div id="tab-advance" class="tab-pane {% if tab == 'advance' %}active{% endif %}">
-
-{# Shared <datalist> for arts_group_dropdown fields. Placed outside the <form>
-   because Chrome ignores datalists inside a form with autocomplete="off".
-   Inputs reference it by id via list="arts-groups-datalist". #}
-<datalist id="arts-groups-datalist">
-  {% for g in (arts_groups if arts_groups is defined else []) %}
-  <option value="{{ g.name }}"></option>
-  {% endfor %}
-</datalist>
-
 <aside id="advance-side-nav" class="form-side-nav" aria-label="Advance form sections"></aside>
 <form id="advance-form" autocomplete="off">
 
