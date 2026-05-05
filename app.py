@@ -2849,11 +2849,41 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
         app.logger.warning(f'Could not load form_sections for PDF: {e}')
         form_sections = []
 
+    # Rented assets, grouped by asset category, for sections that have a
+    # linked category. Skip hidden rentals; sort within each category by
+    # type name for stable PDF output.
+    assets_by_category = {}
+    try:
+        db2 = get_db()
+        rental_rows = db2.execute("""
+            SELECT sa.quantity, sa.notes, sa.rental_start, sa.rental_end,
+                   at.name AS type_name, at.manufacturer, at.model,
+                   ac.id AS category_id, ac.name AS category_name
+            FROM show_assets sa
+            JOIN asset_types at ON at.id = sa.asset_type_id
+            JOIN asset_categories ac ON ac.id = at.category_id
+            WHERE sa.show_id = ? AND sa.is_hidden = 0
+            ORDER BY ac.sort_order, ac.name, at.name
+        """, (show_id,)).fetchall()
+        db2.close()
+        for r in rental_rows:
+            assets_by_category.setdefault(r['category_id'], []).append(dict(r))
+    except Exception as e:
+        app.logger.warning(f'Could not load rented assets for advance PDF: {e}')
+
+    # Map section.id -> list of rentals for sections that link a category.
+    assets_by_section = {
+        s['id']: assets_by_category.get(s.get('asset_category_id'), [])
+        for s in form_sections
+        if s.get('asset_category_id')
+    }
+
     try:
         html = render_template('pdf/advance_pdf.html',
                                show=show, advance_data=advance_data,
                                contact_map=contact_map,
                                form_sections=form_sections,
+                               assets_by_section=assets_by_section,
                                logo_data=logo_data,
                                version=new_v,
                                export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
@@ -2863,6 +2893,7 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
                                show=show, advance_data=advance_data,
                                contact_map=contact_map,
                                form_sections=[],
+                               assets_by_section={},
                                logo_data=logo_data,
                                version=new_v,
                                export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
@@ -3668,6 +3699,12 @@ def settings():
         'SELECT id, name FROM schedule_templates ORDER BY sort_order, name'
     ).fetchall()] if _is_ca else []
 
+    # Asset categories for the form-section editor (link a section to a category
+    # so rented assets in that category appear under it in the advance PDF).
+    asset_categories = [dict(c) for c in db3.execute(
+        'SELECT id, name FROM asset_categories ORDER BY sort_order, name'
+    ).fetchall()] if _is_ca else []
+
     # Job positions data for settings tab — visible to content admins AND schedulers
     position_categories = [dict(c) for c in db3.execute(
         'SELECT * FROM position_categories WHERE is_venue=0 OR is_venue IS NULL ORDER BY sort_order, id'
@@ -3752,6 +3789,7 @@ def settings():
                            users=users,
                            groups=groups_data,
                            form_sections=form_sections,
+                           asset_categories=asset_categories,
                            sched_meta_fields=sched_meta_fields,
                            syslog_settings=safe_settings,
                            db_settings=db_settings if _is_admin else {},
@@ -4265,14 +4303,17 @@ def add_form_section():
         return jsonify({'success': False, 'error': 'section_key and label required.'}), 400
     db = get_db()
     max_order = db.execute('SELECT MAX(sort_order) FROM form_sections').fetchone()[0] or 0
+    asset_cat_raw = data.get('asset_category_id')
+    asset_cat_id = int(asset_cat_raw) if str(asset_cat_raw or '').strip().isdigit() else None
     try:
         cur = db.execute("""
-            INSERT INTO form_sections (section_key, label, sort_order, collapsible, icon, default_open)
-            VALUES (?,?,?,?,?,?)
+            INSERT INTO form_sections (section_key, label, sort_order, collapsible, icon, default_open, asset_category_id)
+            VALUES (?,?,?,?,?,?,?)
         """, (section_key, label, max_order + 10,
               1 if data.get('collapsible', True) else 0,
               data.get('icon', '◈'),
-              0 if str(data.get('default_open', '1')) == '0' else 1))
+              0 if str(data.get('default_open', '1')) == '0' else 1,
+              asset_cat_id))
         sid = cur.lastrowid
         log_audit_change(db, 'SECTION_ADD', 'form_section', sid, detail=label,
                          table='form_sections')
@@ -4291,12 +4332,15 @@ def edit_form_section(sid):
     data = request.get_json(force=True) or {}
     db = get_db()
     before = _snapshot_row(db, 'form_sections', sid)
+    asset_cat_raw = data.get('asset_category_id')
+    asset_cat_id = int(asset_cat_raw) if str(asset_cat_raw or '').strip().isdigit() else None
     db.execute("""
-        UPDATE form_sections SET label=?, collapsible=?, icon=?, default_open=? WHERE id=?
+        UPDATE form_sections SET label=?, collapsible=?, icon=?, default_open=?, asset_category_id=? WHERE id=?
     """, (data.get('label',''),
           1 if data.get('collapsible', True) else 0,
           data.get('icon','◈'),
           0 if str(data.get('default_open', '1')) == '0' else 1,
+          asset_cat_id,
           sid))
     after = _snapshot_row(db, 'form_sections', sid)
     log_audit(db, 'SECTION_EDIT', 'form_section', sid, detail=data.get('label',''),

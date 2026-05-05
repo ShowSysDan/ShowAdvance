@@ -297,7 +297,8 @@
               <button class="btn btn-xs btn-ghost" onclick="openSectionModal({{ section.id }})"
                       data-id="{{ section.id }}" data-label="{{ section.label }}"
                       data-icon="{{ section.icon }}" data-collapsible="{{ '1' if section.collapsible else '0' }}"
-                      data-default-open="{{ '0' if section.default_open == 0 else '1' }}">Edit</button>
+                      data-default-open="{{ '0' if section.default_open == 0 else '1' }}"
+                      data-asset-category-id="{{ section.asset_category_id or '' }}">Edit</button>
               <button class="btn btn-xs btn-danger-ghost" onclick="deleteSection({{ section.id }})">Delete</button>
             </div>
           </div>
@@ -1621,6 +1622,16 @@
           </label>
         </div>
         <p class="field-hint" style="margin-top:4px">Whether this section starts expanded or collapsed on first view. Users can override this per-session.</p>
+      </div>
+      <div class="field-group">
+        <label class="field-label">LINKED ASSET CATEGORY <span class="text-dim" style="font-size:10px">(optional)</span></label>
+        <select name="asset_category_id" class="field-input">
+          <option value="">— None —</option>
+          {% for c in (asset_categories if asset_categories is defined else []) %}
+          <option value="{{ c.id }}">{{ c.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="field-hint" style="margin-top:4px">Rented assets in this category will be listed under this section on the advance PDF (e.g. link a VIDEO section to the Video category and any rented projectors will appear there).</p>
       </div>
     </div>
     <div class="modal-footer">

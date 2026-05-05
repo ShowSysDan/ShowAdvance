@@ -1194,6 +1194,8 @@ function openSectionModal(sid) {
       modal.querySelectorAll('[name="default_open"]').forEach(r => {
         r.checked = (r.value === (defOpen ? '1' : '0'));
       });
+      const catEl = modal.querySelector('[name="asset_category_id"]');
+      if (catEl) catEl.value = btn.dataset.assetCategoryId || '';
     }
   } else {
     const secForm = modal.querySelector('#section-modal-form');
@@ -1204,6 +1206,8 @@ function openSectionModal(sid) {
         else el.value = el.defaultValue;
       });
     }
+    const catEl = modal.querySelector('[name="asset_category_id"]');
+    if (catEl) catEl.value = '';
   }
   modal.style.display = '';
 }

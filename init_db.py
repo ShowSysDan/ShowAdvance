@@ -132,7 +132,8 @@ CREATE TABLE IF NOT EXISTS form_sections (
     sort_order INTEGER DEFAULT 0,
     collapsible INTEGER DEFAULT 1,
     icon TEXT DEFAULT '◈',
-    default_open INTEGER DEFAULT 1
+    default_open INTEGER DEFAULT 1,
+    asset_category_id INTEGER REFERENCES asset_categories(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS form_fields (
@@ -1103,6 +1104,7 @@ def migrate_db():
         'ALTER TABLE show_external_rentals ADD COLUMN s3_key TEXT DEFAULT NULL',
         'ALTER TABLE asset_types ADD COLUMN photo_s3_key TEXT DEFAULT NULL',
         'ALTER TABLE form_sections ADD COLUMN default_open INTEGER DEFAULT 1',
+        'ALTER TABLE form_sections ADD COLUMN asset_category_id INTEGER REFERENCES asset_categories(id) ON DELETE SET NULL',
         'ALTER TABLE schedule_rows ADD COLUMN perf_id INTEGER DEFAULT NULL',
         'ALTER TABLE schedule_rows ADD COLUMN day_date TEXT DEFAULT NULL',
         'ALTER TABLE shows ADD COLUMN assets_approved INTEGER DEFAULT 0',
@@ -1719,7 +1721,8 @@ CREATE TABLE IF NOT EXISTS form_sections (
     sort_order INTEGER DEFAULT 0,
     collapsible INTEGER DEFAULT 1,
     icon TEXT DEFAULT '◈',
-    default_open INTEGER DEFAULT 1
+    default_open INTEGER DEFAULT 1,
+    asset_category_id INTEGER REFERENCES asset_categories(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS form_fields (
@@ -2386,6 +2389,7 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".job_positions ADD COLUMN IF NOT EXISTS override_rate REAL DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".job_positions ADD COLUMN IF NOT EXISTS venue TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_sections ADD COLUMN IF NOT EXISTS default_open INTEGER DEFAULT 1',
+            f'ALTER TABLE "{app_schema}".form_sections ADD COLUMN IF NOT EXISTS asset_category_id INTEGER REFERENCES "{app_schema}".asset_categories(id) ON DELETE SET NULL',
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS perf_id INTEGER DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".schedule_rows ADD COLUMN IF NOT EXISTS day_date TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS assets_approved INTEGER DEFAULT 0',
