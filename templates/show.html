@@ -255,16 +255,18 @@
 {#                          ADVANCE SHEET TAB                                   #}
 {# ════════════════════════════════════════════════════════════════════════════ #}
 <div id="tab-advance" class="tab-pane {% if tab == 'advance' %}active{% endif %}">
+
+{# Shared <datalist> for arts_group_dropdown fields. Placed outside the <form>
+   because Chrome ignores datalists inside a form with autocomplete="off".
+   Inputs reference it by id via list="arts-groups-datalist". #}
+<datalist id="arts-groups-datalist">
+  {% for g in (arts_groups if arts_groups is defined else []) %}
+  <option value="{{ g.name }}"></option>
+  {% endfor %}
+</datalist>
+
 <aside id="advance-side-nav" class="form-side-nav" aria-label="Advance form sections"></aside>
 <form id="advance-form" autocomplete="off">
-
-  {# Shared <datalist> for arts_group_dropdown fields. New entries typed by users
-     are auto-created server-side on save. #}
-  <datalist id="arts-groups-datalist">
-    {% for g in (arts_groups if arts_groups is defined else []) %}
-    <option value="{{ g.name }}"></option>
-    {% endfor %}
-  </datalist>
 
   {# ── Show Dates & Times ───────────────────────────────────────────────────── #}
   <div class="form-section" id="performances-section">
