@@ -107,8 +107,10 @@
       </select>
 
     {% elif field.field_type == 'arts_group_dropdown' %}
+      {# autocomplete="on" overrides the form-level autocomplete="off" so
+         Chrome/Edge will actually display the <datalist> suggestions. #}
       <input type="text" class="field-input adv-field" data-key="{{ field.field_key }}"
-             value="{{ cur }}" list="arts-groups-datalist"
+             value="{{ cur }}" list="arts-groups-datalist" autocomplete="on"
              placeholder="{{ field.placeholder or 'Type or pick an arts group…' }}"
              {% if restricted %}disabled{% endif %}>
       <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">Pick from the list or type a new name — new names are saved automatically.</p>
@@ -419,7 +421,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           <label class="field-label">{{ f.label }}</label>
           {% if f.advance_field_key %}
             <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-              {{ adv(f.advance_field_key) or '—' }}
+              {{ adv(f.advance_field_key) | multi or '—' }}
             </div>
             <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
           {% elif f.field_type == 'textarea' %}
@@ -689,7 +691,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
         <div class="field-group">
           <label class="field-label">RADIO CHANNEL</label>
           <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ adv('radio_channel') or '—' }}
+            {{ adv('radio_channel') | multi or '—' }}
           </div>
           <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
         </div>

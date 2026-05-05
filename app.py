@@ -183,6 +183,28 @@ def pretty_json_filter(value):
         return value or ''
 
 
+@app.template_filter('multi')
+def multi_filter(value, sep=', '):
+    """Render a multi-select value cleanly. Accepts either a JSON-encoded
+    list (e.g. '["01", "02"]' from multi-checkbox fields) or a plain string;
+    returns a human-readable comma-separated string. Empty/N-A values
+    collapse to ''."""
+    if value is None:
+        return ''
+    s = value if isinstance(value, str) else str(value)
+    s = s.strip()
+    if not s or s in ('-', '—', 'None', 'none', '[]'):
+        return ''
+    if s.startswith('[') and s.endswith(']'):
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return sep.join(str(x).strip() for x in parsed if str(x).strip())
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return s
+
+
 @app.template_filter('hhmm')
 def hhmm_filter(value):
     """Normalize a time string to HH:MM for display (e.g. '1900' → '19:00')."""
