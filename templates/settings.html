@@ -70,7 +70,7 @@
               <tr>
                 <td><strong>System notifications</strong> — asset add/edit/retire</td>
                 <td>Asset events fire automatically.</td>
-                <td><em>n/a</em> — sent to <strong>users</strong> with admin/staff role or "Asset Mgr" flag, not to contacts. The <span class="dept-badge">SYSTEM</span> column on contacts is reserved for future use and currently does not gate any email.</td>
+                <td><em>n/a</em> — sent to <strong>users</strong> with admin/staff role or "Asset Mgr" flag, not to contacts.</td>
               </tr>
               <tr>
                 <td><strong>Account flow</strong> — registration confirmation, approval/decline, password reset</td>
@@ -108,7 +108,7 @@
       </div>
       <div class="contacts-table-wrap">
       <table class="data-table" id="contacts-table">
-        <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="System notification emails">SYSTEM</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
+        <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
@@ -131,10 +131,6 @@
             <td style="text-align:center">
               <span class="recipient-indicator recipient-dot {{ 'on' if c.production_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="production"
                     title="{% if c.production_recipient %}Receives production/schedule emails{% else %}Not a production recipient{% endif %}"></span>
-            </td>
-            <td style="text-align:center">
-              <span class="recipient-indicator recipient-dot {{ 'on' if c.system_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="system"
-                    title="{% if c.system_recipient %}Receives system notification emails{% else %}Not a system recipient{% endif %}"></span>
             </td>
             {% endif %}
             {% if user.role == 'admin' or is_content_admin %}
@@ -1512,10 +1508,6 @@
             <input type="checkbox" id="edit-production-recipient" style="accent-color:var(--accent)">
             <span style="font-size:12px">Production / schedule emails</span>
           </label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="edit-system-recipient" style="accent-color:var(--accent)">
-            <span style="font-size:12px">System notification emails</span>
-          </label>
         </div>
       </div>
       {% endif %}
@@ -1904,10 +1896,8 @@ function editContact(btn, id) {
   if (recipientChk) recipientChk.checked = row.dataset.recipient === '1';
   const advChk  = document.getElementById('edit-advance-recipient');
   const prodChk = document.getElementById('edit-production-recipient');
-  const sysChk  = document.getElementById('edit-system-recipient');
   if (advChk)  advChk.checked  = row.querySelector('[data-email-type=advance]')?.classList.contains('on') || false;
   if (prodChk) prodChk.checked = row.querySelector('[data-email-type=production]')?.classList.contains('on') || false;
-  if (sysChk)  sysChk.checked  = row.querySelector('[data-email-type=system]')?.classList.contains('on') || false;
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -1925,7 +1915,6 @@ async function saveContact() {
     report_recipient: recipientChk ? recipientChk.checked : undefined,
     advance_recipient: document.getElementById('edit-advance-recipient')?.checked || false,
     production_recipient: document.getElementById('edit-production-recipient')?.checked || false,
-    system_recipient: document.getElementById('edit-system-recipient')?.checked || false,
   };
   const resp = await fetch(`/settings/contacts/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
