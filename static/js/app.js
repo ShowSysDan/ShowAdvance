@@ -243,6 +243,7 @@ function initShow(showId, initialTab) {
   evaluateAllConditionals();
   _bindScheduleTimeParsing();
   _initRowDrag();
+  if (typeof initAdvFileFields === 'function') initAdvFileFields();
 
   // 30-second safety-net: flush any unsaved changes that the debounce
   // may have missed (e.g. browser regained focus, slow typing bursts).
@@ -1848,12 +1849,16 @@ function renderAttachments(files) {
       ? Math.round(f.file_size / 1024) + ' KB'
       : f.file_size + ' B';
     const time = fmtDate(f.created_at);
+    const fieldBadge = f.field_key
+      ? `<span class="badge" style="background:rgba(184,132,10,.15);color:#B8840A;border:1px solid rgba(184,132,10,.3);font-size:10px;padding:1px 6px;border-radius:99px;margin-left:6px">↳ ${_esc(f.field_key)}</span>`
+      : '';
+    const desc = f.description ? ` · ${_esc(f.description)}` : '';
     return `
       <div class="attachment-item">
         <div class="attachment-icon">${_fileIcon(f.mime_type)}</div>
         <div class="attachment-info">
-          <a href="/shows/${SHOW_ID}/attachments/${f.id}/download" class="attachment-name">${_esc(f.filename)}</a>
-          <span class="attachment-meta">${size} · ${_esc(f.uploader)} · ${time}</span>
+          <a href="/shows/${SHOW_ID}/attachments/${f.id}/download" class="attachment-name">${_esc(f.filename)}</a>${fieldBadge}
+          <span class="attachment-meta">${size} · ${_esc(f.uploader)} · ${time}${desc}</span>
         </div>
         <button class="btn btn-xs btn-danger-ghost" onclick="deleteAttachment(${f.id})" title="Remove">×</button>
       </div>`;
@@ -1941,6 +1946,102 @@ function uploadFile(file) {
   });
   xhr.open('POST', `/shows/${SHOW_ID}/attachments`);
   xhr.send(formData);
+}
+
+/* ── Per-field file_upload (advance form) ─────────────────────────── */
+
+async function loadAdvFieldFiles(wrap) {
+  if (!SHOW_ID || !wrap) return;
+  const fieldKey = wrap.dataset.fieldKey;
+  if (!fieldKey) return;
+  try {
+    const resp = await fetch(`/shows/${SHOW_ID}/attachments?field_key=${encodeURIComponent(fieldKey)}`);
+    const files = await resp.json();
+    const ul = wrap.querySelector('.adv-file-list');
+    if (!ul) return;
+    if (!files.length) { ul.innerHTML = ''; return; }
+    ul.innerHTML = files.map(f => {
+      const size = f.file_size > 1048576
+        ? (f.file_size / 1048576).toFixed(1) + ' MB'
+        : f.file_size > 1024
+        ? Math.round(f.file_size / 1024) + ' KB'
+        : f.file_size + ' B';
+      const desc = f.description ? ` <span class="text-dim">— ${_esc(f.description)}</span>` : '';
+      return `<li style="display:flex;align-items:center;gap:8px;padding:3px 0">
+        <span>${_fileIcon(f.mime_type)}</span>
+        <a href="/shows/${SHOW_ID}/attachments/${f.id}/download" style="color:var(--accent);text-decoration:none">${_esc(f.filename)}</a>
+        <span class="text-dim" style="font-size:11px">(${size})</span>${desc}
+        <button class="btn btn-xs btn-danger-ghost" style="margin-left:auto"
+                onclick="deleteAdvFieldFile(${f.id}, this)" title="Remove">×</button>
+      </li>`;
+    }).join('');
+  } catch(_) {}
+}
+
+function uploadAdvField(input) {
+  const wrap = input.closest('.adv-file-upload');
+  if (!wrap || !SHOW_ID) { input.value = ''; return; }
+  const file = input.files[0];
+  if (!file) return;
+  const fieldKey = wrap.dataset.fieldKey;
+  const status = wrap.querySelector('.adv-file-status');
+  const desc   = (wrap.querySelector('.adv-file-desc')?.value || '').trim();
+
+  const formData = new FormData();
+  formData.append('file', file);
+  formData.append('field_key', fieldKey);
+  if (desc) formData.append('description', desc);
+
+  if (status) { status.textContent = 'Uploading…'; status.style.color = 'var(--text-muted)'; }
+  const xhr = new XMLHttpRequest();
+  xhr.upload.addEventListener('progress', e => {
+    if (e.lengthComputable && status) {
+      status.textContent = `Uploading ${Math.round(e.loaded / e.total * 100)}%`;
+    }
+  });
+  xhr.addEventListener('load', () => {
+    input.value = '';
+    try {
+      const d = JSON.parse(xhr.responseText);
+      if (d.success) {
+        if (status) { status.textContent = '✓ Uploaded'; status.style.color = 'var(--accent)'; }
+        const descInput = wrap.querySelector('.adv-file-desc');
+        if (descInput) descInput.value = '';
+        loadAdvFieldFiles(wrap);
+        // Refresh the export tab list too if it's loaded
+        if (typeof loadAttachments === 'function') loadAttachments();
+        setTimeout(() => { if (status) status.textContent = ''; }, 2500);
+      } else {
+        if (status) { status.textContent = '✗ ' + (d.error || 'Upload failed'); status.style.color = 'var(--danger)'; }
+      }
+    } catch(_) {
+      if (status) { status.textContent = '✗ Upload failed'; status.style.color = 'var(--danger)'; }
+    }
+  });
+  xhr.addEventListener('error', () => {
+    input.value = '';
+    if (status) { status.textContent = '✗ Network error'; status.style.color = 'var(--danger)'; }
+  });
+  xhr.open('POST', `/shows/${SHOW_ID}/attachments`);
+  xhr.send(formData);
+}
+
+async function deleteAdvFieldFile(aid, btn) {
+  if (!SHOW_ID || !aid) return;
+  if (!confirm('Remove this file?')) return;
+  const wrap = btn.closest('.adv-file-upload');
+  const resp = await fetch(`/shows/${SHOW_ID}/attachments/${aid}/delete`, {method:'POST'});
+  const d = await resp.json();
+  if (d.success) {
+    if (wrap) loadAdvFieldFiles(wrap);
+    if (typeof loadAttachments === 'function') loadAttachments();
+  } else {
+    alert(d.error || 'Delete failed.');
+  }
+}
+
+function initAdvFileFields() {
+  document.querySelectorAll('#advance-form .adv-file-upload').forEach(loadAdvFieldFiles);
 }
 
 async function deleteAttachment(aid) {

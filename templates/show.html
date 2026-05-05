@@ -109,6 +109,23 @@
              {% if restricted %}disabled{% endif %}>
       <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">Pick from the list or type a new name — new names are saved automatically.</p>
 
+    {% elif field.field_type == 'file_upload' %}
+      <div class="adv-file-upload" data-field-key="{{ field.field_key }}">
+        {% if not restricted %}
+        <input type="text" class="field-input adv-file-desc" placeholder="{{ field.placeholder or 'Description (optional)' }}"
+               style="margin-bottom:6px;font-size:12px">
+        <label class="btn btn-sm btn-ghost adv-file-pick" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">
+          <input type="file" class="adv-file-input" style="display:none"
+                 accept=".pdf,application/pdf,image/*,.doc,.docx,.txt"
+                 onchange="uploadAdvField(this)">
+          ⤴ Upload file
+        </label>
+        <span class="adv-file-status text-dim" style="font-size:11px;margin-left:8px"></span>
+        {% endif %}
+        <ul class="adv-file-list" style="list-style:none;padding:0;margin:6px 0 0;font-size:12px"></ul>
+      </div>
+      <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">PDFs, images, and Word documents are appended to the advance PDF on export.</p>
+
     {% elif field.field_type == 'textarea' %}
       <textarea class="field-input field-textarea adv-field" data-key="{{ field.field_key }}"
                 rows="3" placeholder="{{ field.placeholder }}" {% if restricted %}disabled{% endif %}>{{ cur }}</textarea>

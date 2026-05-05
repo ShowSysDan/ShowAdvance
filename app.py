@@ -2528,14 +2528,27 @@ def get_attachments(show_id):
     if not can_access_show(session['user_id'], show_id):
         return jsonify({'success': False, 'error': 'Access denied.'}), 403
     db = get_db()
-    rows = db.execute("""
-        SELECT sa.id, sa.filename, sa.mime_type, sa.file_size, sa.created_at,
-               u.display_name, u.username
-        FROM show_attachments sa
-        LEFT JOIN users u ON sa.uploaded_by = u.id
-        WHERE sa.show_id = ?
-        ORDER BY sa.created_at ASC
-    """, (show_id,)).fetchall()
+    field_key = request.args.get('field_key')
+    if field_key:
+        rows = db.execute("""
+            SELECT sa.id, sa.filename, sa.mime_type, sa.file_size, sa.created_at,
+                   sa.field_key, sa.description,
+                   u.display_name, u.username
+            FROM show_attachments sa
+            LEFT JOIN users u ON sa.uploaded_by = u.id
+            WHERE sa.show_id = ? AND sa.field_key = ?
+            ORDER BY sa.created_at ASC
+        """, (show_id, field_key)).fetchall()
+    else:
+        rows = db.execute("""
+            SELECT sa.id, sa.filename, sa.mime_type, sa.file_size, sa.created_at,
+                   sa.field_key, sa.description,
+                   u.display_name, u.username
+            FROM show_attachments sa
+            LEFT JOIN users u ON sa.uploaded_by = u.id
+            WHERE sa.show_id = ?
+            ORDER BY sa.created_at ASC
+        """, (show_id,)).fetchall()
     db.close()
     return jsonify([{
         'id':         r['id'],
@@ -2543,6 +2556,8 @@ def get_attachments(show_id):
         'mime_type':  r['mime_type'],
         'file_size':  r['file_size'],
         'created_at': r['created_at'],
+        'field_key':  r['field_key'],
+        'description': r['description'] or '',
         'uploader':   r['display_name'] or r['username'] or 'Unknown',
     } for r in rows])
 
@@ -2564,12 +2579,15 @@ def upload_attachment(show_id):
         return jsonify({'success': False, 'error': f'File too large (max {max_mb} MB).'}), 413
     filename  = secure_filename(f.filename) or 'file'
     mime_type = f.content_type or 'application/octet-stream'
+    # Optional per-form-field association (NULL = general show attachment).
+    field_key = (request.form.get('field_key') or '').strip() or None
+    description = (request.form.get('description') or '').strip()
     db = get_db()
     # Insert row first (without file data) to get the auto-assigned id
     cur = db.execute("""
-        INSERT INTO show_attachments (show_id, uploaded_by, filename, mime_type, file_data, file_size)
-        VALUES (?, ?, ?, ?, NULL, ?)
-    """, (show_id, session['user_id'], filename, mime_type, len(data)))
+        INSERT INTO show_attachments (show_id, uploaded_by, filename, mime_type, file_data, file_size, field_key, description)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, ?)
+    """, (show_id, session['user_id'], filename, mime_type, len(data), field_key, description))
     aid = cur.lastrowid
     # Upload to S3; fall back to DB storage if S3 is unavailable
     if s3_storage.is_configured():
@@ -2592,7 +2610,7 @@ def upload_attachment(show_id):
         WHERE sa.id = ?
     """, (aid,)).fetchone()
     db.close()
-    syslog_logger.info(f"FILE_UPLOAD show_id={show_id} filename={filename} by={session.get('username')}")
+    syslog_logger.info(f"FILE_UPLOAD show_id={show_id} filename={filename} field_key={field_key} by={session.get('username')}")
     return jsonify({
         'success': True,
         'attachment': {
@@ -2601,6 +2619,8 @@ def upload_attachment(show_id):
             'mime_type':  row['mime_type'],
             'file_size':  row['file_size'],
             'created_at': row['created_at'],
+            'field_key':  field_key,
+            'description': description,
             'uploader':   row['display_name'] or row['username'] or 'Unknown',
         }
     })
@@ -2933,10 +2953,131 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
         app.logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=advance error={e}")
         pdf_bytes = None
 
+    # Append per-field uploaded files (file_upload form fields). PDFs merge as-is;
+    # images and Word docs are converted to PDF wrapper pages first.
+    if pdf_bytes:
+        try:
+            extras = _collect_advance_field_attachments(show_id, base_url)
+            if extras:
+                pdf_bytes = _merge_pdfs(pdf_bytes, extras)
+        except Exception as e:
+            app.logger.error(f"PDF append failed for show {show_id}: {e}")
+
     syslog_logger.info(
         f"PDF_EXPORT show_id={show_id} type=advance v={new_v} by={exported_by_id}"
     )
     return html, new_v, dict(show), pdf_bytes, log_id
+
+
+def _collect_advance_field_attachments(show_id, base_url):
+    """Fetch all show_attachments tied to file_upload advance-form fields, in
+    advance-form section/field order. Convert each to PDF bytes (wrapping
+    images and Word docs in a generated cover page). Returns a list of PDF
+    byte-strings ready to append to the advance PDF."""
+    db = get_db()
+    rows = db.execute("""
+        SELECT sa.id, sa.filename, sa.mime_type, sa.file_data, sa.s3_key,
+               sa.field_key, sa.description, sa.created_at,
+               ff.label AS field_label, fs.label AS section_label,
+               fs.sort_order AS section_order, ff.sort_order AS field_order
+        FROM show_attachments sa
+        LEFT JOIN form_fields   ff ON ff.field_key = sa.field_key
+        LEFT JOIN form_sections fs ON fs.id = ff.section_id
+        WHERE sa.show_id = ?
+          AND sa.field_key IS NOT NULL AND sa.field_key != ''
+          AND ff.field_type = 'file_upload'
+        ORDER BY fs.sort_order, ff.sort_order, sa.created_at
+    """, (show_id,)).fetchall()
+    db.close()
+
+    extras = []
+    for r in rows:
+        try:
+            data = None
+            if r['s3_key']:
+                try:
+                    data = s3_storage.download_file(r['s3_key'])
+                except Exception as e:
+                    app.logger.warning(f"S3 fetch failed for attachment {r['id']}: {e}")
+            elif r['file_data']:
+                data = bytes(r['file_data'])
+            if not data:
+                continue
+            mime = (r['mime_type'] or '').lower()
+            fname = (r['filename'] or '').lower()
+            if 'pdf' in mime or fname.endswith('.pdf'):
+                extras.append(data)
+                continue
+            wrapper = _render_attachment_wrapper_pdf(
+                data, mime, r['filename'],
+                section_label=r['section_label'],
+                field_label=r['field_label'],
+                description=r['description'] or '',
+                base_url=base_url
+            )
+            if wrapper:
+                extras.append(wrapper)
+        except Exception as e:
+            app.logger.warning(f"Could not append attachment {r['id']} to PDF: {e}")
+    return extras
+
+
+def _render_attachment_wrapper_pdf(data, mime, filename, section_label,
+                                   field_label, description, base_url):
+    """Build a single-section HTML page for a non-PDF attachment and render
+    it via WeasyPrint. Supports image/* (embeds the image) and DOCX (extracts
+    text). Other types render a placeholder page noting the file is attached
+    separately. Returns PDF bytes or None on failure."""
+    try:
+        import base64
+        from io import BytesIO
+        section = (section_label or '').strip()
+        flabel  = (field_label or filename or '').strip()
+        desc    = (description or '').strip()
+        body_html = ''
+
+        if mime.startswith('image/'):
+            b64 = base64.b64encode(data).decode('ascii')
+            body_html = f'<img src="data:{mime};base64,{b64}" style="max-width:100%;max-height:9in;display:block;margin:0 auto">'
+        elif filename.lower().endswith('.docx') or 'wordprocessingml' in mime:
+            try:
+                import docx as _docx
+                document = _docx.Document(BytesIO(data))
+                paras = [p.text for p in document.paragraphs if p.text.strip()]
+                from markupsafe import escape as _e
+                body_html = '<div style="font-size:10pt;line-height:1.4;white-space:pre-wrap">' + \
+                            '<br><br>'.join(str(_e(p)) for p in paras) + '</div>'
+                if not paras:
+                    body_html = '<p style="color:#666">[Word document had no extractable text — original file is attached to the show.]</p>'
+            except Exception as e:
+                app.logger.warning(f"DOCX text extract failed: {e}")
+                body_html = f'<p style="color:#666">[Word document <strong>{filename}</strong> could not be embedded — original file is attached to the show.]</p>'
+        else:
+            body_html = f'<p style="color:#666">[File <strong>{filename}</strong> ({mime or "unknown type"}) is attached to the show but cannot be rendered inline. Download it from the show\'s Files tab.]</p>'
+
+        html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+            @page {{ size: letter; margin: 0.6in 0.55in; }}
+            body {{ font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #1a1a1a; }}
+            .head {{ border-bottom: 2px solid #000; padding-bottom: 6px; margin-bottom: 14px; }}
+            .head .section {{ font-size: 8pt; font-weight: bold; letter-spacing: 0.08em; text-transform: uppercase; color: #B8840A; }}
+            .head .title {{ font-size: 14pt; font-weight: 700; margin-top: 2px; }}
+            .head .meta {{ font-size: 8pt; color: #555; margin-top: 4px; }}
+            .desc {{ font-size: 9pt; color: #333; margin-bottom: 12px; padding: 6px 10px; background: #f5f5f5; border-left: 3px solid #B8840A; }}
+        </style></head><body>
+            <div class="head">
+                {f'<div class="section">{section}</div>' if section else ''}
+                <div class="title">{flabel}</div>
+                <div class="meta">Attached file: {filename}</div>
+            </div>
+            {f'<div class="desc">{desc}</div>' if desc else ''}
+            {body_html}
+        </body></html>"""
+
+        from weasyprint import HTML as WP_HTML
+        return WP_HTML(string=html, base_url=base_url).write_pdf()
+    except Exception as e:
+        app.logger.warning(f"Wrapper PDF render failed for {filename}: {e}")
+        return None
 
 
 def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):

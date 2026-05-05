@@ -221,6 +221,8 @@ CREATE TABLE IF NOT EXISTS show_attachments (
     file_data    BLOB,
     file_size    INTEGER DEFAULT 0,
     s3_key       TEXT DEFAULT NULL,
+    field_key    TEXT DEFAULT NULL,
+    description  TEXT DEFAULT '',
     created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1084,6 +1086,8 @@ def migrate_db():
             file_data   BLOB,
             file_size   INTEGER DEFAULT 0,
             s3_key      TEXT DEFAULT NULL,
+            field_key   TEXT DEFAULT NULL,
+            description TEXT DEFAULT '',
             created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
 
@@ -1107,6 +1111,8 @@ def migrate_db():
         "ALTER TABLE export_log ADD COLUMN filename TEXT DEFAULT ''",
         'ALTER TABLE export_log ADD COLUMN s3_key TEXT DEFAULT NULL',
         'ALTER TABLE show_attachments ADD COLUMN s3_key TEXT DEFAULT NULL',
+        'ALTER TABLE show_attachments ADD COLUMN field_key TEXT DEFAULT NULL',
+        "ALTER TABLE show_attachments ADD COLUMN description TEXT DEFAULT ''",
         'ALTER TABLE show_external_rentals ADD COLUMN s3_key TEXT DEFAULT NULL',
         'ALTER TABLE asset_types ADD COLUMN photo_s3_key TEXT DEFAULT NULL',
         'ALTER TABLE form_sections ADD COLUMN default_open INTEGER DEFAULT 1',
@@ -1826,6 +1832,8 @@ CREATE TABLE IF NOT EXISTS show_attachments (
     file_data   BYTEA,
     file_size   INTEGER DEFAULT 0,
     s3_key      TEXT DEFAULT NULL,
+    field_key   TEXT DEFAULT NULL,
+    description TEXT DEFAULT '',
     created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -2384,6 +2392,8 @@ def migrate_db_postgres():
             # Drop NOT NULL constraints so S3-migrated rows can have NULL file data
             f'ALTER TABLE "{app_schema}".show_attachments ALTER COLUMN file_data DROP NOT NULL',
             f'ALTER TABLE "{app_schema}".show_attachments ADD COLUMN IF NOT EXISTS s3_key TEXT DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".show_attachments ADD COLUMN IF NOT EXISTS field_key TEXT DEFAULT NULL',
+            f"ALTER TABLE \"{app_schema}\".show_attachments ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''",
             f'ALTER TABLE "{app_schema}".show_external_rentals ADD COLUMN IF NOT EXISTS s3_key TEXT DEFAULT NULL',
             f"ALTER TABLE \"{app_schema}\".asset_types ADD COLUMN IF NOT EXISTS supplier_name TEXT DEFAULT ''",
             f"ALTER TABLE \"{app_schema}\".asset_types ADD COLUMN IF NOT EXISTS supplier_contact TEXT DEFAULT ''",
