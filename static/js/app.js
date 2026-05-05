@@ -296,6 +296,31 @@ function scheduleSave() {
   saveTimer = setTimeout(() => saveActive(), 1500);
 }
 
+/* ── Help Popovers ─────────────────────────────────────────────── */
+function toggleHelpPopover(id, ev) {
+  if (ev) ev.stopPropagation();
+  const panel = document.getElementById(id);
+  if (!panel) return;
+  const willOpen = panel.hasAttribute('hidden');
+  // Close any other open help panels first.
+  document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(p => {
+    if (p !== panel) p.setAttribute('hidden', '');
+  });
+  if (willOpen) panel.removeAttribute('hidden');
+  else panel.setAttribute('hidden', '');
+}
+document.addEventListener('click', (e) => {
+  document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(panel => {
+    if (!panel.parentElement.contains(e.target)) panel.setAttribute('hidden', '');
+  });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.help-popover-panel:not([hidden])')
+      .forEach(p => p.setAttribute('hidden', ''));
+  }
+});
+
 /* ── Toast Notification ─────────────────────────────────────────── */
 function showSaveToast(msg, type) {
   const toast = document.getElementById('save-toast');

@@ -476,6 +476,38 @@ html[data-theme="light"] select.field-input {
   box-shadow: 0 6px 18px rgba(0,0,0,.35);
 }
 
+/* Help popover — small "?" toggle that opens a styled card with longer help. */
+.help-popover { position: relative; display: inline-block; margin-left: 6px; vertical-align: middle; }
+.help-popover-btn {
+  width: 16px; height: 16px; border-radius: 50%;
+  background: var(--bg-hover); color: var(--text-muted);
+  border: 1px solid var(--border); cursor: pointer; padding: 0;
+  font-size: 11px; line-height: 14px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.help-popover-btn:hover { color: var(--accent); border-color: var(--accent); }
+.help-popover-panel[hidden] { display: none; }
+.help-popover-panel {
+  position: absolute; z-index: 200; top: calc(100% + 6px); left: 0;
+  min-width: 320px; max-width: 480px;
+  background: var(--bg-card); border: 1px solid var(--border-light);
+  border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  padding: 12px 14px; font-size: 12px; line-height: 1.5; color: var(--text);
+}
+.help-popover-panel h4 { font-size: 12px; margin: 0 0 6px; color: var(--accent); letter-spacing: .04em; text-transform: uppercase; }
+.help-popover-panel code { background: var(--bg-hover); padding: 1px 5px; border-radius: 3px; font-family: var(--font-mono); font-size: 11px; }
+.help-popover-panel table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.help-popover-panel table th, .help-popover-panel table td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; }
+.help-popover-panel table th { font-size: 10px; color: var(--text-dim); text-transform: uppercase; letter-spacing: .04em; }
+.help-popover-panel table tr:last-child td { border-bottom: none; }
+.help-popover-panel ul { margin: 4px 0 0 16px; padding: 0; }
+.help-popover-panel li { margin-bottom: 4px; }
+.help-popover-panel .pop-close {
+  position: absolute; top: 6px; right: 8px;
+  background: transparent; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px;
+}
+.help-popover-panel .pop-close:hover { color: var(--text); }
+
 /* Multi-select checkbox list */
 .multi-check-list {
   border: 1px solid var(--border); border-radius: var(--radius);
