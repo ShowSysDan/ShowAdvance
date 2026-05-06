@@ -444,7 +444,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
         <div class="field-group" {% if f.width_hint == 'full' %}style="grid-column:1 / -1"{% endif %}>
           <label class="field-label">{{ f.label }}</label>
           {% if f.advance_field_key %}
-            <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            <div class="field-input sched-adv-mirror" data-adv-key="{{ f.advance_field_key }}" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
               {{ adv(f.advance_field_key) | multi or '—' }}
             </div>
             <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
@@ -459,22 +459,20 @@ const SHOW_VENUE = {{ show.venue | tojson }};
         {% endfor %}
 
         {# ── Load-In / Load-Out (read-only, from Advance Sheet) ─────────── #}
-        {% if show.load_in_date or show.load_in_time or show.load_out_date or show.load_out_time %}
         <div class="field-group">
           <label class="field-label">LOAD-IN</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ show.load_in_date or '' }}{% if show.load_in_date and show.load_in_time %} · {% endif %}{{ show.load_in_time or '' }}{{ '—' if not show.load_in_date and not show.load_in_time }}
+          <div class="field-input sched-adv-mirror" data-mirror-type="load_in" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {% if show.load_in_date or show.load_in_time %}{{ show.load_in_date or '' }}{% if show.load_in_date and show.load_in_time %} · {% endif %}{{ show.load_in_time or '' }}{% else %}—{% endif %}
           </div>
           <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
         </div>
         <div class="field-group">
           <label class="field-label">LOAD-OUT</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ show.load_out_date or '' }}{% if show.load_out_date and show.load_out_time %} · {% endif %}{{ show.load_out_time or '' }}{{ '—' if not show.load_out_date and not show.load_out_time }}
+          <div class="field-input sched-adv-mirror" data-mirror-type="load_out" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+            {% if show.load_out_date or show.load_out_time %}{{ show.load_out_date or '' }}{% if show.load_out_date and show.load_out_time %} · {% endif %}{{ show.load_out_time or '' }}{% else %}—{% endif %}
           </div>
           <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
         </div>
-        {% endif %}
 
         {# ── Global WiFi (read-only) ──────────────────────────────────────── #}
         {% if global_wifi_network %}
@@ -705,20 +703,6 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
         </div>
         {% endfor %}
-        <div class="field-group">
-          <label class="field-label">MIX POSITION</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ adv('mix_position') or '—' }}
-          </div>
-          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-        </div>
-        <div class="field-group">
-          <label class="field-label">RADIO CHANNEL</label>
-          <div class="field-input" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-            {{ adv('radio_channel') | multi or '—' }}
-          </div>
-          <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-        </div>
         <div class="field-group">
           <label class="field-label">SECURITY EMAIL</label>
           <input type="text" class="field-input sched-meta" data-key="security_email"
