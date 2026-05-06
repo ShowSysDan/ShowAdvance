@@ -496,7 +496,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
             class="btn btn-sm {% if loop.first %}btn-primary{% else %}btn-ghost{% endif %} sched-day-tab"
             data-day-key="{{ d.date_key }}"
             data-perf-id="{{ d.primary_perf_id or '' }}"
-            onclick="switchSchedDay({{ d.date_key | tojson }}, this)">
+            onclick='switchSchedDay({{ d.date_key | tojson }}, this)'>
       DAY {{ loop.index }}{% if d.perf_date %} · {{ (d.perf_date|string)[5:] | replace('-','/') }}{% endif %}
     </button>
     {% endfor %}
@@ -532,7 +532,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           {# Apply template dropdown #}
           {% if sched_templates %}
           <select class="field-input" style="width:auto;font-size:11px;padding:3px 6px;height:auto"
-                  onchange="applySchedTemplate(this.value, {{ d.date_key | tojson }}); this.value=''">
+                  onchange='applySchedTemplate(this.value, {{ d.date_key | tojson }}); this.value=""'>
             <option value="">Apply template…</option>
             {% for t in sched_templates %}
             <option value="{{ t.id }}">{{ t.name }}</option>
@@ -542,7 +542,7 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           {# Copy from another day #}
           {% if schedule_days | length > 1 %}
           <select class="field-input" style="width:auto;font-size:11px;padding:3px 6px;height:auto"
-                  onchange="copySchedDay(this.value, {{ d.date_key | tojson }}); this.value=''">
+                  onchange='copySchedDay(this.value, {{ d.date_key | tojson }}); this.value=""'>
             <option value="">Copy from…</option>
             {% for od in schedule_days %}
             {% if od.date_key != d.date_key %}
@@ -557,8 +557,8 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           <button type="button" class="btn btn-sm btn-ghost"
                   onclick='pullAdvanceTime({{ d.date_key | tojson }}, {{ _times | tojson }})'>Pull time{% if _times|length > 1 %}s{% endif %}</button>
           {% endif %}
-          <button type="button" class="btn btn-sm btn-ghost" onclick="sortSchedRowsByTime({{ d.date_key | tojson }})" title="Sort rows by start time">⇅ Sort</button>
-          <button type="button" class="btn btn-sm btn-ghost" onclick="addScheduleRow({{ d.date_key | tojson }})">+ Add Row</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick='sortSchedRowsByTime({{ d.date_key | tojson }})' title="Sort rows by start time">⇅ Sort</button>
+          <button type="button" class="btn btn-sm btn-ghost" onclick='addScheduleRow({{ d.date_key | tojson }})'>+ Add Row</button>
         </div>
         {% endif %}
       </div>
@@ -601,8 +601,8 @@ const SHOW_VENUE = {{ show.venue | tojson }};
       </div>
       {% if not restricted %}
       <div class="form-section-footer">
-        <button type="button" class="btn btn-ghost btn-sm" onclick="addScheduleRow({{ d.date_key | tojson }})">+ Add Row</button>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="sortSchedRowsByTime({{ d.date_key | tojson }})">⇅ Sort by time</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick='addScheduleRow({{ d.date_key | tojson }})'>+ Add Row</button>
+        <button type="button" class="btn btn-ghost btn-sm" onclick='sortSchedRowsByTime({{ d.date_key | tojson }})'>⇅ Sort by time</button>
       </div>
       {% endif %}
     </div>
