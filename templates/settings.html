@@ -354,6 +354,7 @@
                 <tr>
                   <th style="width:28px"></th>
                   <th>LABEL</th>
+                  <th style="width:180px">FIELD KEY</th>
                   <th style="width:120px">TYPE</th>
                   <th style="width:140px">CONDITION</th>
                   <th style="width:80px">ACTIONS</th>
@@ -367,6 +368,7 @@
                     {{ field.label }}
                     {% if field.is_notes_field %}<span class="text-dim" style="font-size:10px"> (notes)</span>{% endif %}
                   </td>
+                  <td><code class="field-key-code" title="Click to copy" onclick="copyToClipboard(this.textContent, this)" style="font-size:11px;font-family:var(--font-mono);background:var(--bg-hover);color:var(--text-muted);padding:2px 6px;border-radius:4px;cursor:pointer;user-select:all">{{ field.field_key }}</code></td>
                   <td><span class="field-type-badge">{{ field.field_type }}</span></td>
                   <td class="text-dim" style="font-size:11px;font-family:var(--font-mono)">{{ field.conditional_show_when or '—' }}</td>
                   <td>
@@ -1846,6 +1848,28 @@
 
 {% block scripts %}
 <script>
+/* ── Copy-to-clipboard helper (used by field-key cells) ─────────── */
+function copyToClipboard(text, el) {
+  if (!text) return;
+  const done = () => {
+    if (!el) return;
+    const orig = el.textContent;
+    el.textContent = 'copied!';
+    el.classList.add('copied');
+    setTimeout(() => { el.textContent = orig; el.classList.remove('copied'); }, 900);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(done, () => {});
+  } else {
+    // Fallback for non-secure contexts
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch(e) {}
+    document.body.removeChild(ta);
+  }
+}
+
 /* ── Form Fields Sub-tab Switcher ──────────────────────────────── */
 function switchFieldsTab(name) {
   ['advance','schedule','templates'].forEach(t => {
