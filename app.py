@@ -946,6 +946,8 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         recip_col = 'advance_recipient'
     elif pdf_type == 'schedule':
         recip_col = 'production_recipient'
+    elif pdf_type == 'postnotes':
+        recip_col = 'postnotes_recipient'
     else:
         recip_col = 'report_recipient'
     recipients = [
@@ -964,6 +966,10 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         with app.app_context():
             if pdf_type == 'advance':
                 _, pdf_version, show_dict, pdf_bytes, pdf_log_id = _build_advance_pdf(
+                    show_id, exported_by_id=exported_by_id, base_url='/'
+                )
+            elif pdf_type == 'postnotes':
+                _, pdf_version, show_dict, pdf_bytes, pdf_log_id = _build_postnotes_pdf(
                     show_id, exported_by_id=exported_by_id, base_url='/'
                 )
             else:
@@ -1008,7 +1014,11 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         except Exception:
             pm_name = ''
 
-    type_label  = 'Advance Sheet' if pdf_type == 'advance' else 'Production Schedule'
+    type_label = ({
+        'advance': 'Advance Sheet',
+        'schedule': 'Production Schedule',
+        'postnotes': 'Post-Show Report',
+    }).get(pdf_type, 'Production Schedule')
     subject_parts = ['3·2·1→Theater', type_label, show_name]
     if show_date:
         subject_parts.append(show_date)
@@ -2985,12 +2995,19 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
         pdf_bytes = None
 
     # Append per-field uploaded files (file_upload form fields). PDFs merge as-is;
-    # images and Word docs are converted to PDF wrapper pages first.
+    # images and Word docs are converted to PDF wrapper pages first. The
+    # watermark below brands each appended page so a printed copy is
+    # traceable back to this advance sheet.
     if pdf_bytes:
         try:
             extras = _collect_advance_field_attachments(show_id, base_url)
             if extras:
-                pdf_bytes = _merge_pdfs(pdf_bytes, extras)
+                wm_text = (
+                    f"Attached to ADVANCE SHEET v{new_v}  ·  {show['name']}  ·  "
+                    f"{show['show_date'] or '—'}  ·  Exported "
+                    f"{datetime.now().strftime('%B %d, %Y at %I:%M %p')}"
+                )
+                pdf_bytes = _merge_pdfs(pdf_bytes, extras, extras_watermark=wm_text)
         except Exception as e:
             app.logger.error(f"PDF append failed for show {show_id}: {e}")
 
@@ -3392,8 +3409,8 @@ def download_export_history(show_id, log_id):
 @app.route('/shows/<int:show_id>/email/<pdf_type>', methods=['POST'])
 @login_required
 def email_pdf(show_id, pdf_type):
-    """Manually trigger a PDF email for advance or schedule."""
-    if pdf_type not in ('advance', 'schedule'):
+    """Manually trigger a PDF email for advance, schedule, or postnotes."""
+    if pdf_type not in ('advance', 'schedule', 'postnotes'):
         return jsonify({'success': False, 'error': 'Invalid PDF type.'}), 400
     if not can_access_show(session['user_id'], show_id):
         return jsonify({'success': False, 'error': 'Access denied.'}), 403
@@ -3412,15 +3429,18 @@ def email_pdf(show_id, pdf_type):
     return jsonify({'success': ok, 'message': msg, 'recipients': count})
 
 
-@app.route('/shows/<int:show_id>/export/postnotes')
-@login_required
-def export_postnotes(show_id):
-    if not can_access_show(session['user_id'], show_id):
-        abort(403)
+def _build_postnotes_pdf(show_id, exported_by_id=None, base_url=None):
+    """Build the post-show notes PDF. Versions and logs to export_log so the
+    same machinery (history download, S3 archival, scheduled email) works
+    identically to advance/schedule. Returns (html, version, show_dict,
+    pdf_bytes, log_id)."""
+    if exported_by_id is None:
+        exported_by_id = session.get('user_id')
+    if base_url is None:
+        base_url = request.url_root
+
     db = get_db()
     show = db.execute('SELECT * FROM shows WHERE id=?', (show_id,)).fetchone()
-    if not show:
-        abort(404)
     note_rows = db.execute(
         'SELECT field_key, field_value FROM post_show_notes WHERE show_id=?', (show_id,)
     ).fetchall()
@@ -3433,6 +3453,13 @@ def export_postnotes(show_id):
         'SELECT * FROM schedule_rows WHERE show_id=? ORDER BY sort_order,id', (show_id,)
     ).fetchall()
     logo_data = get_app_setting('logo_data', '')
+
+    new_v = (show['postnotes_version'] or 0) + 1
+    db.execute('UPDATE shows SET postnotes_version=? WHERE id=?', (new_v, show_id))
+    log_cur = db.execute("""INSERT INTO export_log (show_id, export_type, version, exported_by)
+                  VALUES (?, 'postnotes', ?, ?)""", (show_id, new_v, exported_by_id))
+    log_id = log_cur.lastrowid
+    db.commit()
     db.close()
 
     html = render_template('pdf/postnotes_pdf.html',
@@ -3441,21 +3468,39 @@ def export_postnotes(show_id):
                            advance_data=advance_data,
                            schedule_rows=sched_rows,
                            logo_data=logo_data,
+                           version=new_v,
                            export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
-    safe_name = show['name'].replace(' ', '_').replace('/', '-')
-    filename = f"PostNotes_{safe_name}_{show['show_date'] or 'nodate'}.pdf"
     try:
-        from weasyprint import HTML
-        pdf = HTML(string=html, base_url=request.url_root).write_pdf()
-        resp = make_response(pdf)
+        from weasyprint import HTML as WP_HTML
+        pdf_bytes = WP_HTML(string=html, base_url=base_url).write_pdf()
+    except Exception as e:
+        app.logger.error(f"PDF_GENERATION_FAILED show_id={show_id} type=postnotes error={e}")
+        pdf_bytes = None
+
+    syslog_logger.info(
+        f"PDF_EXPORT show_id={show_id} type=postnotes v={new_v} by={exported_by_id}"
+    )
+    return html, new_v, dict(show), pdf_bytes, log_id
+
+
+@app.route('/shows/<int:show_id>/export/postnotes')
+@login_required
+def export_postnotes(show_id):
+    if not can_access_show(session['user_id'], show_id):
+        abort(403)
+    get_show_or_404(show_id)
+    html, version, show_dict, pdf_bytes, _log_id = _build_postnotes_pdf(show_id)
+    safe_name = show_dict['name'].replace(' ', '_').replace('/', '-')
+    filename = f"PostNotes_{safe_name}_{show_dict.get('show_date') or 'nodate'}_v{version}.pdf"
+    if pdf_bytes:
+        resp = make_response(pdf_bytes)
         resp.headers['Content-Type'] = 'application/pdf'
         resp.headers['Content-Disposition'] = _safe_content_disposition(filename)
         return resp
-    except Exception as e:
-        app.logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=postnotes error={e}")
-        resp = make_response(html)
-        resp.headers['Content-Type'] = 'text/html'
-        return resp
+    app.logger.error(f"PDF_FALLBACK_FAILED show_id={show_id} type=postnotes")
+    resp = make_response(html)
+    resp.headers['Content-Type'] = 'text/html'
+    return resp
 
 
 # ─── Show Management ──────────────────────────────────────────────────────────
@@ -4027,8 +4072,9 @@ def add_contact():
     name = request.form.get('name','').strip()
     cur = db.execute("""
         INSERT INTO contacts (name, title, department, phone, email,
-                              report_recipient, advance_recipient, production_recipient)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                              report_recipient, advance_recipient, production_recipient,
+                              postnotes_recipient)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (name,
           request.form.get('title','').strip(),
           request.form.get('department','').strip(),
@@ -4036,7 +4082,8 @@ def add_contact():
           request.form.get('email','').strip(),
           1 if request.form.get('report_recipient') else 0,
           1 if request.form.get('advance_recipient') else 0,
-          1 if request.form.get('production_recipient') else 0))
+          1 if request.form.get('production_recipient') else 0,
+          1 if request.form.get('postnotes_recipient') else 0))
     cid_new = cur.lastrowid
     log_audit_change(db, 'CONTACT_ADD', 'contact', cid_new, detail=name,
                      table='contacts')
@@ -4054,13 +4101,15 @@ def edit_contact(cid):
     before = _snapshot_row(db, 'contacts', cid)
     db.execute("""
         UPDATE contacts SET name=?, title=?, department=?, phone=?, email=?,
-                            report_recipient=?, advance_recipient=?, production_recipient=?
+                            report_recipient=?, advance_recipient=?, production_recipient=?,
+                            postnotes_recipient=?
         WHERE id=?
     """, (data.get('name',''), data.get('title',''), data.get('department',''),
           data.get('phone',''), data.get('email',''),
           1 if data.get('report_recipient') else 0,
           1 if data.get('advance_recipient') else 0,
           1 if data.get('production_recipient') else 0,
+          1 if data.get('postnotes_recipient') else 0,
           cid))
     after = _snapshot_row(db, 'contacts', cid)
     log_audit(db, 'CONTACT_EDIT', 'contact', cid, detail=data.get('name',''),
@@ -5770,7 +5819,8 @@ def toggle_contact_recipient(cid):
     email_type = data.get('email_type', 'report')
     val = 1 if data.get('recipient') else 0
     allowed_cols = {'report': 'report_recipient', 'advance': 'advance_recipient',
-                    'production': 'production_recipient'}
+                    'production': 'production_recipient',
+                    'postnotes': 'postnotes_recipient'}
     col = allowed_cols.get(email_type, 'report_recipient')
     db = get_db()
     db.execute(f'UPDATE contacts SET {col}=? WHERE id=?', (val, cid))
@@ -8287,19 +8337,64 @@ def assets_retired():
                            user=get_current_user())
 
 
-def _merge_pdfs(base_pdf_bytes, extra_pdfs):
-    """Append extra PDF byte-strings to base_pdf_bytes using pdfrw. Returns merged bytes."""
+def _make_watermark_pdf(text):
+    """Render a single transparent letter page with a subtle text watermark
+    pinned to the bottom-left, used to brand extra-doc pages so the
+    source is identifiable when printed. Returns PDF bytes or None."""
     try:
-        from pdfrw import PdfReader, PdfWriter
+        from weasyprint import HTML as WP_HTML
+        from markupsafe import escape
+        safe = str(escape(text))
+        html = (
+            "<!doctype html><html><head><style>"
+            "@page { size: letter; margin: 0; }"
+            "html, body { margin: 0; padding: 0; height: 100%; }"
+            ".wm { position: absolute; bottom: 0.18in; left: 0.4in; right: 0.4in; "
+            "      font-family: Arial, Helvetica, sans-serif; font-size: 6pt; "
+            "      color: #b0b0b0; letter-spacing: 0.04em; text-align: left; }"
+            "</style></head><body>"
+            f"<div class=\"wm\">{safe}</div>"
+            "</body></html>"
+        )
+        return WP_HTML(string=html).write_pdf()
+    except Exception as e:
+        app.logger.warning(f'Watermark generation failed: {e}')
+        return None
+
+
+def _merge_pdfs(base_pdf_bytes, extra_pdfs, extras_watermark=None):
+    """Append extra PDF byte-strings to base_pdf_bytes using pdfrw. Returns merged bytes.
+    When extras_watermark is set, overlay that text on each extra page so printed
+    copies retain a hint of their origin (the base PDF has its own footer)."""
+    try:
+        from pdfrw import PdfReader, PdfWriter, PageMerge
         from io import BytesIO
         writer = PdfWriter()
         writer.addpages(PdfReader(fdata=base_pdf_bytes).pages)
-        for extra in extra_pdfs:
-            if extra:
+
+        watermark_page = None
+        if extras_watermark:
+            wm_bytes = _make_watermark_pdf(extras_watermark)
+            if wm_bytes:
                 try:
-                    writer.addpages(PdfReader(fdata=extra).pages)
+                    watermark_page = PdfReader(fdata=wm_bytes).pages[0]
                 except Exception as e:
-                    app.logger.warning(f'PDF merge: skipping page set due to error: {e}')
+                    app.logger.warning(f'Watermark read failed: {e}')
+
+        for extra in extra_pdfs:
+            if not extra:
+                continue
+            try:
+                pages = PdfReader(fdata=extra).pages
+                for p in pages:
+                    if watermark_page is not None:
+                        try:
+                            PageMerge(p).add(watermark_page).render()
+                        except Exception as e:
+                            app.logger.warning(f'Watermark overlay failed on a page: {e}')
+                    writer.addpage(p)
+            except Exception as e:
+                app.logger.warning(f'PDF merge: skipping page set due to error: {e}')
         buf = BytesIO()
         writer.write(buf)
         return buf.getvalue()

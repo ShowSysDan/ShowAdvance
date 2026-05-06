@@ -108,7 +108,7 @@
       </div>
       <div class="contacts-table-wrap">
       <table class="data-table" id="contacts-table">
-        <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
+        <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="Post-show report emails">POST</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
           <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
@@ -131,6 +131,10 @@
             <td style="text-align:center">
               <span class="recipient-indicator recipient-dot {{ 'on' if c.production_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="production"
                     title="{% if c.production_recipient %}Receives production/schedule emails{% else %}Not a production recipient{% endif %}"></span>
+            </td>
+            <td style="text-align:center">
+              <span class="recipient-indicator recipient-dot {{ 'on' if c.postnotes_recipient else '' }}" data-cid="{{ c.id }}" data-email-type="postnotes"
+                    title="{% if c.postnotes_recipient %}Receives post-show report emails{% else %}Not a post-show recipient{% endif %}"></span>
             </td>
             {% endif %}
             {% if user.role == 'admin' or is_content_admin %}
@@ -1510,6 +1514,10 @@
             <input type="checkbox" id="edit-production-recipient" style="accent-color:var(--accent)">
             <span style="font-size:12px">Production / schedule emails</span>
           </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="edit-postnotes-recipient" style="accent-color:var(--accent)">
+            <span style="font-size:12px">Post-show report emails</span>
+          </label>
         </div>
       </div>
       {% endif %}
@@ -1920,8 +1928,10 @@ function editContact(btn, id) {
   if (recipientChk) recipientChk.checked = row.dataset.recipient === '1';
   const advChk  = document.getElementById('edit-advance-recipient');
   const prodChk = document.getElementById('edit-production-recipient');
+  const postChk = document.getElementById('edit-postnotes-recipient');
   if (advChk)  advChk.checked  = row.querySelector('[data-email-type=advance]')?.classList.contains('on') || false;
   if (prodChk) prodChk.checked = row.querySelector('[data-email-type=production]')?.classList.contains('on') || false;
+  if (postChk) postChk.checked = row.querySelector('[data-email-type=postnotes]')?.classList.contains('on') || false;
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -1939,6 +1949,7 @@ async function saveContact() {
     report_recipient: recipientChk ? recipientChk.checked : undefined,
     advance_recipient: document.getElementById('edit-advance-recipient')?.checked || false,
     production_recipient: document.getElementById('edit-production-recipient')?.checked || false,
+    postnotes_recipient: document.getElementById('edit-postnotes-recipient')?.checked || false,
   };
   const resp = await fetch(`/settings/contacts/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)
