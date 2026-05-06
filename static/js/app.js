@@ -296,6 +296,62 @@ function scheduleSave() {
   saveTimer = setTimeout(() => saveActive(), 1500);
 }
 
+/* ── Modal Dirty-Guard ────────────────────────────────────────────
+   Most modals close when the background overlay is clicked (via an
+   inline onclick="if(event.target===this)closeXxx()"). That makes
+   accidental data loss easy. This capture-phase handler runs BEFORE
+   the inline handlers and aborts the close with a confirm() if any
+   field inside has been edited. Universal — every .modal-overlay in
+   the app picks it up automatically. */
+(function() {
+  function _markDirty(e) {
+    const m = e.target.closest && e.target.closest('.modal-overlay');
+    if (m) m.dataset.dirty = '1';
+  }
+  document.addEventListener('input', _markDirty, true);
+  document.addEventListener('change', _markDirty, true);
+
+  document.addEventListener('click', (e) => {
+    const overlay = (e.target && e.target.classList && e.target.classList.contains('modal-overlay'))
+      ? e.target : null;
+    if (!overlay) return;
+    if (overlay.dataset.dirty === '1') {
+      if (!window.confirm('You have unsaved changes in this dialog. Discard them?')) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        return;
+      }
+      overlay.dataset.dirty = '';
+    }
+  }, true);
+
+  function _isHidden(el) {
+    return el.style.display === 'none' || el.classList.contains('hidden');
+  }
+  const obs = new MutationObserver(muts => {
+    muts.forEach(m => {
+      const el = m.target;
+      if (el && el.classList && el.classList.contains('modal-overlay') && _isHidden(el)) {
+        el.dataset.dirty = '';
+      }
+    });
+  });
+  function _attachObserver() {
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+      if (el.dataset.dirtyObs) return;
+      el.dataset.dirtyObs = '1';
+      obs.observe(el, {attributes: true, attributeFilter: ['style', 'class']});
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _attachObserver);
+  } else {
+    _attachObserver();
+  }
+  setTimeout(_attachObserver, 1000);
+  setTimeout(_attachObserver, 5000);
+})();
+
 /* ── Help Popovers ─────────────────────────────────────────────── */
 function _positionHelpPopover(panel, trigger) {
   // Make sure layout is computed before measuring.
