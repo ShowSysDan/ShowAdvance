@@ -297,6 +297,28 @@ function scheduleSave() {
 }
 
 /* ── Help Popovers ─────────────────────────────────────────────── */
+function _positionHelpPopover(panel, trigger) {
+  // Make sure layout is computed before measuring.
+  panel.style.visibility = 'hidden';
+  panel.removeAttribute('hidden');
+  const rect = trigger.getBoundingClientRect();
+  const panelRect = panel.getBoundingClientRect();
+  const margin = 8;
+  let top = rect.bottom + 6;
+  let left = rect.left;
+  // Keep within the viewport.
+  if (left + panelRect.width + margin > window.innerWidth) {
+    left = Math.max(margin, window.innerWidth - panelRect.width - margin);
+  }
+  if (top + panelRect.height + margin > window.innerHeight) {
+    // Flip above the trigger if there's no room below.
+    const above = rect.top - panelRect.height - 6;
+    top = above >= margin ? above : Math.max(margin, window.innerHeight - panelRect.height - margin);
+  }
+  panel.style.top = `${Math.round(top)}px`;
+  panel.style.left = `${Math.round(left)}px`;
+  panel.style.visibility = '';
+}
 function toggleHelpPopover(id, ev) {
   if (ev) ev.stopPropagation();
   const panel = document.getElementById(id);
@@ -306,12 +328,34 @@ function toggleHelpPopover(id, ev) {
   document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(p => {
     if (p !== panel) p.setAttribute('hidden', '');
   });
-  if (willOpen) panel.removeAttribute('hidden');
-  else panel.setAttribute('hidden', '');
+  if (willOpen) {
+    const trigger = ev?.currentTarget
+      || panel.parentElement?.querySelector('.help-popover-btn')
+      || panel.previousElementSibling;
+    if (trigger) _positionHelpPopover(panel, trigger);
+    else panel.removeAttribute('hidden');
+  } else {
+    panel.setAttribute('hidden', '');
+  }
 }
+// Reposition any open popovers on resize/scroll so they stay anchored.
+window.addEventListener('resize', () => {
+  document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(panel => {
+    const trigger = panel.parentElement?.querySelector('.help-popover-btn');
+    if (trigger) _positionHelpPopover(panel, trigger);
+  });
+});
+window.addEventListener('scroll', () => {
+  document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(panel => {
+    const trigger = panel.parentElement?.querySelector('.help-popover-btn');
+    if (trigger) _positionHelpPopover(panel, trigger);
+  });
+}, true);
 document.addEventListener('click', (e) => {
   document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(panel => {
-    if (!panel.parentElement.contains(e.target)) panel.setAttribute('hidden', '');
+    if (!panel.parentElement.contains(e.target) && !panel.contains(e.target)) {
+      panel.setAttribute('hidden', '');
+    }
   });
 });
 document.addEventListener('keydown', (e) => {
