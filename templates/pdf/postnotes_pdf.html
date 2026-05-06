@@ -3,7 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <style>
-  @page { size: letter; margin: 0.6in 0.55in 0.65in; }
+  @page {
+    size: letter;
+    margin: 0.6in 0.55in 0.55in;
+    @bottom-left   { content: element(footerLeft);   font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; }
+    @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; }
+    @bottom-right  { content: element(footerRight);  font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; text-align: right; }
+  }
+  .footer-left  { position: running(footerLeft);  font-size: 6.5pt; color: #888; }
+  .footer-right { position: running(footerRight); font-size: 6.5pt; color: #888; text-align: right; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #1a1a1a; line-height: 1.4; }
 
@@ -30,7 +38,6 @@
   .sched-table td { padding: 3px 7px; border-bottom: 1px solid #eee; vertical-align: top; }
   .sched-table tr:last-child td { border-bottom: none; }
 
-  .doc-footer { position: fixed; bottom: 0.35in; left: 0.55in; right: 0.55in; font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; display: flex; justify-content: space-between; }
 </style>
 </head>
 <body>
@@ -122,12 +129,9 @@
 </div>
 {% endif %}
 
-<!-- Footer -->
-<div class="doc-footer">
-  <span>{{ show.name }}  ·  {{ show.show_date or '—' }}</span>
-  <span>POST-SHOW NOTES  ·  Exported {{ export_date }}</span>
-  <span>Dr. Phillips Center for the Performing Arts</span>
-</div>
+<!-- Running footer elements (positioned by @page margin boxes) -->
+<div class="footer-left">{{ show.name }}  ·  {{ show.show_date or '—' }}  ·  Dr. Phillips Center for the Performing Arts</div>
+<div class="footer-right">POST-SHOW NOTES{% if version %} v{{ version }}{% endif %}  ·  Exported {{ export_date }}</div>
 
 </body>
 </html>

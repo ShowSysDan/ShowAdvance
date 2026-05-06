@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS shows (
     status TEXT DEFAULT 'active',
     advance_version INTEGER DEFAULT 0,
     schedule_version INTEGER DEFAULT 0,
+    postnotes_version INTEGER DEFAULT 0,
     performance_company TEXT DEFAULT '',
     created_by INTEGER REFERENCES users(id),
     last_saved_by INTEGER REFERENCES users(id),
@@ -109,6 +110,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     report_recipient    INTEGER DEFAULT 0,
     advance_recipient   INTEGER DEFAULT 0,
     production_recipient INTEGER DEFAULT 0,
+    postnotes_recipient INTEGER DEFAULT 0,
     system_recipient    INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -1417,7 +1419,10 @@ def migrate_db():
         # Per-contact email type recipients
         "ALTER TABLE contacts ADD COLUMN advance_recipient INTEGER DEFAULT 0",
         "ALTER TABLE contacts ADD COLUMN production_recipient INTEGER DEFAULT 0",
+        "ALTER TABLE contacts ADD COLUMN postnotes_recipient INTEGER DEFAULT 0",
         "ALTER TABLE contacts ADD COLUMN system_recipient INTEGER DEFAULT 0",
+        # Post-show notes versioning
+        "ALTER TABLE shows ADD COLUMN postnotes_version INTEGER DEFAULT 0",
         # Venue-linked position categories
         "ALTER TABLE position_categories ADD COLUMN is_venue INTEGER DEFAULT 0",
         # Pay rate levels table (new installs get it from schema; existing need migration)
@@ -1652,6 +1657,7 @@ CREATE TABLE IF NOT EXISTS shows (
     status TEXT DEFAULT 'active',
     advance_version INTEGER DEFAULT 0,
     schedule_version INTEGER DEFAULT 0,
+    postnotes_version INTEGER DEFAULT 0,
     performance_company TEXT DEFAULT '',
     created_by INTEGER REFERENCES users(id),
     last_saved_by INTEGER REFERENCES users(id),
@@ -1717,6 +1723,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     report_recipient     INTEGER DEFAULT 0,
     advance_recipient    INTEGER DEFAULT 0,
     production_recipient INTEGER DEFAULT 0,
+    postnotes_recipient  INTEGER DEFAULT 0,
     system_recipient     INTEGER DEFAULT 0,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -2406,7 +2413,9 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".asset_types ADD COLUMN IF NOT EXISTS hide_from_pm INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS advance_recipient INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS production_recipient INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS postnotes_recipient INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS system_recipient INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS postnotes_version INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".position_categories ADD COLUMN IF NOT EXISTS is_venue INTEGER DEFAULT 0',
             f'''CREATE TABLE IF NOT EXISTS "{app_schema}".pay_rate_levels (
                 id SERIAL PRIMARY KEY,

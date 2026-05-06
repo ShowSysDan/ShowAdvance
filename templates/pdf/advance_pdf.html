@@ -3,7 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <style>
-  @page { size: letter; margin: 0.6in 0.55in 1.05in; }
+  @page {
+    size: letter;
+    margin: 0.6in 0.55in 0.7in;
+    @bottom-left   { content: element(footerLeft);   font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; }
+    @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; }
+    @bottom-right  { content: element(footerRight);  font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; text-align: right; }
+  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; font-size: 8.5pt; color: #1a1a1a; line-height: 1.35; }
 
@@ -44,11 +50,9 @@
   .rentals-table .qty { width: 36px; font-weight: bold; color: #555; white-space: nowrap; }
   .rentals-table .meta { color: #777; font-size: 7.5pt; }
 
-  /* ── Footer ── */
-  .doc-footer { position: fixed; bottom: 0.35in; left: 0.55in; right: 0.55in; font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
-  .doc-footer span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-  .doc-footer .page-num { flex: 0 0 auto; }
-  .doc-footer .page-num::before { content: "Page " counter(page) " of " counter(pages); }
+  /* ── Running footer elements (rendered into @page margin boxes) ── */
+  .footer-left  { position: running(footerLeft);  font-size: 6.5pt; color: #888; }
+  .footer-right { position: running(footerRight); font-size: 6.5pt; color: #888; text-align: right; }
 
   /* ── Checkbox indicator ── */
   .cb { display: inline-block; width: 9px; height: 9px; border: 1px solid #555; margin-right: 3px; vertical-align: middle; position: relative; }
@@ -207,12 +211,9 @@
 
 {% endif %}
 
-<!-- Footer -->
-<div class="doc-footer">
-  <span>{{ show.name }}  ·  {{ show.show_date or '—' }}  ·  Dr. Phillips Center for the Performing Arts</span>
-  <span class="page-num"></span>
-  <span>ADVANCE SHEET v{{ version }}  ·  Exported {{ export_date }}</span>
-</div>
+<!-- Running footer elements (positioned by @page margin boxes) -->
+<div class="footer-left">{{ show.name }}  ·  {{ show.show_date or '—' }}  ·  Dr. Phillips Center for the Performing Arts</div>
+<div class="footer-right">ADVANCE SHEET v{{ version }}  ·  Exported {{ export_date }}</div>
 
 </body>
 </html>
