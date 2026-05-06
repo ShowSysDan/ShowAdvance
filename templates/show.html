@@ -1913,7 +1913,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const firstTime = rows[0].cells[1].textContent.trim();
     const sub = document.querySelector('.page-sub');
     if (sub) {
-      let parts = ['{{ show.venue or '' }}'];
+      let parts = [{{ (show.venue or '') | tojson }}];
       if (firstDate && firstDate !== '—') parts.unshift(firstDate);
       if (firstTime && firstTime !== '—') parts.splice(1, 0, firstTime);
       sub.textContent = parts.filter(Boolean).join(' · ');
