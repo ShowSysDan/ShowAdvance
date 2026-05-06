@@ -1538,6 +1538,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     </div>
 
     <!-- Post-Show Report PDF -->
+    {% set _postnotes_v = (show.postnotes_version | default(0, true)) | int %}
     <div class="export-card">
       <div class="export-card-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M9 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2h-4"/><polyline points="9 6 12 3 15 6"/><line x1="12" y1="3" x2="12" y2="14"/></svg>
@@ -1545,13 +1546,13 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       <div class="export-card-info">
         <h3>Post-Show Report PDF</h3>
         <p>Closeout report with post-show notes, attached for archival or distribution.</p>
-        {% if show.postnotes_version and show.postnotes_version > 0 %}
-        <span class="version-badge">Current: v{{ show.postnotes_version }}</span>
+        {% if _postnotes_v > 0 %}
+        <span class="version-badge">Current: v{{ _postnotes_v }}</span>
         {% endif %}
       </div>
       <div style="display:flex;gap:8px;align-items:center">
         <a href="{{ url_for('export_postnotes', show_id=show.id) }}" class="btn btn-primary" target="_blank">
-          Export → v{{ (show.postnotes_version or 0) + 1 }}
+          Export → v{{ _postnotes_v + 1 }}
         </a>
         <button class="btn btn-ghost btn-sm" type="button" title="Generate PDF and email to post-show report recipients"
                 onclick="emailPdf({{ show.id }}, 'postnotes', this)">
