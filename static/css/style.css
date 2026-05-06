@@ -488,8 +488,9 @@ html[data-theme="light"] select.field-input {
 .help-popover-btn:hover { color: var(--accent); border-color: var(--accent); }
 .help-popover-panel[hidden] { display: none; }
 .help-popover-panel {
-  position: absolute; z-index: 200; top: calc(100% + 6px); left: 0;
+  position: fixed; z-index: 9000; top: 0; left: 0;
   min-width: 320px; max-width: 480px;
+  max-height: calc(100vh - 32px); overflow-y: auto;
   background: var(--bg-card); border: 1px solid var(--border-light);
   border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.4);
   padding: 12px 14px; font-size: 12px; line-height: 1.5; color: var(--text);

@@ -296,7 +296,85 @@ function scheduleSave() {
   saveTimer = setTimeout(() => saveActive(), 1500);
 }
 
+/* ── Modal Dirty-Guard ────────────────────────────────────────────
+   Most modals close when the background overlay is clicked (via an
+   inline onclick="if(event.target===this)closeXxx()"). That makes
+   accidental data loss easy. This capture-phase handler runs BEFORE
+   the inline handlers and aborts the close with a confirm() if any
+   field inside has been edited. Universal — every .modal-overlay in
+   the app picks it up automatically. */
+(function() {
+  function _markDirty(e) {
+    const m = e.target.closest && e.target.closest('.modal-overlay');
+    if (m) m.dataset.dirty = '1';
+  }
+  document.addEventListener('input', _markDirty, true);
+  document.addEventListener('change', _markDirty, true);
+
+  document.addEventListener('click', (e) => {
+    const overlay = (e.target && e.target.classList && e.target.classList.contains('modal-overlay'))
+      ? e.target : null;
+    if (!overlay) return;
+    if (overlay.dataset.dirty === '1') {
+      if (!window.confirm('You have unsaved changes in this dialog. Discard them?')) {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+        return;
+      }
+      overlay.dataset.dirty = '';
+    }
+  }, true);
+
+  function _isHidden(el) {
+    return el.style.display === 'none' || el.classList.contains('hidden');
+  }
+  const obs = new MutationObserver(muts => {
+    muts.forEach(m => {
+      const el = m.target;
+      if (el && el.classList && el.classList.contains('modal-overlay') && _isHidden(el)) {
+        el.dataset.dirty = '';
+      }
+    });
+  });
+  function _attachObserver() {
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+      if (el.dataset.dirtyObs) return;
+      el.dataset.dirtyObs = '1';
+      obs.observe(el, {attributes: true, attributeFilter: ['style', 'class']});
+    });
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _attachObserver);
+  } else {
+    _attachObserver();
+  }
+  setTimeout(_attachObserver, 1000);
+  setTimeout(_attachObserver, 5000);
+})();
+
 /* ── Help Popovers ─────────────────────────────────────────────── */
+function _positionHelpPopover(panel, trigger) {
+  // Make sure layout is computed before measuring.
+  panel.style.visibility = 'hidden';
+  panel.removeAttribute('hidden');
+  const rect = trigger.getBoundingClientRect();
+  const panelRect = panel.getBoundingClientRect();
+  const margin = 8;
+  let top = rect.bottom + 6;
+  let left = rect.left;
+  // Keep within the viewport.
+  if (left + panelRect.width + margin > window.innerWidth) {
+    left = Math.max(margin, window.innerWidth - panelRect.width - margin);
+  }
+  if (top + panelRect.height + margin > window.innerHeight) {
+    // Flip above the trigger if there's no room below.
+    const above = rect.top - panelRect.height - 6;
+    top = above >= margin ? above : Math.max(margin, window.innerHeight - panelRect.height - margin);
+  }
+  panel.style.top = `${Math.round(top)}px`;
+  panel.style.left = `${Math.round(left)}px`;
+  panel.style.visibility = '';
+}
 function toggleHelpPopover(id, ev) {
   if (ev) ev.stopPropagation();
   const panel = document.getElementById(id);
@@ -306,12 +384,34 @@ function toggleHelpPopover(id, ev) {
   document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(p => {
     if (p !== panel) p.setAttribute('hidden', '');
   });
-  if (willOpen) panel.removeAttribute('hidden');
-  else panel.setAttribute('hidden', '');
+  if (willOpen) {
+    const trigger = ev?.currentTarget
+      || panel.parentElement?.querySelector('.help-popover-btn')
+      || panel.previousElementSibling;
+    if (trigger) _positionHelpPopover(panel, trigger);
+    else panel.removeAttribute('hidden');
+  } else {
+    panel.setAttribute('hidden', '');
+  }
 }
+// Reposition any open popovers on resize/scroll so they stay anchored.
+window.addEventListener('resize', () => {
+  document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(panel => {
+    const trigger = panel.parentElement?.querySelector('.help-popover-btn');
+    if (trigger) _positionHelpPopover(panel, trigger);
+  });
+});
+window.addEventListener('scroll', () => {
+  document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(panel => {
+    const trigger = panel.parentElement?.querySelector('.help-popover-btn');
+    if (trigger) _positionHelpPopover(panel, trigger);
+  });
+}, true);
 document.addEventListener('click', (e) => {
   document.querySelectorAll('.help-popover-panel:not([hidden])').forEach(panel => {
-    if (!panel.parentElement.contains(e.target)) panel.setAttribute('hidden', '');
+    if (!panel.parentElement.contains(e.target) && !panel.contains(e.target)) {
+      panel.setAttribute('hidden', '');
+    }
   });
 });
 document.addEventListener('keydown', (e) => {
