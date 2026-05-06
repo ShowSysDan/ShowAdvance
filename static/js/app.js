@@ -226,6 +226,7 @@ function switchTab(name) {
       markAdvanceRead();
     } else {
       _pollHeartbeat();
+      if (name === 'schedule' && typeof _syncScheduleMirrors === 'function') _syncScheduleMirrors();
       if (name === 'comments') loadComments();
       if (name === 'export')   { loadAttachments(); loadReadReceipts(); }
       if (name === 'assets' && typeof loadAssetsTab === 'function') loadAssetsTab();
@@ -454,11 +455,74 @@ function saveActive() {
 }
 
 /* ── Advance Form ──────────────────────────────────────────────── */
+/* Format an advance field's raw value for read-only display on the
+   schedule tab. Mirrors the server-side `multi_filter` so the live
+   value matches what a page refresh would render. */
+function _formatAdvDisplay(val) {
+  if (val === null || val === undefined) return '';
+  let s = String(val).trim();
+  if (!s || s === '-' || s === '—' || s === 'None' || s === 'none' || s === '[]') return '';
+  if (s.startsWith('[') && s.endsWith(']')) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) {
+        return arr.map(x => String(x).trim()).filter(Boolean).join(', ');
+      }
+    } catch (e) { /* fall through */ }
+  }
+  return s;
+}
+
+/* Push live advance-form values into the read-only mirror divs on the
+   Schedule tab so users see updates without a full page refresh. */
+function _syncScheduleMirrors() {
+  const form = document.getElementById('advance-form');
+  if (!form) return;
+
+  // Generic field-key mirrors (sched meta fields with advance_field_key)
+  document.querySelectorAll('.sched-adv-mirror[data-adv-key]').forEach(div => {
+    const key = div.dataset.advKey;
+    if (!key) return;
+    // Match collectAdvanceData: iterate all .adv-field with this key, last wins.
+    let raw = '';
+    form.querySelectorAll(`.adv-field[data-key="${CSS.escape(key)}"]`).forEach(el => {
+      if (el.type === 'checkbox') {
+        raw = el.checked ? 'true' : 'false';
+      } else {
+        raw = el.value || '';
+      }
+    });
+    div.textContent = _formatAdvDisplay(raw) || '—';
+  });
+
+  // Composite load-in / load-out mirrors
+  const readVal = (k) => {
+    const el = form.querySelector(`.adv-field[data-key="${k}"]`);
+    return (el && el.value || '').trim();
+  };
+  const liDate = readVal('load_in_date');
+  const liTime = readVal('load_in_time');
+  const loDate = readVal('load_out_date');
+  const loTime = readVal('load_out_time');
+  const liEl = document.querySelector('.sched-adv-mirror[data-mirror-type="load_in"]');
+  const loEl = document.querySelector('.sched-adv-mirror[data-mirror-type="load_out"]');
+  if (liEl) {
+    liEl.textContent = (liDate || liTime)
+      ? `${liDate}${liDate && liTime ? ' · ' : ''}${liTime}`
+      : '—';
+  }
+  if (loEl) {
+    loEl.textContent = (loDate || loTime)
+      ? `${loDate}${loDate && loTime ? ' · ' : ''}${loTime}`
+      : '—';
+  }
+}
+
 function bindAdvanceForm() {
   const form = document.getElementById('advance-form');
   if (!form) return;
-  form.addEventListener('change', () => { evaluateAllConditionals(); scheduleSave(); });
-  form.addEventListener('input', () => scheduleSave());
+  form.addEventListener('change', () => { evaluateAllConditionals(); _syncScheduleMirrors(); scheduleSave(); });
+  form.addEventListener('input', () => { _syncScheduleMirrors(); scheduleSave(); });
 
   // Normalize load-in/out time fields to 24-hour HH:MM on blur
   ['load_in_time', 'load_out_time'].forEach(key => {
