@@ -2731,15 +2731,24 @@ async function emailPdf(showId, pdfType, btn) {
   if (!confirm(`Generate and email the ${label} PDF to all report recipients?`)) return;
   const orig = btn.innerHTML;
   btn.disabled = true;
-  btn.textContent = 'Sending…';
+  btn.textContent = 'Queuing…';
   try {
     const resp = await fetch(`/shows/${showId}/email/${pdfType}`, {method: 'POST'});
-    const d = await resp.json();
-    if (d.success) {
-      btn.textContent = `✓ Sent (${d.recipients})`;
+    // 202 Accepted is the "queued for background send" response — a normal
+    // success path now. Treat anything 2xx with success:true as accepted.
+    let d = {};
+    try { d = await resp.json(); } catch (_) { d = {}; }
+    if (resp.ok && d.success) {
+      btn.textContent = d.queued ? '✓ Queued' : `✓ Sent${d.recipients != null ? ' (' + d.recipients + ')' : ''}`;
+      // Brief reminder so the user knows where to check if anything fails.
+      if (typeof showSaveToast === 'function') {
+        showSaveToast(d.queued
+          ? '✓ Email queued — bounces appear in Settings → Email Errors'
+          : '✓ Email sent');
+      }
       setTimeout(() => { btn.innerHTML = orig; btn.disabled = false; }, 4000);
     } else {
-      alert('Email failed: ' + (d.message || 'Unknown error'));
+      alert('Email failed: ' + (d.message || d.error || 'Unknown error'));
       btn.innerHTML = orig; btn.disabled = false;
     }
   } catch (e) {
