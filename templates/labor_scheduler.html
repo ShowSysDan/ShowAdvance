@@ -50,20 +50,27 @@
 
   /* Stacked Lunch 1/2 + Tech (Requested over Scheduled) */
   .sched-stack-cell { padding: 4px 6px !important; }
-  .sched-stack-cell > input + input { margin-top: 3px; }
   .sched-stack-cell .sched-stack-row {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 5px;
     font-size: 11px; line-height: 1.2;
   }
   .sched-stack-cell .sched-stack-row + .sched-stack-row { margin-top: 3px; }
   .sched-stack-cell .sched-stack-tag {
-    flex: 0 0 38px;
-    font-size: 9px; font-weight: 700; letter-spacing: .06em;
+    flex: 0 0 auto;
+    min-width: 14px;
+    padding: 0 4px;
+    font-size: 9px; font-weight: 700; letter-spacing: .04em;
     color: var(--text-muted); text-transform: uppercase;
+    text-align: center;
+  }
+  /* Tech cell — REQ/SCHED labels are wider and left-aligned */
+  .sched-tech-cell .sched-stack-tag {
+    flex: 0 0 38px;
+    text-align: left;
   }
   .sched-stack-cell .sched-stack-row .field-input { flex: 1; }
   .sched-stack-cell .sched-tech-readout {
-    flex: 1; color: var(--text-dim);
+    flex: 1; font-size: 13px; font-weight: 600; color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   /* Tighten time-input cells */
@@ -236,16 +243,28 @@
       <td><input type="text" class="sched-time-input sched-in"   value="${escapeHtml(lr.in_time||'')}"    placeholder="HH:MM" maxlength="5"
                  onchange="window.__scheduler.onTimeChange(this)"></td>
       <td class="sched-stack-cell">
-        <input type="text" class="sched-time-input sched-bstart"  value="${escapeHtml(lr.break_start||'')}"  placeholder="HH:MM" maxlength="5"
-               onchange="window.__scheduler.onTimeChange(this)">
-        <input type="text" class="sched-time-input sched-b2start" value="${escapeHtml(lr.break2_start||'')}" placeholder="HH:MM" maxlength="5"
-               onchange="window.__scheduler.onTimeChange(this)">
+        <div class="sched-stack-row">
+          <span class="sched-stack-tag">1</span>
+          <input type="text" class="sched-time-input sched-bstart"  value="${escapeHtml(lr.break_start||'')}"  placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)">
+        </div>
+        <div class="sched-stack-row">
+          <span class="sched-stack-tag">2</span>
+          <input type="text" class="sched-time-input sched-b2start" value="${escapeHtml(lr.break2_start||'')}" placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)">
+        </div>
       </td>
       <td class="sched-stack-cell">
-        <input type="text" class="sched-time-input sched-bend"    value="${escapeHtml(lr.break_end||'')}"    placeholder="HH:MM" maxlength="5"
-               onchange="window.__scheduler.onTimeChange(this)">
-        <input type="text" class="sched-time-input sched-b2end"   value="${escapeHtml(lr.break2_end||'')}"   placeholder="HH:MM" maxlength="5"
-               onchange="window.__scheduler.onTimeChange(this)">
+        <div class="sched-stack-row">
+          <span class="sched-stack-tag">1</span>
+          <input type="text" class="sched-time-input sched-bend"    value="${escapeHtml(lr.break_end||'')}"    placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)">
+        </div>
+        <div class="sched-stack-row">
+          <span class="sched-stack-tag">2</span>
+          <input type="text" class="sched-time-input sched-b2end"   value="${escapeHtml(lr.break2_end||'')}"   placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)">
+        </div>
       </td>
       <td><input type="text" class="sched-time-input sched-out"  value="${escapeHtml(lr.out_time||'')}"   placeholder="HH:MM" maxlength="5"
                  onchange="window.__scheduler.onTimeChange(this)"></td>

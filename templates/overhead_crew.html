@@ -168,18 +168,26 @@
   .oh-stack-cell { padding: 3px 4px !important; }
   .oh-stack-cell > input + input { margin-top: 3px; }
   .oh-stack-cell .oh-stack-row {
-    display: flex; align-items: center; gap: 6px;
+    display: flex; align-items: center; gap: 5px;
     font-size: 11px; line-height: 1.2;
   }
   .oh-stack-cell .oh-stack-row + .oh-stack-row { margin-top: 3px; }
   .oh-stack-cell .oh-stack-tag {
-    flex: 0 0 38px;
-    font-size: 9px; font-weight: 700; letter-spacing: .06em;
+    flex: 0 0 auto;
+    min-width: 14px;
+    padding: 0 4px;
+    font-size: 9px; font-weight: 700; letter-spacing: .04em;
     color: var(--text-muted); text-transform: uppercase;
+    text-align: center;
+  }
+  /* Tech cell — REQ/SCHED labels are wider and right-aligned */
+  .oh-tech-cell .oh-stack-tag {
+    flex: 0 0 38px;
+    text-align: left;
   }
   .oh-stack-cell .oh-stack-row .field-input { flex: 1; }
   .oh-stack-cell .oh-tech-readout {
-    flex: 1; color: var(--text-dim);
+    flex: 1; font-size: 13px; font-weight: 600; color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
   /* Tighten the spacing between IN / lunches / OUT */
@@ -695,12 +703,24 @@
       </td>
       <td><input type="text" class="oh-time-input oh-in"     value="${escapeHtml(req.in_time||'')}"     placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
       <td class="oh-stack-cell">
-        <input type="text" class="oh-time-input oh-bstart"  value="${escapeHtml(req.break_start||'')}"  placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
-        <input type="text" class="oh-time-input oh-b2start" value="${escapeHtml(req.break2_start||'')}" placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+        <div class="oh-stack-row">
+          <span class="oh-stack-tag">1</span>
+          <input type="text" class="oh-time-input oh-bstart"  value="${escapeHtml(req.break_start||'')}"  placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+        </div>
+        <div class="oh-stack-row">
+          <span class="oh-stack-tag">2</span>
+          <input type="text" class="oh-time-input oh-b2start" value="${escapeHtml(req.break2_start||'')}" placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+        </div>
       </td>
       <td class="oh-stack-cell">
-        <input type="text" class="oh-time-input oh-bend"    value="${escapeHtml(req.break_end||'')}"    placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
-        <input type="text" class="oh-time-input oh-b2end"   value="${escapeHtml(req.break2_end||'')}"   placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+        <div class="oh-stack-row">
+          <span class="oh-stack-tag">1</span>
+          <input type="text" class="oh-time-input oh-bend"    value="${escapeHtml(req.break_end||'')}"    placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+        </div>
+        <div class="oh-stack-row">
+          <span class="oh-stack-tag">2</span>
+          <input type="text" class="oh-time-input oh-b2end"   value="${escapeHtml(req.break2_end||'')}"   placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+        </div>
       </td>
       <td><input type="text" class="oh-time-input oh-out"    value="${escapeHtml(req.out_time||'')}"    placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
       <td class="oh-hours-cell" style="text-align:right;font-family:var(--font-mono,monospace);font-size:11px;color:var(--text-dim)">
