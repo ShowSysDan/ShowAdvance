@@ -3430,16 +3430,39 @@ def email_pdf(show_id, pdf_type):
         return jsonify({'success': False, 'error': 'Access denied.'}), 403
     get_show_or_404(show_id)
     triggered_by = session.get('username') or session.get('user_display') or 'user'
-    ok, msg, count = _send_pdf_email(
-        show_id, pdf_type, triggered_by,
-        exported_by_id=session.get('user_id')
-    )
+    # Guard the entire send path so any unexpected exception (PDF render,
+    # SMTP, S3, audit log, etc.) comes back as JSON the client can parse,
+    # not an HTML 500 page.
+    try:
+        ok, msg, count = _send_pdf_email(
+            show_id, pdf_type, triggered_by,
+            exported_by_id=session.get('user_id')
+        )
+    except Exception as e:
+        app.logger.exception(
+            f'email_pdf failed show_id={show_id} type={pdf_type}'
+        )
+        syslog_logger.error(
+            f'PDF_EMAIL_FAILED show_id={show_id} type={pdf_type} '
+            f'by={session.get("username")} error={e!r}'
+        )
+        return jsonify({
+            'success': False,
+            'error':   f'Email send failed: {e}',
+            'message': f'Email send failed: {e}',
+            'recipients': 0,
+        }), 500
     if ok:
-        _adb = get_db()
-        log_audit(_adb, f'PDF_EMAIL_{pdf_type.upper()}', 'show', show_id,
-                  show_id=show_id, detail=f'Manual email to {count} recipient(s)')
-        _adb.commit()
-        _adb.close()
+        try:
+            _adb = get_db()
+            log_audit(_adb, f'PDF_EMAIL_{pdf_type.upper()}', 'show', show_id,
+                      show_id=show_id, detail=f'Manual email to {count} recipient(s)')
+            _adb.commit()
+            _adb.close()
+        except Exception as e:
+            # Audit logging failure shouldn't poison the response — the email
+            # already went out successfully.
+            app.logger.warning(f'audit log failed for PDF_EMAIL_{pdf_type}: {e}')
     return jsonify({'success': ok, 'message': msg, 'recipients': count})
 
 
@@ -10996,9 +11019,33 @@ def not_found(e):
                            user=get_current_user()), 404
 
 
+def _wants_json_response():
+    """Return True when the current request is XHR / fetch / JSON.
+
+    Used by the error handlers so that an unexpected exception inside an API
+    route gives the caller a parseable JSON body instead of an HTML error page
+    (which is what triggers `Unexpected token '<'` in the browser console)."""
+    if request.is_json:
+        return True
+    if request.path.startswith('/api/'):
+        return True
+    accept = (request.headers.get('Accept') or '').lower()
+    if 'application/json' in accept:
+        return True
+    if request.headers.get('X-Requested-With') == 'XMLHttpRequest':
+        return True
+    return False
+
+
 @app.errorhandler(500)
 def internal_error(e):
     app.logger.exception("500 Internal Server Error")
+    if _wants_json_response():
+        return jsonify({
+            'success': False,
+            'error': 'Internal server error.',
+            'detail': str(getattr(e, 'original_exception', e) or e),
+        }), 500
     return render_template('error.html', code=500,
                            message="An unexpected server error occurred.",
                            user=get_current_user()), 500
