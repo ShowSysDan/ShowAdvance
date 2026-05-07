@@ -487,6 +487,7 @@
   if (!CAN_EDIT) document.body.classList.add('oh-readonly');
 
   let _positions   = null;
+  let _crewMembers = null;   // for the Requested Tech dropdown
   let _projects    = null;   // active project list cached
   let _editingTemplateId = null;
   let _editingProjectId  = null;
@@ -529,6 +530,12 @@
     return '$' + (Math.round(parseFloat(n) * 100) / 100).toFixed(2);
   }
 
+  async function loadCrew() {
+    if (_crewMembers) return _crewMembers;
+    const r = await fetch('/api/crew-members');
+    _crewMembers = await r.json();
+    return _crewMembers;
+  }
   async function loadPositions() {
     if (_positions) return _positions;
     const r = await fetch('/api/job-positions');
@@ -564,6 +571,48 @@
       selectEl.appendChild(og);
     }
   }
+  /* Build the Requested Tech dropdown. If a position is given, qualified
+     crew members are grouped first under "Qualified" with everyone else
+     under "Others". Without a position, show all techs un-grouped. Stores
+     the crew member's *name* as the value (matches show.html). */
+  function buildRequestedTechSelect(selectEl, positionId, selectedName) {
+    selectEl.innerHTML = '<option value="">— Select Tech —</option>';
+    if (!_crewMembers || !_crewMembers.length) return;
+    const addList = (label, list) => {
+      if (!list.length) return;
+      const og = document.createElement('optgroup');
+      og.label = label;
+      list.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name; opt.textContent = m.name;
+        if (m.name === selectedName) opt.selected = true;
+        og.appendChild(opt);
+      });
+      selectEl.appendChild(og);
+    };
+    if (positionId) {
+      const pid = parseInt(positionId) || null;
+      const qualified = _crewMembers.filter(m => (m.qualifications || []).includes(pid));
+      const others    = _crewMembers.filter(m => !(m.qualifications || []).includes(pid));
+      addList('Qualified', qualified);
+      addList('Others',    others);
+    } else {
+      _crewMembers.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.name; opt.textContent = m.name;
+        if (m.name === selectedName) opt.selected = true;
+        selectEl.appendChild(opt);
+      });
+    }
+    // Preserve a free-form value typed elsewhere that isn't on the roster
+    if (selectedName && selectEl.value !== selectedName) {
+      const opt = document.createElement('option');
+      opt.value = selectedName; opt.textContent = selectedName;
+      opt.selected = true;
+      selectEl.insertBefore(opt, selectEl.children[1] || null);
+    }
+  }
+
   function buildProjectSelect(selectEl, selectedId, opts) {
     opts = opts || {};
     selectEl.innerHTML = '';
@@ -595,10 +644,6 @@
     // those fields are owned by the labor scheduler workflow.
     tr.innerHTML = `
       <td style="text-align:center" title="Set by the labor scheduler">
-        <input type="checkbox" class="oh-row-select" ${CAN_EDIT ? '' : 'disabled'}
-               title="Select this row for Quick Fill">
-      </td>
-      <td style="text-align:center" title="Set by the labor scheduler">
         <input type="checkbox" class="oh-check" ${req.is_scheduled ? 'checked' : ''} disabled>
       </td>
       <td>
@@ -612,8 +657,10 @@
       <td class="oh-hours-cell" style="text-align:right;font-family:var(--font-mono,monospace);font-size:11px;color:var(--text-dim)">
         ${fmtHours(req.hours_planned || 0)}
       </td>
-      <td><input type="text" class="field-input field-input-sm oh-req-name" value="${escapeHtml(req.requested_name||'')}"
-                 placeholder="Requested name (optional)" ${CAN_EDIT ? '' : 'disabled'}></td>
+      <td>
+        <select class="field-input field-input-sm oh-req-name"
+                ${CAN_EDIT ? '' : 'disabled'}></select>
+      </td>
       <td class="oh-scheduled-tech" style="font-size:12px;color:var(--text-dim)"
           title="Set by the labor scheduler">${escapeHtml(req.scheduled_crew_name || '—')}</td>
       ${CAN_EDIT ? `
@@ -622,8 +669,10 @@
                 onclick="window.__overhead.removeRequest(this)">×</button>
       </td>` : ''}
     `;
-    const posSel  = tr.querySelector('.oh-pos');
+    const posSel    = tr.querySelector('.oh-pos');
+    const reqNameSel = tr.querySelector('.oh-req-name');
     buildPositionSelect(posSel, req.position_id);
+    buildRequestedTechSelect(reqNameSel, req.position_id, req.requested_name);
     tr._req = req;
 
     if (CAN_EDIT) {
@@ -640,6 +689,9 @@
       };
       posSel.addEventListener('change', () => {
         const pid = parseInt(posSel.value) || null;
+        // Re-rank the Requested Tech list by qualification for the new
+        // position, preserving the current selection if still valid.
+        buildRequestedTechSelect(reqNameSel, pid, reqNameSel.value);
         saveRequest(tr, { position_id: pid });
       });
       ['in', 'out', 'bstart', 'bend'].forEach(suffix => {
@@ -654,8 +706,8 @@
           });
         });
       });
-      tr.querySelector('.oh-req-name').addEventListener('change', e => {
-        saveRequest(tr, { requested_name: e.target.value.trim() });
+      reqNameSel.addEventListener('change', () => {
+        saveRequest(tr, { requested_name: reqNameSel.value });
       });
     }
     return tr;
@@ -719,6 +771,8 @@
           <span>Lines: <strong class="oh-group-lines">0</strong></span>
         </div>
         ${CAN_EDIT ? `
+        <button class="btn btn-xs btn-ghost"
+                onclick="window.__overhead.toggleQuickFill(this)" title="Set times for every line in this sub-group">▾ Quick Fill</button>
         <button class="btn btn-xs btn-ghost" onclick="window.__overhead.addRequest(this)">+ Add Labor Line</button>
         <button class="btn btn-xs btn-danger-ghost"
                 onclick="window.__overhead.deleteGroup(this)" title="Delete this sub-group">×</button>
@@ -752,7 +806,7 @@
       </div>
 
       ${CAN_EDIT ? `
-      <div class="oh-quickfill" data-group-id="${group.id}">
+      <div class="oh-quickfill" data-group-id="${group.id}" hidden>
         <span class="oh-qf-label">Quick Fill</span>
         <label class="oh-qf-field"><span>In</span>
           <input type="text" class="oh-time-input oh-qf-in"     placeholder="HH:MM" maxlength="5"></label>
@@ -762,10 +816,8 @@
           <input type="text" class="oh-time-input oh-qf-bend"   placeholder="HH:MM" maxlength="5"></label>
         <label class="oh-qf-field"><span>Out</span>
           <input type="text" class="oh-time-input oh-qf-out"    placeholder="HH:MM" maxlength="5"></label>
-        <button type="button" class="btn btn-xs btn-ghost"
-                onclick="window.__overhead.applyQuickFill(this, false)">Apply to Selected</button>
         <button type="button" class="btn btn-xs btn-primary"
-                onclick="window.__overhead.applyQuickFill(this, true)">Apply to All</button>
+                onclick="window.__overhead.applyQuickFill(this)">Apply to All Lines</button>
       </div>
       ` : ''}
 
@@ -773,10 +825,6 @@
         <table class="data-table">
           <thead>
             <tr>
-              <th style="width:32px;text-align:center" title="Select for Quick Fill">
-                <input type="checkbox" class="oh-select-all" ${CAN_EDIT ? '' : 'disabled'}
-                       title="Select / deselect all in this sub-group"
-                       onchange="window.__overhead.toggleSelectAll(this)"></th>
               <th style="width:48px;text-align:center" title="Set by the labor scheduler">SCHED</th>
               <th style="min-width:160px">POSITION</th>
               <th style="width:80px">IN</th>
@@ -784,7 +832,7 @@
               <th style="width:80px">LUNCH END</th>
               <th style="width:80px">OUT</th>
               <th style="width:60px;text-align:right">HOURS</th>
-              <th style="min-width:160px">REQUESTED NAME</th>
+              <th style="min-width:160px">REQUESTED TECH</th>
               <th style="min-width:160px">SCHEDULED TECH</th>
               ${CAN_EDIT ? '<th style="width:40px"></th>' : ''}
             </tr>
@@ -895,7 +943,7 @@
     if (!from || !to) { status.textContent = 'Pick both dates.'; return; }
     status.textContent = 'Loading…';
     try {
-      await Promise.all([loadPositions(), loadProjects(true)]);
+      await Promise.all([loadPositions(), loadCrew(), loadProjects(true)]);
       const r = await fetch(`/api/overhead-crew/list?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
       if (!r.ok) { status.textContent = 'Failed to load.'; return; }
       const data = await r.json();
@@ -1198,19 +1246,20 @@
     showSaveToast('✓ Removed');
   }
 
-  /* Toggle every row's select-checkbox in the sub-group when the header
-     master checkbox flips. */
-  function toggleSelectAll(masterCb) {
-    const groupEl = masterCb.closest('.oh-group');
+  /* Show / hide the per-sub-group Quick Fill bar. */
+  function toggleQuickFill(btn) {
+    const groupEl = btn.closest('.oh-group');
     if (!groupEl) return;
-    groupEl.querySelectorAll('tbody tr[data-rid] .oh-row-select').forEach(cb => {
-      cb.checked = masterCb.checked;
-    });
+    const bar = groupEl.querySelector('.oh-quickfill');
+    if (!bar) return;
+    const willShow = bar.hidden;
+    bar.hidden = !willShow;
+    btn.textContent = willShow ? '▴ Quick Fill' : '▾ Quick Fill';
+    if (willShow) bar.querySelector('.oh-qf-in')?.focus();
   }
 
-  /* Apply the per-sub-group Quick Fill in/lunch/out times to either
-     the rows whose select-box is checked, or every row in the sub-group. */
-  async function applyQuickFill(btn, toAll) {
+  /* Apply the Quick Fill in/lunch/out times to every line in the sub-group. */
+  async function applyQuickFill(btn) {
     const groupEl = btn.closest('.oh-group');
     if (!groupEl) return;
     const qfBox = groupEl.querySelector('.oh-quickfill');
@@ -1222,19 +1271,16 @@
       alert('Enter at least one time in Quick Fill before applying.');
       return;
     }
-    const allRows = Array.from(groupEl.querySelectorAll('tbody tr[data-rid]'));
-    const targets = toAll ? allRows : allRows.filter(tr => tr.querySelector('.oh-row-select')?.checked);
-    if (!targets.length) {
-      alert(toAll ? 'No rows in this sub-group.' : 'Select rows first, or click "Apply to All".');
-      return;
-    }
+    const targets = Array.from(groupEl.querySelectorAll('tbody tr[data-rid]'));
+    if (!targets.length) { alert('No labor lines in this sub-group.'); return; }
+
     let ok = 0, fail = 0;
     for (const tr of targets) {
       // Update visible inputs first so the user sees the change immediately
-      if (inV) tr.querySelector('.oh-in').value = inV;
-      if (outV) tr.querySelector('.oh-out').value = outV;
-      if (bsV) tr.querySelector('.oh-bstart').value = bsV;
-      if (beV) tr.querySelector('.oh-bend').value = beV;
+      if (inV)  tr.querySelector('.oh-in').value     = inV;
+      if (outV) tr.querySelector('.oh-out').value    = outV;
+      if (bsV)  tr.querySelector('.oh-bstart').value = bsV;
+      if (beV)  tr.querySelector('.oh-bend').value   = beV;
       const payload = {};
       if (inV)  payload.in_time     = inV;
       if (outV) payload.out_time    = outV;
@@ -1243,7 +1289,6 @@
       const res = await putJSON(`/api/overhead-crew/requests/${tr.dataset.rid}`, payload);
       if (res && res.success) {
         ok++;
-        // Refresh the request's metric fields and the row's hours cell.
         if (res.request) {
           Object.assign(tr._req || {}, res.request);
           tr.querySelector('.oh-hours-cell').textContent = fmtHours(res.request.hours_planned || 0);
@@ -1255,7 +1300,7 @@
     recomputeGroupTotals(groupEl);
     recomputeDayTotals(groupEl.closest('.oh-day'));
     if (fail) showSaveToast(`✗ ${fail} failed, ${ok} updated`, 'error');
-    else      showSaveToast(`✓ Applied to ${ok} row${ok===1?'':'s'}`);
+    else      showSaveToast(`✓ Applied to ${ok} line${ok===1?'':'s'}`);
   }
 
   /* ── Project Manager ─────────────────────────────────────────── */
@@ -1550,7 +1595,7 @@
     deleteDay,
     addRequest,
     removeRequest,
-    toggleSelectAll,
+    toggleQuickFill,
     applyQuickFill,
     toggleSummary,
     openProjectMgr,
