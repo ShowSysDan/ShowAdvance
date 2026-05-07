@@ -722,13 +722,35 @@
     return tr;
   }
 
-  /* Mirror the server's _calc_hours() for live totals */
+  /* Normalise "1300" / "13:00" / "7" / "" to canonical "HH:MM" or '' */
+  function normalizeTime(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    let h, m;
+    if (s.includes(':')) {
+      const parts = s.split(':', 2);
+      h = parseInt(parts[0], 10);
+      m = parseInt(parts[1], 10);
+    } else if (/^\d{3,4}$/.test(s)) {
+      h = parseInt(s.slice(0, -2), 10);
+      m = parseInt(s.slice(-2), 10);
+    } else if (/^\d{1,2}$/.test(s)) {
+      h = parseInt(s, 10);
+      m = 0;
+    } else {
+      return s;
+    }
+    if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return s;
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+
+  /* Mirror the server's _calc_hours() for live totals — accepts HH:MM or HHMM */
   function computeHours(inT, outT, bs, be) {
-    if (!inT || !outT) return 0;
     const parse = t => {
-      const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+      const norm = normalizeTime(t);
+      const m = norm.match(/^(\d{2}):(\d{2})$/);
       if (!m) return null;
-      return parseInt(m[1]) * 60 + parseInt(m[2]);
+      return parseInt(m[1], 10) * 60 + parseInt(m[2], 10);
     };
     let i = parse(inT), o = parse(outT);
     if (i == null || o == null) return 0;
@@ -740,6 +762,14 @@
     }
     return Math.max(0, mins / 60);
   }
+
+  /* Auto-format any .oh-time-input on blur: "1300" -> "13:00" */
+  document.addEventListener('blur', e => {
+    if (e.target && e.target.classList && e.target.classList.contains('oh-time-input')) {
+      const formatted = normalizeTime(e.target.value);
+      if (formatted !== e.target.value) e.target.value = formatted;
+    }
+  }, true);
 
   /* ── Render: a sub-group ─────────────────────────────────────── */
 
