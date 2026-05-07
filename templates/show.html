@@ -441,8 +441,10 @@ const SHOW_VENUE = {{ show.venue | tojson }};
     <div class="form-section-header"><span class="section-icon">◈</span> VENUE & TECH INFO</div>
     <div class="form-section-body">
       {% set _smf = sched_meta_fields if sched_meta_fields is defined else [] %}
+      {% set _smf_tech = _smf | rejectattr('show_in_contacts') | list %}
+      {% set _smf_contacts = _smf | selectattr('show_in_contacts') | list %}
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-        {% for f in _smf %}
+        {% for f in _smf_tech %}
         <div class="field-group" {% if f.width_hint == 'full' %}style="grid-column:1 / -1"{% endif %}>
           <label class="field-label">{{ f.label }}</label>
           {% if f.advance_field_key %}
@@ -703,6 +705,22 @@ const SHOW_VENUE = {{ show.venue | tojson }};
             {{ adv(key) or '—' }}
           </div>
           <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+        </div>
+        {% endfor %}
+        {# Admin-assigned advance fields routed into the contacts section #}
+        {% for f in _smf_contacts %}
+        <div class="field-group" {% if f.width_hint == 'full' %}style="grid-column:1 / -1"{% endif %}>
+          <label class="field-label">{{ f.label }}</label>
+          {% if f.advance_field_key %}
+            <div class="field-input sched-adv-mirror" data-adv-key="{{ f.advance_field_key }}" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+              {{ adv(f.advance_field_key) | multi or '—' }}
+            </div>
+            <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+          {% elif f.field_type == 'textarea' %}
+            <textarea class="field-input field-textarea sched-meta" data-key="{{ f.field_key }}" rows="3" {% if restricted %}disabled{% endif %}>{{ meta(f.field_key) }}</textarea>
+          {% else %}
+            <input type="text" class="field-input sched-meta" data-key="{{ f.field_key }}" value="{{ meta(f.field_key) }}" {% if restricted %}disabled{% endif %}>
+          {% endif %}
         </div>
         {% endfor %}
         <div class="field-group">

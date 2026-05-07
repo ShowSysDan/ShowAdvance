@@ -246,7 +246,8 @@ CREATE TABLE IF NOT EXISTS schedule_meta_fields (
     field_type       TEXT DEFAULT 'text',
     advance_field_key TEXT DEFAULT NULL,
     sort_order       INTEGER DEFAULT 0,
-    width_hint       TEXT DEFAULT 'half'
+    width_hint       TEXT DEFAULT 'half',
+    show_in_contacts INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS schedule_templates (
@@ -1240,6 +1241,7 @@ def migrate_db():
         'ALTER TABLE form_fields ADD COLUMN allow_multi INTEGER DEFAULT 0',
         'ALTER TABLE form_fields ADD COLUMN hide_from_pdf INTEGER DEFAULT 0',
         'ALTER TABLE form_fields ADD COLUMN upload_button_only INTEGER DEFAULT 0',
+        'ALTER TABLE schedule_meta_fields ADD COLUMN show_in_contacts INTEGER DEFAULT 0',
         "ALTER TABLE labor_requests ADD COLUMN break_start TEXT DEFAULT ''",
         "ALTER TABLE labor_requests ADD COLUMN break_end TEXT DEFAULT ''",
         "ALTER TABLE labor_requests ADD COLUMN work_date DATE",
@@ -2093,7 +2095,8 @@ CREATE TABLE IF NOT EXISTS schedule_meta_fields (
     field_type       TEXT DEFAULT 'text',
     advance_field_key TEXT DEFAULT NULL,
     sort_order       INTEGER DEFAULT 0,
-    width_hint       TEXT DEFAULT 'half'
+    width_hint       TEXT DEFAULT 'half',
+    show_in_contacts INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS schedule_templates (
@@ -2803,6 +2806,7 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS allow_multi INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS hide_from_pdf INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS upload_button_only INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".schedule_meta_fields ADD COLUMN IF NOT EXISTS show_in_contacts INTEGER DEFAULT 0',
             f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_start TEXT DEFAULT ''",
             f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_end TEXT DEFAULT ''",
             f'ALTER TABLE "{app_schema}".labor_requests ADD COLUMN IF NOT EXISTS work_date DATE',

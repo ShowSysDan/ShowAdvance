@@ -5422,13 +5422,14 @@ def add_sched_meta_field():
     try:
         cur = db.execute("""
             INSERT INTO schedule_meta_fields
-              (field_key, label, field_type, advance_field_key, sort_order, width_hint)
-            VALUES (?, ?, ?, ?, ?, ?)
+              (field_key, label, field_type, advance_field_key, sort_order, width_hint, show_in_contacts)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (field_key, label,
               data.get('field_type', 'text'),
               data.get('advance_field_key', '').strip() or None,
               max_order + 10,
-              data.get('width_hint', 'half')))
+              data.get('width_hint', 'half'),
+              1 if data.get('show_in_contacts') else 0))
         fid = cur.lastrowid
         db.commit()
         return jsonify({'success': True, 'id': fid})
@@ -5445,12 +5446,13 @@ def edit_sched_meta_field(fid):
     db = get_db()
     db.execute("""
         UPDATE schedule_meta_fields
-        SET label=?, field_type=?, advance_field_key=?, width_hint=?
+        SET label=?, field_type=?, advance_field_key=?, width_hint=?, show_in_contacts=?
         WHERE id=?
     """, (data.get('label', ''),
           data.get('field_type', 'text'),
           data.get('advance_field_key', '').strip() or None,
           data.get('width_hint', 'half'),
+          1 if data.get('show_in_contacts') else 0,
           fid))
     db.commit(); db.close()
     return jsonify({'success': True})

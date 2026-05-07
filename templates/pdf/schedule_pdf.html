@@ -75,8 +75,10 @@
 {% macro adv(key, default='') %}{{ a.get(key, default)|string|trim }}{% endmacro %}
 
 {% set _smf = sched_meta_fields if sched_meta_fields is defined else [] %}
-{% set _bar_fields = _smf | selectattr('width_hint', 'ne', 'full') | list %}
-{% set _full_fields = _smf | selectattr('width_hint', 'eq', 'full') | list %}
+{% set _smf_tech     = _smf | rejectattr('show_in_contacts') | list %}
+{% set _smf_contacts = _smf | selectattr('show_in_contacts') | list %}
+{% set _bar_fields  = _smf_tech | selectattr('width_hint', 'ne', 'full') | list %}
+{% set _full_fields = _smf_tech | selectattr('width_hint', 'eq', 'full') | list %}
 
 {% set _section_keys = ['header','day_banner','info_bar','wifi_box','crew_call','sched_table','contacts_grid'] %}
 
@@ -231,6 +233,15 @@
           <tr>
             <td class="lbl">{{ role }}</td>
             <td>{{ val }}</td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+          {% for f in _smf_contacts %}
+          {% set fval = (adv(f.advance_field_key) if f.advance_field_key else m(f.field_key)) | trim %}
+          {% if fval and fval not in ['-',''] %}
+          <tr>
+            <td class="lbl">{{ f.label }}</td>
+            <td>{{ fval }}</td>
           </tr>
           {% endif %}
           {% endfor %}
