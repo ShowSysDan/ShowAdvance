@@ -539,12 +539,20 @@ def _compute_leader(peers):
 
 
 def get_cluster_status():
-    """Build the dict consumed by /api/cluster/peers."""
+    """Build the dict consumed by /api/cluster/peers.
+
+    The protocol writes one row per Gunicorn worker (each worker process gets
+    its own UUID) so leader election can pick exactly one worker to run
+    scheduled jobs. For UI display, however, we aggregate rows by
+    (ip, hostname) and report a worker_count so users see one entry per
+    physical server instead of N entries per server.
+    """
     enabled = get_app_setting('cluster_heartbeat_enabled', '1') in ('1', 'true')
     force = get_app_setting('cluster_force_leader', 'auto')
     self_ip = _get_local_ip()
-    peers = _query_live_peers() if enabled else []
-    leader = _compute_leader(peers)
+    self_hostname = socket.gethostname()
+    raw_peers = _query_live_peers() if enabled else []
+    leader = _compute_leader(raw_peers)
 
     if force == 'always':
         leader_id = _CLUSTER_INSTANCE_ID
@@ -554,7 +562,7 @@ def get_cluster_status():
         leader_id = leader.get('instance_id') if leader else None
         leader_ip = leader.get('ip') if leader else None
         is_leader = False
-    elif not enabled or not peers:
+    elif not enabled or not raw_peers:
         # Single-instance / disabled fallback: self is leader
         leader_id = _CLUSTER_INSTANCE_ID
         leader_ip = self_ip
@@ -564,29 +572,59 @@ def get_cluster_status():
         leader_ip = leader.get('ip')
         is_leader = (leader_id == _CLUSTER_INSTANCE_ID)
 
-    annotated = []
-    for p in peers:
-        d = dict(p)
-        # Convert datetimes to ISO strings for JSON
+    # Aggregate raw worker rows by (ip, hostname) into per-server rows.
+    groups = {}
+    for p in raw_peers:
+        key = (p.get('ip', ''), p.get('hostname', '') or '')
+        if key not in groups:
+            groups[key] = {
+                'ip':            p.get('ip'),
+                'hostname':      p.get('hostname'),
+                'port':          p.get('port'),
+                'app_version':   p.get('app_version') or '',
+                'started_at':    p.get('started_at'),
+                'last_seen':     p.get('last_seen'),
+                'worker_count':  0,
+                '_instance_ids': set(),
+            }
+        g = groups[key]
+        g['worker_count'] += 1
+        iid = p.get('instance_id')
+        if iid:
+            g['_instance_ids'].add(iid)
+        # Earliest started_at = whenever the first worker on this server came up
+        sa = p.get('started_at')
+        if sa and (not g['started_at'] or sa < g['started_at']):
+            g['started_at'] = sa
+        # Latest last_seen across the workers on this server
+        ls = p.get('last_seen')
+        if ls and (not g['last_seen'] or ls > g['last_seen']):
+            g['last_seen'] = ls
+
+    aggregated = []
+    for g in groups.values():
+        ids = g.pop('_instance_ids')
         for k in ('started_at', 'last_seen'):
-            v = d.get(k)
+            v = g.get(k)
             if hasattr(v, 'isoformat'):
-                d[k] = v.isoformat()
-        d['is_self']   = (d.get('instance_id') == _CLUSTER_INSTANCE_ID)
-        d['is_leader'] = (d.get('instance_id') == leader_id)
-        annotated.append(d)
+                g[k] = v.isoformat()
+        g['is_self']   = (_CLUSTER_INSTANCE_ID in ids)
+        g['is_leader'] = (leader_id in ids) if leader_id else False
+        aggregated.append(g)
+
+    aggregated.sort(key=lambda x: _ip_sort_key(x.get('ip', '')))
 
     return {
         'self_id':         _CLUSTER_INSTANCE_ID,
         'self_ip':         self_ip,
-        'self_hostname':   socket.gethostname(),
+        'self_hostname':   self_hostname,
         'self_started_at': _CLUSTER_STARTED_AT.isoformat(),
         'leader_id':       leader_id,
         'leader_ip':       leader_ip,
         'is_leader':       is_leader,
         'enabled':         enabled,
         'force_leader':    force,
-        'peers':           annotated,
+        'peers':           aggregated,
     }
 
 
