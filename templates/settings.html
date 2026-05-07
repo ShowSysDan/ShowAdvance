@@ -2379,7 +2379,8 @@ async function loadClusterStatus() {
     // Self panel
     const selfEl = document.getElementById('cluster-self');
     if (selfEl) {
-      const leaderBadge = d.is_leader
+      const serverIsLeader = !!d.is_self_server_leader;
+      const leaderBadge = serverIsLeader
         ? '<span class="role-badge role-admin" style="background:#1a8754">LEADER</span>'
         : '<span class="role-badge" style="background:#6c757d">FOLLOWER</span>';
       const forceLine = d.force_leader && d.force_leader !== 'auto'
@@ -2392,7 +2393,7 @@ async function loadClusterStatus() {
         `<strong>Worker ID:</strong> <code>${(d.self_id||'').slice(0,12)}…</code> &nbsp; ` +
         `<strong>This worker started:</strong> <span class="text-dim">${_fmtRelTime(d.self_started_at)}</span><br>` +
         `<strong>Current leader:</strong> <code>${d.leader_ip || '—'}</code>` +
-        (d.is_leader ? ' (this server)' : ' (remote)') +
+        (serverIsLeader ? ' (this server)' : ' (remote)') +
         forceLine + enabledLine +
         '<br><span class="text-dim" style="font-size:11px">Each Gunicorn worker registers itself; the table below groups workers by server. Only one worker globally runs scheduled PDF emails.</span>';
     }

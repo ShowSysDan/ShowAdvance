@@ -614,17 +614,24 @@ def get_cluster_status():
 
     aggregated.sort(key=lambda x: _ip_sort_key(x.get('ip', '')))
 
+    # Server-level leader flag: True if the elected leader worker lives on the
+    # same server as this worker (same IP). Used for the "This Instance" UI
+    # badge so that all 4 Gunicorn workers on the leader server show LEADER,
+    # even though only one of them is actually firing scheduled jobs.
+    is_self_server_leader = bool(leader_ip and leader_ip == self_ip)
+
     return {
-        'self_id':         _CLUSTER_INSTANCE_ID,
-        'self_ip':         self_ip,
-        'self_hostname':   self_hostname,
-        'self_started_at': _CLUSTER_STARTED_AT.isoformat(),
-        'leader_id':       leader_id,
-        'leader_ip':       leader_ip,
-        'is_leader':       is_leader,
-        'enabled':         enabled,
-        'force_leader':    force,
-        'peers':           aggregated,
+        'self_id':                _CLUSTER_INSTANCE_ID,
+        'self_ip':                self_ip,
+        'self_hostname':          self_hostname,
+        'self_started_at':        _CLUSTER_STARTED_AT.isoformat(),
+        'leader_id':              leader_id,
+        'leader_ip':              leader_ip,
+        'is_leader':              is_leader,             # per-worker (drives am_i_leader)
+        'is_self_server_leader':  is_self_server_leader, # per-server (drives UI badge)
+        'enabled':                enabled,
+        'force_leader':           force,
+        'peers':                  aggregated,
     }
 
 
