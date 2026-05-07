@@ -214,7 +214,17 @@
     <div class="contacts-grid" style="font-size: {{ layout.font_size('contacts_grid', '8pt') }}">
       <div class="contacts-box">
         <div class="contacts-box-head">{{ layout.label('contacts_grid', 'Artist / Tour Contacts') }}</div>
-        <div style="padding:6px 8px; white-space:pre-wrap; min-height:50px;">{{ m('artist_contacts') or '—' }}</div>
+        <table class="contacts-table">
+          {% for f in _smf_contacts %}
+          {% set fval = (adv(f.advance_field_key) if f.advance_field_key else m(f.field_key)) | trim %}
+          {% if fval and fval not in ['-',''] %}
+          <tr>
+            <td class="lbl">{{ f.label }}</td>
+            <td>{{ fval }}</td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </table>
       </div>
       <div class="contacts-box">
         <div class="contacts-box-head"><span style="text-transform:none">dpc</span> Contacts</div>
@@ -233,15 +243,6 @@
           <tr>
             <td class="lbl">{{ role }}</td>
             <td>{{ val }}</td>
-          </tr>
-          {% endif %}
-          {% endfor %}
-          {% for f in _smf_contacts %}
-          {% set fval = (adv(f.advance_field_key) if f.advance_field_key else m(f.field_key)) | trim %}
-          {% if fval and fval not in ['-',''] %}
-          <tr>
-            <td class="lbl">{{ f.label }}</td>
-            <td>{{ fval }}</td>
           </tr>
           {% endif %}
           {% endfor %}
