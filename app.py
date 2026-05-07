@@ -243,7 +243,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.9.0'
+APP_VERSION = '2.10.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -6638,6 +6638,108 @@ def _parse_iso_date(s):
         return None
 
 
+# ── Shared overhead helpers ──────────────────────────────────────────────────
+
+# SELECT used in three places — keep it here so the column list / joins stay
+# in sync between create/update endpoints and the list view.
+_OVERHEAD_REQUEST_JOIN_SELECT = """
+    SELECT r.*,
+           jp.name AS position_name,
+           pc.name AS category_name,
+           cm.name AS scheduled_crew_name,
+           prl.name AS scheduled_level_name,
+           prl.hourly_rate AS scheduled_level_rate
+    FROM overhead_labor_requests r
+    LEFT JOIN job_positions jp ON jp.id = r.position_id
+    LEFT JOIN position_categories pc ON pc.id = jp.category_id
+    LEFT JOIN crew_members cm ON cm.id = r.scheduled_crew_member_id
+    LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
+"""
+
+_OVERHEAD_GROUP_JOIN_SELECT = """
+    SELECT g.*,
+           p.name AS project_name,
+           p.client_name,
+           p.color,
+           p.contact_name  AS project_contact_name,
+           p.contact_email AS project_contact_email,
+           p.contact_phone AS project_contact_phone,
+           p.project_notes AS project_default_notes
+    FROM overhead_labor_groups g
+    LEFT JOIN overhead_projects p ON p.id = g.project_id
+"""
+
+
+def _fetch_overhead_request(db, rid):
+    """Fetch a single labor request row joined to position + crew + rate level."""
+    return db.execute(_OVERHEAD_REQUEST_JOIN_SELECT + ' WHERE r.id=?', (rid,)).fetchone()
+
+
+def _fetch_overhead_group(db, gid):
+    """Fetch a single sub-group row joined to its project (if any)."""
+    return db.execute(_OVERHEAD_GROUP_JOIN_SELECT + ' WHERE g.id=?', (gid,)).fetchone()
+
+
+def _annotate_request_metrics(req_dict, *, rate_keys=('scheduled_level_rate',)):
+    """Attach hours_planned / hours_actual / effective_rate / cost_* fields
+    in-place. Snapshot rate is used when present so historical cost is stable.
+
+    `rate_keys` lists the dict keys to fall back to when `pay_rate_snapshot`
+    is None (different SELECT aliases use different names)."""
+    h_p = _calc_hours(
+        req_dict.get('in_time'), req_dict.get('out_time'),
+        req_dict.get('break_start'), req_dict.get('break_end'))
+    h_a = _calc_hours(
+        req_dict.get('actual_in_time'), req_dict.get('actual_out_time'),
+        req_dict.get('actual_break_start'), req_dict.get('actual_break_end'))
+    rate = req_dict.get('pay_rate_snapshot')
+    if rate is None:
+        for k in rate_keys:
+            if req_dict.get(k) is not None:
+                rate = req_dict.get(k)
+                break
+    rate = float(rate or 0)
+    req_dict['hours_planned'] = round(h_p, 4)
+    req_dict['hours_actual']  = round(h_a, 4)
+    req_dict['effective_rate'] = rate
+    req_dict['cost_planned'] = round(h_p * rate, 2)
+    req_dict['cost_actual']  = round(h_a * rate, 2)
+    return req_dict
+
+
+def _parse_dow_csv(csv):
+    """Parse a CSV of weekday digits (0=Sun..6=Sat) → sorted set of valid ints."""
+    out = set()
+    for piece in (csv or '').split(','):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            n = int(piece)
+        except ValueError:
+            continue
+        if 0 <= n <= 6:
+            out.add(n)
+    return out
+
+
+def _max_sort_order(db, table, where_sql='', where_params=()):
+    """Return next sort_order value (current max + 10). Centralizes the pattern."""
+    sql = f'SELECT COALESCE(MAX(sort_order), 0) FROM {table}'
+    if where_sql:
+        sql += ' WHERE ' + where_sql
+    return (db.execute(sql, where_params).fetchone()[0] or 0) + 10
+
+
+def _overhead_log(action, **kw):
+    """Single syslog entry point for overhead crew mutations.
+    Keeps the line format consistent with the rest of the app
+    (LABOR_REQUEST_ADD show_id=… id=… by=…)."""
+    parts = [f'{k}={v}' for k, v in kw.items() if v is not None]
+    parts.append(f"by={session.get('username')}")
+    syslog_logger.info(f"{action} {' '.join(parts)}")
+
+
 @app.route('/overhead-crew')
 @login_required
 def overhead_crew_page():
@@ -6660,63 +6762,24 @@ def api_overhead_list():
         return jsonify({'error': 'from and to dates required'}), 400
 
     db = get_db()
-    groups = db.execute("""
-        SELECT g.id, g.work_date, g.project_id, g.name, g.contact_name,
-               g.contact_email, g.contact_phone, g.project_notes, g.sort_order,
-               p.name AS project_name,
-               p.contact_name  AS project_contact_name,
-               p.contact_email AS project_contact_email,
-               p.contact_phone AS project_contact_phone,
-               p.project_notes AS project_default_notes,
-               p.client_name,
-               p.color
-        FROM overhead_labor_groups g
-        LEFT JOIN overhead_projects p ON p.id = g.project_id
-        WHERE g.work_date BETWEEN ? AND ?
-        ORDER BY g.work_date, g.sort_order, g.id
-    """, (date_from, date_to)).fetchall()
+    groups = db.execute(
+        _OVERHEAD_GROUP_JOIN_SELECT +
+        ' WHERE g.work_date BETWEEN ? AND ? ORDER BY g.work_date, g.sort_order, g.id',
+        (date_from, date_to),
+    ).fetchall()
 
-    requests_rows = db.execute("""
-        SELECT r.id, r.group_id, r.work_date, r.position_id, r.in_time, r.out_time,
-               r.break_start, r.break_end, r.requested_name, r.is_scheduled,
-               r.scheduled_crew_member_id, r.sort_order,
-               r.pay_rate_snapshot, r.pay_rate_level_id_snapshot,
-               r.actual_in_time, r.actual_out_time, r.actual_break_start,
-               r.actual_break_end, r.notes,
-               jp.name AS position_name,
-               pc.name AS category_name,
-               cm.name AS scheduled_crew_name,
-               prl.name AS scheduled_level_name,
-               prl.hourly_rate AS scheduled_level_rate
-        FROM overhead_labor_requests r
-        LEFT JOIN job_positions jp ON jp.id = r.position_id
-        LEFT JOIN position_categories pc ON pc.id = jp.category_id
-        LEFT JOIN crew_members cm ON cm.id = r.scheduled_crew_member_id
-        LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
-        WHERE r.work_date BETWEEN ? AND ?
-        ORDER BY r.work_date, r.group_id, r.sort_order, r.id
-    """, (date_from, date_to)).fetchall()
+    requests_rows = db.execute(
+        _OVERHEAD_REQUEST_JOIN_SELECT +
+        ' WHERE r.work_date BETWEEN ? AND ? ORDER BY r.work_date, r.group_id, r.sort_order, r.id',
+        (date_from, date_to),
+    ).fetchall()
     db.close()
 
-    # Index requests by group id and pre-compute hours/cost so the client doesn't
-    # have to mirror the time-math logic.
+    # Index requests by group id, attaching pre-computed hours/cost so the
+    # client doesn't have to mirror the time-math logic.
     by_group = {}
     for r in requests_rows:
-        rd = _normalize_row_dates(dict(r))
-        rd['hours_planned'] = _calc_hours(
-            rd.get('in_time'), rd.get('out_time'),
-            rd.get('break_start'), rd.get('break_end'))
-        rd['hours_actual'] = _calc_hours(
-            rd.get('actual_in_time'), rd.get('actual_out_time'),
-            rd.get('actual_break_start'), rd.get('actual_break_end'))
-        # Use the snapshot rate when present (preserves history); fall back to the
-        # current crew member's level rate so today's planning shows accurate cost.
-        rate = rd.get('pay_rate_snapshot')
-        if rate is None:
-            rate = rd.get('scheduled_level_rate') or 0
-        rd['effective_rate'] = float(rate or 0)
-        rd['cost_planned'] = round(rd['hours_planned'] * rd['effective_rate'], 2)
-        rd['cost_actual']  = round(rd['hours_actual']  * rd['effective_rate'], 2)
+        rd = _annotate_request_metrics(_normalize_row_dates(dict(r)))
         by_group.setdefault(rd['group_id'], []).append(rd)
 
     # Build days[] → groups[] → requests[]
@@ -6730,7 +6793,11 @@ def api_overhead_list():
             day_order.append(wd)
         gd['requests'] = by_group.get(gd['id'], [])
         # Display name = group's own override if non-empty, else the project's name
-        gd['display_name'] = gd.get('name') if (gd.get('name') and gd.get('name') != 'General') else (gd.get('project_name') or gd.get('name') or 'General')
+        gd['display_name'] = (
+            gd.get('name')
+            if (gd.get('name') and gd.get('name') != 'General')
+            else (gd.get('project_name') or gd.get('name') or 'General')
+        )
         days[wd]['groups'].append(gd)
 
     return jsonify({
@@ -6790,9 +6857,6 @@ def _find_or_create_project(db, name, *, defaults=None):
     if row:
         return row['id']
     d = defaults or {}
-    max_order = db.execute(
-        'SELECT COALESCE(MAX(sort_order), 0) FROM overhead_projects'
-    ).fetchone()[0] or 0
     cur = db.execute("""
         INSERT INTO overhead_projects
             (name, description, client_name, billing_code,
@@ -6809,12 +6873,13 @@ def _find_or_create_project(db, name, *, defaults=None):
         (d.get('contact_phone') or '').strip(),
         d.get('project_notes') or '',
         (d.get('color') or '').strip(),
-        max_order + 10,
+        _max_sort_order(db, 'overhead_projects'),
         session.get('user_id'),
     ))
     pid = cur.lastrowid
     log_audit(db, 'OVERHEAD_PROJECT_ADD', 'overhead_project', pid,
               detail=f'auto-created via group: {name}')
+    _overhead_log('OVERHEAD_PROJECT_ADD', id=pid, name=name, source='auto')
     return pid
 
 
@@ -6834,9 +6899,6 @@ def api_overhead_projects_add():
     if existing:
         db.close()
         return jsonify({'success': False, 'error': 'A project with that name already exists.'}), 409
-    max_order = db.execute(
-        'SELECT COALESCE(MAX(sort_order), 0) FROM overhead_projects'
-    ).fetchone()[0] or 0
     cur = db.execute("""
         INSERT INTO overhead_projects
             (name, description, client_name, billing_code,
@@ -6847,13 +6909,15 @@ def api_overhead_projects_add():
         payload['name'], payload['description'], payload['client_name'],
         payload['billing_code'], payload['contact_name'], payload['contact_email'],
         payload['contact_phone'], payload['project_notes'], payload['color'],
-        payload['archived'], max_order + 10, session.get('user_id'),
+        payload['archived'], _max_sort_order(db, 'overhead_projects'),
+        session.get('user_id'),
     ))
     pid = cur.lastrowid
     log_audit(db, 'OVERHEAD_PROJECT_ADD', 'overhead_project', pid, detail=payload['name'])
     db.commit()
     row = db.execute('SELECT * FROM overhead_projects WHERE id=?', (pid,)).fetchone()
     db.close()
+    _overhead_log('OVERHEAD_PROJECT_ADD', id=pid, name=payload['name'])
     return jsonify({'success': True, 'project': _normalize_row_dates(dict(row)) if row else {'id': pid}})
 
 
@@ -6888,6 +6952,7 @@ def api_overhead_projects_update(pid):
     db.commit()
     refreshed = db.execute('SELECT * FROM overhead_projects WHERE id=?', (pid,)).fetchone()
     db.close()
+    _overhead_log('OVERHEAD_PROJECT_EDIT', id=pid, name=payload['name'])
     return jsonify({'success': True, 'project': _normalize_row_dates(dict(refreshed)) if refreshed else None})
 
 
@@ -6910,12 +6975,15 @@ def api_overhead_projects_delete(pid):
     if hard and not in_use:
         db.execute('DELETE FROM overhead_projects WHERE id=?', (pid,))
         log_audit(db, 'OVERHEAD_PROJECT_DELETE', 'overhead_project', pid, detail=row['name'])
+        action = 'OVERHEAD_PROJECT_DELETE'
     else:
         db.execute('UPDATE overhead_projects SET archived=1 WHERE id=?', (pid,))
         log_audit(db, 'OVERHEAD_PROJECT_ARCHIVE', 'overhead_project', pid,
                   detail=f"{row['name']} (in_use={in_use})")
+        action = 'OVERHEAD_PROJECT_ARCHIVE'
     db.commit()
     db.close()
+    _overhead_log(action, id=pid, name=row['name'], in_use=in_use)
     return jsonify({'success': True, 'archived_only': bool(in_use) or not hard})
 
 
@@ -6952,36 +7020,29 @@ def api_overhead_project_stats():
     """).fetchall()
     db.close()
 
+    def _empty_bucket():
+        return {
+            'lifetime_hours_planned': 0.0, 'lifetime_hours_actual':  0.0,
+            'lifetime_cost_planned':  0.0, 'lifetime_cost_actual':   0.0,
+            'lifetime_lines': 0,
+            'lifetime_first_date': None, 'lifetime_last_date': None,
+            'range_hours_planned': 0.0, 'range_hours_actual': 0.0,
+            'range_cost_planned': 0.0, 'range_cost_actual': 0.0,
+            'range_lines': 0,
+        }
+
     by_pid = {}
-    # Track unmatched (no project) lines under a synthetic project_id = None group
+    # Track unmatched (no project) lines under a synthetic project_id = None bucket
     for r in rows:
-        rd = _normalize_row_dates(dict(r))
-        pid = rd['project_id']  # may be None for ungrouped lines
-        rec = by_pid.setdefault(pid, {
-            'lifetime_hours_planned': 0.0,
-            'lifetime_hours_actual':  0.0,
-            'lifetime_cost_planned':  0.0,
-            'lifetime_cost_actual':   0.0,
-            'lifetime_lines':         0,
-            'lifetime_first_date':    None,
-            'lifetime_last_date':     None,
-            'range_hours_planned':    0.0,
-            'range_hours_actual':     0.0,
-            'range_cost_planned':     0.0,
-            'range_cost_actual':      0.0,
-            'range_lines':            0,
-        })
+        rd = _annotate_request_metrics(
+            _normalize_row_dates(dict(r)),
+            rate_keys=('level_rate',),
+        )
+        pid = rd['project_id']
+        rec = by_pid.setdefault(pid, _empty_bucket())
         wd = rd.get('work_date') or ''
-        h_p = _calc_hours(rd.get('in_time'), rd.get('out_time'),
-                          rd.get('break_start'), rd.get('break_end'))
-        h_a = _calc_hours(rd.get('actual_in_time'), rd.get('actual_out_time'),
-                          rd.get('actual_break_start'), rd.get('actual_break_end'))
-        rate = rd.get('pay_rate_snapshot')
-        if rate is None:
-            rate = rd.get('level_rate') or 0
-        rate = float(rate or 0)
-        cp = h_p * rate
-        ca = h_a * rate
+        h_p, h_a = rd['hours_planned'], rd['hours_actual']
+        cp, ca   = rd['cost_planned'],  rd['cost_actual']
 
         rec['lifetime_hours_planned'] += h_p
         rec['lifetime_hours_actual']  += h_a
@@ -6994,9 +7055,9 @@ def api_overhead_project_stats():
             if rec['lifetime_last_date'] is None or wd > rec['lifetime_last_date']:
                 rec['lifetime_last_date'] = wd
 
-        in_range = True
-        if date_from and (not wd or wd < date_from): in_range = False
-        if date_to   and (not wd or wd > date_to):   in_range = False
+        in_range = bool(wd)
+        if in_range and date_from and wd < date_from: in_range = False
+        if in_range and date_to   and wd > date_to:   in_range = False
         if in_range:
             rec['range_hours_planned'] += h_p
             rec['range_hours_actual']  += h_a
@@ -7004,41 +7065,28 @@ def api_overhead_project_stats():
             rec['range_cost_actual']   += ca
             rec['range_lines']         += 1
 
+    _NUM_KEYS = (
+        'lifetime_hours_planned', 'lifetime_hours_actual',
+        'lifetime_cost_planned',  'lifetime_cost_actual',
+        'range_hours_planned',    'range_hours_actual',
+        'range_cost_planned',     'range_cost_actual',
+    )
+    def _round_bucket(b):
+        for k in _NUM_KEYS:
+            b[k] = round(b[k], 2)
+        return b
+
     out = []
     for p in projects:
         pd = _normalize_row_dates(dict(p))
-        s = by_pid.get(pd['id'], None)
-        if s is None:
-            s = {
-                'lifetime_hours_planned': 0.0, 'lifetime_hours_actual': 0.0,
-                'lifetime_cost_planned': 0.0,  'lifetime_cost_actual': 0.0,
-                'lifetime_lines': 0,
-                'lifetime_first_date': None,   'lifetime_last_date': None,
-                'range_hours_planned': 0.0,    'range_hours_actual': 0.0,
-                'range_cost_planned': 0.0,     'range_cost_actual': 0.0,
-                'range_lines': 0,
-            }
-        # Round numeric fields for nicer display
-        for k in ('lifetime_hours_planned', 'lifetime_hours_actual',
-                  'lifetime_cost_planned',  'lifetime_cost_actual',
-                  'range_hours_planned',    'range_hours_actual',
-                  'range_cost_planned',     'range_cost_actual'):
-            s[k] = round(s[k], 2)
-        out.append({**pd, **s})
+        bucket = by_pid.get(pd['id']) or _empty_bucket()
+        out.append({**pd, **_round_bucket(bucket)})
 
     # Also include un-projected lines (project_id=NULL) as a synthetic row
     if None in by_pid:
-        s = by_pid[None]
-        for k in ('lifetime_hours_planned', 'lifetime_hours_actual',
-                  'lifetime_cost_planned',  'lifetime_cost_actual',
-                  'range_hours_planned',    'range_hours_actual',
-                  'range_cost_planned',     'range_cost_actual'):
-            s[k] = round(s[k], 2)
         out.append({
-            'id': None,
-            'name': '(No project)',
-            'archived': 0,
-            **s,
+            'id': None, 'name': '(No project)', 'archived': 0,
+            **_round_bucket(by_pid[None]),
         })
 
     return jsonify({'from': date_from, 'to': date_to, 'projects': out})
@@ -7096,10 +7144,6 @@ def api_overhead_group_add():
     if not name:
         name = (proj['name'] if proj else (data.get('project_name') or '').strip()) or 'General'
 
-    max_order = db.execute(
-        'SELECT COALESCE(MAX(sort_order), 0) FROM overhead_labor_groups WHERE work_date=?',
-        (wd.isoformat(),)
-    ).fetchone()[0] or 0
     cur = db.execute("""
         INSERT INTO overhead_labor_groups
             (work_date, project_id, name, contact_name, contact_email, contact_phone,
@@ -7113,22 +7157,19 @@ def api_overhead_group_add():
         (data.get('contact_email') or '').strip(),
         (data.get('contact_phone') or '').strip(),
         data.get('project_notes') or '',
-        max_order + 10,
+        _max_sort_order(db, 'overhead_labor_groups', 'work_date=?', (wd.isoformat(),)),
         session.get('user_id'),
     ))
     gid = cur.lastrowid
     log_audit(db, 'OVERHEAD_GROUP_ADD', 'overhead_labor_group', gid,
               detail=f"{wd.isoformat()} · project={project_id} · {name}")
     db.commit()
-    row = db.execute("""
-        SELECT g.*, p.name AS project_name, p.client_name, p.color
-        FROM overhead_labor_groups g
-        LEFT JOIN overhead_projects p ON p.id = g.project_id
-        WHERE g.id=?
-    """, (gid,)).fetchone()
+    row = _fetch_overhead_group(db, gid)
     db.close()
     out = _normalize_row_dates(dict(row)) if row else {'id': gid}
     out['requests'] = []
+    _overhead_log('OVERHEAD_GROUP_ADD',
+                  id=gid, date=wd.isoformat(), project_id=project_id, name=name)
     return jsonify({'success': True, 'group': out})
 
 
@@ -7193,13 +7234,9 @@ def api_overhead_group_update(gid):
     db.execute(f"UPDATE overhead_labor_groups SET {', '.join(updates)} WHERE id=?", params)
     log_audit(db, 'OVERHEAD_GROUP_EDIT', 'overhead_labor_group', gid)
     db.commit()
-    refreshed = db.execute("""
-        SELECT g.*, p.name AS project_name, p.client_name, p.color
-        FROM overhead_labor_groups g
-        LEFT JOIN overhead_projects p ON p.id = g.project_id
-        WHERE g.id=?
-    """, (gid,)).fetchone()
+    refreshed = _fetch_overhead_group(db, gid)
     db.close()
+    _overhead_log('OVERHEAD_GROUP_EDIT', id=gid)
     return jsonify({'success': True, 'group': _normalize_row_dates(dict(refreshed)) if refreshed else None})
 
 
@@ -7220,6 +7257,7 @@ def api_overhead_group_delete(gid):
               detail=f"{row['work_date']} · {row['name']}")
     db.commit()
     db.close()
+    _overhead_log('OVERHEAD_GROUP_DELETE', id=gid, date=row['work_date'], name=row['name'])
     return jsonify({'success': True})
 
 
@@ -7238,9 +7276,6 @@ def api_overhead_request_add():
     if not grp:
         db.close()
         return jsonify({'success': False, 'error': 'Group not found.'}), 404
-    max_order = db.execute(
-        'SELECT COALESCE(MAX(sort_order), 0) FROM overhead_labor_requests WHERE group_id=?', (gid,)
-    ).fetchone()[0] or 0
     cur = db.execute("""
         INSERT INTO overhead_labor_requests
             (group_id, work_date, position_id, in_time, out_time, break_start, break_end,
@@ -7255,24 +7290,18 @@ def api_overhead_request_add():
         (data.get('break_start') or '').strip(),
         (data.get('break_end') or '').strip(),
         (data.get('requested_name') or '').strip(),
-        max_order + 10,
+        _max_sort_order(db, 'overhead_labor_requests', 'group_id=?', (gid,)),
         session.get('user_id'),
     ))
     rid = cur.lastrowid
     log_audit(db, 'OVERHEAD_REQUEST_ADD', 'overhead_labor_request', rid,
               detail=f"group={gid}")
     db.commit()
-    row = db.execute("""
-        SELECT r.*, jp.name AS position_name, pc.name AS category_name,
-               cm.name AS scheduled_crew_name
-        FROM overhead_labor_requests r
-        LEFT JOIN job_positions jp ON jp.id = r.position_id
-        LEFT JOIN position_categories pc ON pc.id = jp.category_id
-        LEFT JOIN crew_members cm ON cm.id = r.scheduled_crew_member_id
-        WHERE r.id=?
-    """, (rid,)).fetchone()
+    row = _fetch_overhead_request(db, rid)
     db.close()
-    return jsonify({'success': True, 'request': _normalize_row_dates(dict(row)) if row else {'id': rid}})
+    out = _annotate_request_metrics(_normalize_row_dates(dict(row))) if row else {'id': rid}
+    _overhead_log('OVERHEAD_REQUEST_ADD', id=rid, group_id=gid)
+    return jsonify({'success': True, 'request': out})
 
 
 @app.route('/api/overhead-crew/requests/<int:rid>', methods=['PUT'])
@@ -7336,17 +7365,11 @@ def api_overhead_request_update(rid):
     log_audit(db, 'OVERHEAD_REQUEST_EDIT', 'overhead_labor_request', rid,
               detail='; '.join(detail_parts))
     db.commit()
-    refreshed = db.execute("""
-        SELECT r.*, jp.name AS position_name, pc.name AS category_name,
-               cm.name AS scheduled_crew_name
-        FROM overhead_labor_requests r
-        LEFT JOIN job_positions jp ON jp.id = r.position_id
-        LEFT JOIN position_categories pc ON pc.id = jp.category_id
-        LEFT JOIN crew_members cm ON cm.id = r.scheduled_crew_member_id
-        WHERE r.id=?
-    """, (rid,)).fetchone()
+    refreshed = _fetch_overhead_request(db, rid)
     db.close()
-    return jsonify({'success': True, 'request': _normalize_row_dates(dict(refreshed)) if refreshed else None})
+    out = _annotate_request_metrics(_normalize_row_dates(dict(refreshed))) if refreshed else None
+    _overhead_log('OVERHEAD_REQUEST_EDIT', id=rid)
+    return jsonify({'success': True, 'request': out})
 
 
 @app.route('/api/overhead-crew/requests/<int:rid>', methods=['DELETE'])
@@ -7364,27 +7387,22 @@ def api_overhead_request_delete(rid):
     log_audit(db, 'OVERHEAD_REQUEST_DELETE', 'overhead_labor_request', rid)
     db.commit()
     db.close()
+    _overhead_log('OVERHEAD_REQUEST_DELETE', id=rid)
     return jsonify({'success': True})
 
 
 # ── Recurring templates ──────────────────────────────────────────────────────
 
+_OVERHEAD_TEMPLATE_JOIN_SELECT = """
+    SELECT t.*, jp.name AS position_name
+    FROM overhead_labor_templates t
+    LEFT JOIN job_positions jp ON jp.id = t.position_id
+"""
+
+
 def _template_row_to_dict(r):
     d = _normalize_row_dates(dict(r))
-    # Parse days_of_week CSV → array of ints 0..6
-    raw = (d.get('days_of_week') or '').strip()
-    days = []
-    for piece in raw.split(','):
-        piece = piece.strip()
-        if not piece:
-            continue
-        try:
-            n = int(piece)
-            if 0 <= n <= 6:
-                days.append(n)
-        except ValueError:
-            continue
-    d['days_of_week'] = sorted(set(days))
+    d['days_of_week'] = sorted(_parse_dow_csv(d.get('days_of_week')))
     return d
 
 
@@ -7392,12 +7410,9 @@ def _template_row_to_dict(r):
 @login_required
 def api_overhead_templates_list():
     db = get_db()
-    rows = db.execute("""
-        SELECT t.*, jp.name AS position_name
-        FROM overhead_labor_templates t
-        LEFT JOIN job_positions jp ON jp.id = t.position_id
-        ORDER BY t.is_active DESC, t.sort_order, t.id
-    """).fetchall()
+    rows = db.execute(
+        _OVERHEAD_TEMPLATE_JOIN_SELECT + ' ORDER BY t.is_active DESC, t.sort_order, t.id'
+    ).fetchall()
     db.close()
     return jsonify([_template_row_to_dict(r) for r in rows])
 
@@ -7407,9 +7422,10 @@ def _template_payload_from_request(data):
     Returns (col_assignments_dict)."""
     days = data.get('days_of_week')
     if isinstance(days, list):
-        days_csv = ','.join(str(int(d)) for d in days if 0 <= int(d) <= 6)
+        # Same validation as _parse_dow_csv: keep only 0..6
+        days_csv = ','.join(str(n) for n in sorted(_parse_dow_csv(','.join(str(d) for d in days))))
     else:
-        days_csv = (data.get('days_of_week') or '').strip()
+        days_csv = ','.join(str(n) for n in sorted(_parse_dow_csv(data.get('days_of_week') or '')))
     return {
         'name':                   (data.get('name') or '').strip(),
         'position_id':            (int(data['position_id']) if data.get('position_id') else None),
@@ -7440,11 +7456,8 @@ def api_overhead_templates_add():
     if not payload['name']:
         return jsonify({'success': False, 'error': 'Template name is required.'}), 400
     db = get_db()
-    max_order = db.execute(
-        'SELECT COALESCE(MAX(sort_order),0) FROM overhead_labor_templates'
-    ).fetchone()[0] or 0
     cols = list(payload.keys()) + ['sort_order']
-    vals = list(payload.values()) + [max_order + 10]
+    vals = list(payload.values()) + [_max_sort_order(db, 'overhead_labor_templates')]
     placeholders = ','.join(['?'] * len(cols))
     cur = db.execute(
         f"INSERT INTO overhead_labor_templates ({','.join(cols)}) VALUES ({placeholders})",
@@ -7454,13 +7467,9 @@ def api_overhead_templates_add():
     log_audit(db, 'OVERHEAD_TEMPLATE_ADD', 'overhead_labor_template', tid,
               detail=payload['name'])
     db.commit()
-    row = db.execute("""
-        SELECT t.*, jp.name AS position_name
-        FROM overhead_labor_templates t
-        LEFT JOIN job_positions jp ON jp.id = t.position_id
-        WHERE t.id=?
-    """, (tid,)).fetchone()
+    row = db.execute(_OVERHEAD_TEMPLATE_JOIN_SELECT + ' WHERE t.id=?', (tid,)).fetchone()
     db.close()
+    _overhead_log('OVERHEAD_TEMPLATE_ADD', id=tid, name=payload['name'])
     return jsonify({'success': True, 'template': _template_row_to_dict(row) if row else {'id': tid}})
 
 
@@ -7486,13 +7495,9 @@ def api_overhead_templates_update(tid):
     log_audit(db, 'OVERHEAD_TEMPLATE_EDIT', 'overhead_labor_template', tid,
               detail=payload['name'])
     db.commit()
-    refreshed = db.execute("""
-        SELECT t.*, jp.name AS position_name
-        FROM overhead_labor_templates t
-        LEFT JOIN job_positions jp ON jp.id = t.position_id
-        WHERE t.id=?
-    """, (tid,)).fetchone()
+    refreshed = db.execute(_OVERHEAD_TEMPLATE_JOIN_SELECT + ' WHERE t.id=?', (tid,)).fetchone()
     db.close()
+    _overhead_log('OVERHEAD_TEMPLATE_EDIT', id=tid, name=payload['name'])
     return jsonify({'success': True, 'template': _template_row_to_dict(refreshed) if refreshed else None})
 
 
@@ -7511,6 +7516,7 @@ def api_overhead_templates_delete(tid):
               detail=row['name'])
     db.commit()
     db.close()
+    _overhead_log('OVERHEAD_TEMPLATE_DELETE', id=tid, name=row['name'])
     return jsonify({'success': True})
 
 
@@ -7547,120 +7553,110 @@ def api_overhead_templates_generate():
     groups_created   = 0
     skipped          = 0
 
+    # Cache project upserts per (run, template) so multiple matching dates re-use
+    # the same project_id without a DB round-trip per day.
+    project_id_cache = {}
+
     for t in templates:
-        # Parse the days_of_week CSV (Python date.weekday(): 0=Mon..6=Sun;
-        # we use 0=Sun..6=Sat to match JS Date#getDay() — convert).
-        raw_days = (t['days_of_week'] or '').split(',')
-        wanted = set()
-        for d in raw_days:
-            d = d.strip()
-            if not d:
-                continue
-            try:
-                n = int(d)
-            except ValueError:
-                continue
-            if 0 <= n <= 6:
-                wanted.add(n)
+        wanted = _parse_dow_csv(t['days_of_week'])
         if not wanted:
             continue
 
         t_start = _parse_iso_date(t['start_date']) if t['start_date'] else None
         t_end   = _parse_iso_date(t['end_date'])   if t['end_date']   else None
 
-        cur = df
+        # Auto-link the template's default group name to a project (creates one
+        # on first generate so lifetime stats roll up correctly).
+        gname = t['default_group_name'] or 'Overhead'
+        if gname not in project_id_cache:
+            project_id_cache[gname] = _find_or_create_project(
+                db, gname,
+                defaults={
+                    'contact_name':  t['default_contact_name'],
+                    'contact_email': t['default_contact_email'],
+                    'contact_phone': t['default_contact_phone'],
+                    'project_notes': t['default_project_notes'],
+                },
+            )
+        project_id = project_id_cache[gname]
+
+        # Build an equality predicate for position_id that works on both engines
+        # (PostgreSQL rejects `col IS ?` when ? binds to NULL).
+        pos_id = t['position_id']
+        if pos_id is None:
+            pos_pred  = 'position_id IS NULL'
+            pos_param = []
+        else:
+            pos_pred  = 'position_id = ?'
+            pos_param = [pos_id]
+
+        cur_date = df
         last_generated = _parse_iso_date(t['last_generated_through']) if t['last_generated_through'] else None
-        while cur <= dt:
-            # Convert Python weekday (Mon=0..Sun=6) → JS getDay (Sun=0..Sat=6)
-            py_w = cur.weekday()  # 0..6 Mon..Sun
-            js_w = (py_w + 1) % 7  # 0=Sun
+        while cur_date <= dt:
+            # Python weekday: Mon=0..Sun=6 → JS getDay: Sun=0..Sat=6
+            js_w = (cur_date.weekday() + 1) % 7
             in_range = (
-                (t_start is None or cur >= t_start) and
-                (t_end   is None or cur <= t_end)
+                (t_start is None or cur_date >= t_start) and
+                (t_end   is None or cur_date <= t_end)
             )
             if js_w in wanted and in_range:
-                iso = cur.isoformat()
+                iso = cur_date.isoformat()
 
-                # Find or create the target group on this date with the template's
-                # default group name. We re-use an existing same-named group on
-                # that day to keep the generated requests grouped together.
+                # Find or create the target group (same date + group name).
                 grp = db.execute(
                     "SELECT id FROM overhead_labor_groups WHERE work_date=? AND name=? LIMIT 1",
-                    (iso, t['default_group_name'] or 'Overhead')
+                    (iso, gname),
                 ).fetchone()
                 if not grp:
-                    max_g = db.execute(
-                        'SELECT COALESCE(MAX(sort_order),0) FROM overhead_labor_groups WHERE work_date=?',
-                        (iso,)
-                    ).fetchone()[0] or 0
                     cur_g = db.execute("""
                         INSERT INTO overhead_labor_groups
-                            (work_date, name, contact_name, contact_email, contact_phone,
-                             project_notes, sort_order)
-                        VALUES (?,?,?,?,?,?,?)
+                            (work_date, project_id, name, contact_name, contact_email,
+                             contact_phone, project_notes, sort_order, created_by)
+                        VALUES (?,?,?,?,?,?,?,?,?)
                     """, (
-                        iso,
-                        t['default_group_name'] or 'Overhead',
+                        iso, project_id, gname,
                         t['default_contact_name'] or '',
                         t['default_contact_email'] or '',
                         t['default_contact_phone'] or '',
                         t['default_project_notes'] or '',
-                        max_g + 10,
+                        _max_sort_order(db, 'overhead_labor_groups', 'work_date=?', (iso,)),
+                        session.get('user_id'),
                     ))
                     gid = cur_g.lastrowid
                     groups_created += 1
                 else:
                     gid = grp['id']
 
+                # Idempotency: count matching lines once, only insert (qty - existing)
+                # additional ones. Matching = same position + in/out within this group.
+                existing = db.execute(
+                    f"""SELECT COUNT(*) FROM overhead_labor_requests
+                        WHERE group_id=? AND {pos_pred} AND in_time=? AND out_time=?""",
+                    [gid] + pos_param + [t['in_time'] or '', t['out_time'] or ''],
+                ).fetchone()[0] or 0
                 qty = max(1, int(t['quantity'] or 1))
-                for _ in range(qty):
-                    # Skip if a request with the same position + in/out already
-                    # exists in this group (idempotency for re-runs).
-                    dup = db.execute("""
-                        SELECT id FROM overhead_labor_requests
-                        WHERE group_id=? AND position_id IS ? AND in_time=? AND out_time=?
-                        LIMIT 1
-                    """, (
-                        gid,
-                        t['position_id'],
-                        t['in_time'] or '',
-                        t['out_time'] or '',
-                    )).fetchone()
-                    # Within a single template+day, each subsequent slot of the
-                    # same position is a *new* line, so we only want to skip
-                    # *across runs*. We approximate that by counting matching
-                    # rows and stopping once we have qty already.
-                    matching = db.execute("""
-                        SELECT COUNT(*) FROM overhead_labor_requests
-                        WHERE group_id=? AND position_id IS ? AND in_time=? AND out_time=?
-                    """, (
-                        gid,
-                        t['position_id'],
-                        t['in_time'] or '',
-                        t['out_time'] or '',
-                    )).fetchone()[0] or 0
-                    if matching >= qty:
-                        skipped += 1
-                        break
-                    max_o = db.execute(
-                        'SELECT COALESCE(MAX(sort_order),0) FROM overhead_labor_requests WHERE group_id=?',
-                        (gid,)
-                    ).fetchone()[0] or 0
-                    db.execute("""
-                        INSERT INTO overhead_labor_requests
-                            (group_id, work_date, position_id, in_time, out_time,
-                             break_start, break_end, requested_name, sort_order)
-                        VALUES (?,?,?,?,?,?,?,?,?)
-                    """, (
-                        gid, iso, t['position_id'],
-                        t['in_time'] or '', t['out_time'] or '',
-                        t['break_start'] or '', t['break_end'] or '',
-                        '', max_o + 10,
-                    ))
-                    requests_created += 1
-            cur = cur + timedelta(days=1)
+                to_insert = max(0, qty - existing)
+                if to_insert == 0:
+                    skipped += 1
+                else:
+                    next_sort = _max_sort_order(db, 'overhead_labor_requests', 'group_id=?', (gid,))
+                    for i in range(to_insert):
+                        db.execute("""
+                            INSERT INTO overhead_labor_requests
+                                (group_id, work_date, position_id, in_time, out_time,
+                                 break_start, break_end, requested_name, sort_order, created_by)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """, (
+                            gid, iso, t['position_id'],
+                            t['in_time'] or '', t['out_time'] or '',
+                            t['break_start'] or '', t['break_end'] or '',
+                            '', next_sort + (i * 10),
+                            session.get('user_id'),
+                        ))
+                        requests_created += 1
+            cur_date = cur_date + timedelta(days=1)
 
-        # Mark the template as generated through `to` if we extended its coverage
+        # Bump last_generated_through if we extended coverage
         if last_generated is None or dt > last_generated:
             db.execute(
                 'UPDATE overhead_labor_templates SET last_generated_through=? WHERE id=?',
@@ -7671,10 +7667,12 @@ def api_overhead_templates_generate():
               detail=f"{df.isoformat()}→{dt.isoformat()} created={requests_created} groups={groups_created}")
     db.commit()
     db.close()
-    syslog_logger.info(
-        f"OVERHEAD_GENERATE {df.isoformat()}→{dt.isoformat()} "
-        f"created={requests_created} groups={groups_created} by={session.get('username')}"
-    )
+    _overhead_log('OVERHEAD_GENERATE',
+                  range_from=df.isoformat(), range_to=dt.isoformat(),
+                  template_id=only_id,
+                  requests_created=requests_created,
+                  groups_created=groups_created,
+                  skipped=skipped)
     return jsonify({
         'success': True,
         'requests_created': requests_created,

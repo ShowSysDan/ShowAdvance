@@ -523,8 +523,8 @@
     return _projects;
   }
 
-  function buildPositionSelect(selectEl, selectedId) {
-    selectEl.innerHTML = '<option value="">— Position —</option>';
+  function buildPositionSelect(selectEl, selectedId, placeholder) {
+    selectEl.innerHTML = `<option value="">${placeholder || '— Position —'}</option>`;
     if (!_positions) return;
     const byCat = {};
     _positions.forEach(p => {
@@ -1177,9 +1177,9 @@
       alert('Failed to add labor line: ' + ((res && res.error) || 'unknown'));
       return;
     }
+    // The server returns the new row with hours_planned / effective_rate already
+    // attached by _annotate_request_metrics — no need to backfill here.
     const tbody = groupEl.querySelector('.oh-req-tbody');
-    res.request.hours_planned = 0;
-    res.request.effective_rate = 0;
     tbody.appendChild(renderRequestRow(res.request));
     recomputeGroupTotals(groupEl);
     recomputeDayTotals(groupEl.closest('.oh-day'));
@@ -1352,25 +1352,9 @@
       list.appendChild(row);
     });
   }
-  function buildTemplatePositionSelect() {
-    const sel = document.getElementById('oh-tpl-position');
-    sel.innerHTML = '<option value="">— Any position —</option>';
-    if (!_positions) return;
-    const byCat = {};
-    _positions.forEach(p => {
-      const c = p.category_name || 'Other';
-      if (!byCat[c]) byCat[c] = [];
-      byCat[c].push(p);
-    });
-    for (const [cat, positions] of Object.entries(byCat)) {
-      const og = document.createElement('optgroup'); og.label = cat;
-      positions.forEach(p => {
-        const opt = document.createElement('option');
-        opt.value = p.id; opt.textContent = p.name;
-        og.appendChild(opt);
-      });
-      sel.appendChild(og);
-    }
+  function buildTemplatePositionSelect(selectedId) {
+    buildPositionSelect(document.getElementById('oh-tpl-position'),
+                        selectedId, '— Any position —');
   }
   function buildTemplateProjectSelect(selectedId) {
     const sel = document.getElementById('oh-tpl-project');
@@ -1400,11 +1384,11 @@
     document.getElementById('oh-tpl-form-wrap').scrollIntoView({behavior:'smooth', block:'start'});
   }
   function populateTemplateForm(t) {
-    buildTemplatePositionSelect();
+    buildTemplatePositionSelect(t.position_id);
     buildTemplateProjectSelect(t.default_group_name || '');
     const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v == null ? '' : v; };
     set('oh-tpl-name',     t.name);
-    set('oh-tpl-position', t.position_id);
+    // (oh-tpl-position is set by buildTemplatePositionSelect above)
     set('oh-tpl-qty',      t.quantity || 1);
     set('oh-tpl-in',       t.in_time);
     set('oh-tpl-out',      t.out_time);
