@@ -746,8 +746,46 @@ def _get_smtp_settings():
     return {k: get_app_setting(k, '') for k in keys}
 
 
+def _log_email_error(recipients, subject, error, *,
+                     pdf_type=None, show_id=None,
+                     triggered_by=None, smtp_code=None):
+    """Record one row per failed recipient in email_send_errors.
+
+    `recipients` may be a list, a single string, or None (treated as one
+    'unknown' row so the failure isn't lost). Never raises — best-effort
+    logging only."""
+    if recipients is None:
+        recipients = ['(unknown)']
+    elif isinstance(recipients, str):
+        recipients = [recipients]
+    if not recipients:
+        return
+    err_str  = str(error)[:1000]
+    code_str = str(smtp_code or '')[:50]
+    by_str   = (triggered_by or session.get('username') or 'system')[:100]
+    subj_str = (subject or '')[:200]
+    pdf_str  = (pdf_type or '')[:50]
+    try:
+        db = get_db()
+        for r in recipients:
+            try:
+                db.execute("""
+                    INSERT INTO email_send_errors
+                        (recipient, subject, error_msg, smtp_code,
+                         pdf_type, show_id, triggered_by)
+                    VALUES (?,?,?,?,?,?,?)
+                """, (str(r)[:200], subj_str, err_str, code_str,
+                      pdf_str, show_id, by_str))
+            except Exception:
+                pass
+        db.commit()
+        db.close()
+    except Exception as e:
+        app.logger.warning(f'_log_email_error: could not write error row: {e}')
+
+
 def _build_mime_message(subject, from_addr, recipients, body_text=None,
-                        body_html=None, attachments=None):
+                        body_html=None, attachments=None, use_bcc=True):
     """
     Build a MIME email message.
 
@@ -758,6 +796,9 @@ def _build_mime_message(subject, from_addr, recipients, body_text=None,
         body_text (str|None): Plain text body
         body_html (str|None): HTML body
         attachments (list[dict]|None): Each dict: {'filename', 'data' (bytes), 'mimetype'}
+        use_bcc (bool): When True (default), recipients are NOT listed in the
+            visible To: header — delivery is via the SMTP envelope only so
+            recipients can't see each other. To: shows the from address.
 
     Returns:
         email.mime.multipart.MIMEMultipart
@@ -773,7 +814,12 @@ def _build_mime_message(subject, from_addr, recipients, body_text=None,
 
     msg = MIMEMultipart()
     msg['From'] = _clean_header(from_addr)
-    msg['To'] = _clean_header(', '.join(recipients))
+    if use_bcc:
+        # Most mail clients want a non-empty To: header; show the from address
+        # rather than "Undisclosed Recipients" so the message looks normal.
+        msg['To'] = _clean_header(from_addr)
+    else:
+        msg['To'] = _clean_header(', '.join(recipients))
     msg['Subject'] = _clean_header(subject)
 
     if body_text and body_html:
@@ -800,12 +846,18 @@ def _build_mime_message(subject, from_addr, recipients, body_text=None,
 
 
 def _send_email_smtp(subject, recipients, body_text=None, body_html=None,
-                     attachments=None, from_address=None):
-    """Send email via configured SMTP relay. Returns (success, message)."""
+                     attachments=None, from_address=None, error_context=None):
+    """Send email via configured SMTP relay. Returns (success, message).
+
+    `error_context` is an optional dict of {pdf_type, show_id, triggered_by}
+    that's attached to any rows written into email_send_errors so the admin
+    can trace which feature triggered the failure."""
     import smtplib
 
     smtp_cfg = _get_smtp_settings()
     if not smtp_cfg.get('smtp_host'):
+        _log_email_error(recipients, subject, 'SMTP not configured.',
+                         **(error_context or {}))
         return False, 'SMTP not configured.'
 
     from_addr = from_address or smtp_cfg.get('smtp_from') or smtp_cfg.get('smtp_user', '')
@@ -824,17 +876,40 @@ def _send_email_smtp(subject, recipients, body_text=None, body_html=None,
             server = smtplib.SMTP_SSL(smtp_cfg['smtp_host'], port, timeout=15)
         if smtp_cfg.get('smtp_user') and smtp_cfg.get('smtp_pass'):
             server.login(smtp_cfg['smtp_user'], smtp_cfg['smtp_pass'])
-        server.sendmail(from_addr, recipients, msg.as_string())
-        server.quit()
+        try:
+            # sendmail returns a dict of refused recipients for partial failures
+            refused = server.sendmail(from_addr, recipients, msg.as_string())
+            if refused:
+                # SMTP relay refused some addresses but accepted others
+                for addr, (code, why) in refused.items():
+                    _log_email_error(addr, subject, f'{code} {why!r}',
+                                     smtp_code=str(code), **(error_context or {}))
+        finally:
+            try: server.quit()
+            except Exception: pass
+    except smtplib.SMTPRecipientsRefused as e:
+        # Every recipient was refused — log each with its specific code
+        app.logger.error(f'SMTP all recipients refused: {e.recipients}')
+        for addr, (code, why) in (e.recipients or {}).items():
+            _log_email_error(addr, subject, f'{code} {why!r}',
+                             smtp_code=str(code), **(error_context or {}))
+        return False, f'SMTP error: all recipients refused.'
+    except smtplib.SMTPResponseException as e:
+        app.logger.error(f'SMTP send failed: {e.smtp_code} {e.smtp_error}')
+        _log_email_error(recipients, subject, str(e.smtp_error),
+                         smtp_code=str(e.smtp_code), **(error_context or {}))
+        return False, f'SMTP error: {e.smtp_code} {e.smtp_error}'
     except Exception as e:
         app.logger.error(f'SMTP send failed: {e}')
+        _log_email_error(recipients, subject, str(e),
+                         **(error_context or {}))
         return False, f'SMTP error: {e}'
 
     return True, f'Sent to {len(recipients)} recipient(s).'
 
 
 def _send_email_direct(subject, recipients, body_text=None, body_html=None,
-                       attachments=None, from_address=None):
+                       attachments=None, from_address=None, error_context=None):
     """Send email directly via MX lookup (no relay). Returns (success, message)."""
     import smtplib
     import dns.resolver
@@ -871,7 +946,9 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
             mx_records = dns.resolver.resolve(domain, 'MX')
             mx_hosts = sorted(mx_records, key=lambda r: r.preference)
         except Exception as e:
-            errors.append(f'MX lookup failed for {domain}: {e}')
+            err_msg = f'MX lookup failed for {domain}: {e}'
+            errors.append(err_msg)
+            _log_email_error(addrs, subject, err_msg, **(error_context or {}))
             continue
 
         # Try each MX host in priority order
@@ -888,9 +965,17 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
                     server.ehlo(ehlo_hostname)
                 except smtplib.SMTPNotSupportedError:
                     pass  # Server doesn't support STARTTLS, continue unencrypted
-                server.sendmail(from_addr, addrs, msg_str)
-                server.quit()
-                sent_count += len(addrs)
+                refused = server.sendmail(from_addr, addrs, msg_str)
+                try: server.quit()
+                except Exception: pass
+                # Partial refusal — server accepted the connection but rejected
+                # specific addresses; log each so the admin can act on bad
+                # addresses (e.g. typo'd recipient).
+                if refused:
+                    for addr, (code, why) in refused.items():
+                        _log_email_error(addr, subject, f'{code} {why!r}',
+                                         smtp_code=str(code), **(error_context or {}))
+                sent_count += len(addrs) - len(refused or {})
                 delivered = True
                 break
             except Exception as e:
@@ -900,7 +985,9 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
 
         if not delivered:
             detail = f' ({last_error})' if last_error else ''
-            errors.append(f'All MX hosts failed for {domain}{detail}')
+            err_msg = f'All MX hosts failed for {domain}{detail}'
+            errors.append(err_msg)
+            _log_email_error(addrs, subject, err_msg, **(error_context or {}))
 
     if errors and sent_count == 0:
         return False, '; '.join(errors)
@@ -910,7 +997,7 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
 
 
 def _send_email(subject, recipients, body_text=None, body_html=None,
-                attachments=None, from_address=None):
+                attachments=None, from_address=None, error_context=None):
     """
     General-purpose email sender. Dispatches to SMTP relay or direct MX
     based on the email_provider setting.
@@ -922,6 +1009,8 @@ def _send_email(subject, recipients, body_text=None, body_html=None,
         body_html (str|None): HTML body
         attachments (list[dict]|None): Each dict: {'filename', 'data' (bytes), 'mimetype'}
         from_address (str|None): Override the configured from address
+        error_context (dict|None): {pdf_type, show_id, triggered_by} stamped
+            onto any rows the helpers write into email_send_errors.
 
     Returns:
         (bool, str): (success, message)
@@ -929,9 +1018,11 @@ def _send_email(subject, recipients, body_text=None, body_html=None,
     provider = get_app_setting('email_provider', 'smtp')
     if provider == 'direct':
         return _send_email_direct(subject, recipients, body_text, body_html,
-                                  attachments, from_address)
+                                  attachments, from_address,
+                                  error_context=error_context)
     return _send_email_smtp(subject, recipients, body_text, body_html,
-                            attachments, from_address)
+                            attachments, from_address,
+                            error_context=error_context)
 
 
 def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_before=None):
@@ -1060,7 +1151,12 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
     attachments = [{'filename': filename, 'data': pdf_bytes, 'mimetype': 'application/pdf'}]
     success, send_message = _send_email(
         subject=subject, recipients=recipients,
-        body_text=body_line, attachments=attachments
+        body_text=body_line, attachments=attachments,
+        error_context={
+            'pdf_type':     pdf_type,
+            'show_id':      show_id,
+            'triggered_by': triggered_by,
+        },
     )
     if not success:
         app.logger.error(f'Email send failed show={show_id} type={pdf_type}: {send_message}')
@@ -5832,9 +5928,111 @@ def test_email_provider():
     success, message = _send_email(
         subject='3·2·1→THEATER Email Test',
         recipients=[to_addr],
-        body_text='This is a test email from 3·2·1→THEATER to verify your email configuration.'
+        body_text='This is a test email from 3·2·1→THEATER to verify your email configuration.',
+        error_context={'pdf_type': 'test', 'triggered_by': session.get('username')},
     )
     return jsonify({'success': success, 'message': message})
+
+
+# ─── Email Error Log ──────────────────────────────────────────────────────────
+
+@app.route('/settings/email-errors', methods=['GET'])
+@admin_required
+def email_errors_list():
+    """Return paginated email send failures.
+
+    Query: ?status=unresolved|all (default unresolved), ?limit=N (default 200)."""
+    status = (request.args.get('status') or 'unresolved').lower()
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 200), 1000))
+    except ValueError:
+        limit = 200
+    db = get_db()
+    sql = """
+        SELECT e.id, e.sent_at, e.recipient, e.subject, e.error_msg, e.smtp_code,
+               e.pdf_type, e.show_id, e.triggered_by, e.resolved, e.resolved_at,
+               s.name AS show_name,
+               u.username AS resolved_by_name
+        FROM email_send_errors e
+        LEFT JOIN shows s ON s.id = e.show_id
+        LEFT JOIN users u ON u.id = e.resolved_by
+    """
+    params = []
+    if status == 'unresolved':
+        sql += ' WHERE COALESCE(e.resolved, 0) = 0'
+    sql += ' ORDER BY e.sent_at DESC, e.id DESC LIMIT ?'
+    params.append(limit)
+    rows = db.execute(sql, params).fetchall()
+    counts = db.execute("""
+        SELECT
+            SUM(CASE WHEN COALESCE(resolved,0)=0 THEN 1 ELSE 0 END) AS unresolved,
+            COUNT(*) AS total
+        FROM email_send_errors
+    """).fetchone()
+    db.close()
+    return jsonify({
+        'errors':     [_normalize_row_dates(dict(r)) for r in rows],
+        'unresolved': (counts['unresolved'] if counts else 0) or 0,
+        'total':      (counts['total']      if counts else 0) or 0,
+    })
+
+
+@app.route('/settings/email-errors/<int:eid>/resolve', methods=['POST'])
+@admin_required
+def email_errors_resolve(eid):
+    """Mark a single error as reviewed/handled."""
+    db = get_db()
+    row = db.execute('SELECT id FROM email_send_errors WHERE id=?', (eid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    db.execute(
+        'UPDATE email_send_errors SET resolved=1, resolved_at=CURRENT_TIMESTAMP, resolved_by=? WHERE id=?',
+        (session['user_id'], eid),
+    )
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/email-errors/resolve-all', methods=['POST'])
+@admin_required
+def email_errors_resolve_all():
+    """Mark every currently-unresolved error as reviewed in one click."""
+    db = get_db()
+    cur = db.execute(
+        'UPDATE email_send_errors SET resolved=1, resolved_at=CURRENT_TIMESTAMP, resolved_by=? '
+        'WHERE COALESCE(resolved,0)=0',
+        (session['user_id'],),
+    )
+    affected = cur.rowcount or 0
+    db.commit()
+    db.close()
+    syslog_logger.info(f'EMAIL_ERRORS_RESOLVE_ALL count={affected} by={session.get("username")}')
+    return jsonify({'success': True, 'count': affected})
+
+
+@app.route('/settings/email-errors/clear', methods=['POST'])
+@admin_required
+def email_errors_clear():
+    """Permanently delete all rows. Use sparingly — review first.
+
+    Body: {scope: 'resolved' (default) | 'all'}.
+    'resolved' is the safe default — only removes rows already marked
+    handled. Pass 'all' to wipe everything (e.g. before re-running tests).
+    """
+    data = request.get_json(silent=True) or {}
+    scope = (data.get('scope') or 'resolved').lower()
+    db = get_db()
+    if scope == 'all':
+        cur = db.execute('DELETE FROM email_send_errors')
+    else:
+        cur = db.execute('DELETE FROM email_send_errors WHERE COALESCE(resolved,0)=1')
+    affected = cur.rowcount or 0
+    db.commit()
+    db.close()
+    syslog_logger.info(f'EMAIL_ERRORS_CLEAR scope={scope} count={affected} by={session.get("username")}')
+    return jsonify({'success': True, 'count': affected, 'scope': scope})
 
 
 @app.route('/settings/pdf-emails', methods=['POST'])

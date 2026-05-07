@@ -1407,6 +1407,51 @@
     </div>
   </div>
 
+  {# Email Send Errors — bounces, invalid addresses, SMTP failures, etc. #}
+  <div class="form-section mt-lg" id="email-errors-section">
+    <div class="form-section-header" style="display:flex;align-items:center;gap:10px">
+      <span class="section-icon">◈</span>
+      EMAIL SEND ERRORS
+      <span id="email-errors-count" class="oh-pill"
+            style="display:none;font-size:10px;padding:1px 6px;border-radius:999px;background:rgba(239,68,68,.15);color:#F56565;border:1px solid rgba(239,68,68,.3)"></span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+        <select id="email-errors-status" class="field-input field-input-sm"
+                style="width:auto" onchange="loadEmailErrors()">
+          <option value="unresolved">Unresolved</option>
+          <option value="all">All</option>
+        </select>
+        <button class="btn btn-sm btn-ghost" onclick="loadEmailErrors()">Refresh</button>
+        <button class="btn btn-sm btn-ghost" onclick="resolveAllEmailErrors()">Mark all reviewed</button>
+        <button class="btn btn-sm btn-danger-ghost" onclick="clearEmailErrors('resolved')"
+                title="Permanently delete rows that have already been marked reviewed">Clear reviewed</button>
+      </div>
+    </div>
+    <div class="form-section-body no-pad">
+      <p class="text-dim text-sm" style="padding:10px 14px 0">
+        One row per recipient that failed to deliver. Use this to spot
+        bounces, invalid addresses, or transient SMTP issues. Rows persist
+        until you mark them reviewed and clear them.
+      </p>
+      <table class="data-table" id="email-errors-table">
+        <thead>
+          <tr>
+            <th style="width:140px">WHEN</th>
+            <th style="min-width:180px">RECIPIENT</th>
+            <th style="min-width:200px">ERROR</th>
+            <th style="width:100px">CODE</th>
+            <th style="width:100px">CONTEXT</th>
+            <th style="width:140px">SHOW</th>
+            <th style="width:100px">TRIGGERED BY</th>
+            <th style="width:120px;text-align:center">ACTIONS</th>
+          </tr>
+        </thead>
+        <tbody id="email-errors-tbody">
+          <tr><td colspan="8" class="text-dim" style="text-align:center;padding:14px">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 {% endif %}
 
@@ -2919,6 +2964,109 @@ async function savePdfEmailSettings() {
 
 // Initialize email mode toggle on page load
 if (document.getElementById('email_provider')) toggleEmailMode();
+
+// ── Email Send Errors panel ──────────────────────────────────────────────────
+function _emailErrEsc(s) {
+  if (s == null) return '';
+  return String(s).replace(/[&<>"']/g, c => (
+    {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]
+  ));
+}
+function _emailErrFmtTime(iso) {
+  if (!iso) return '—';
+  // 2026-05-07T14:23:01 -> "2026-05-07 14:23"
+  return String(iso).replace('T', ' ').slice(0, 16);
+}
+
+async function loadEmailErrors() {
+  const tbody = document.getElementById('email-errors-tbody');
+  if (!tbody) return;
+  const status = document.getElementById('email-errors-status').value || 'unresolved';
+  tbody.innerHTML = '<tr><td colspan="8" class="text-dim" style="text-align:center;padding:14px">Loading…</td></tr>';
+  try {
+    const r = await fetch('/settings/email-errors?status=' + encodeURIComponent(status));
+    if (!r.ok) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-dim" style="text-align:center;padding:14px">Failed to load.</td></tr>';
+      return;
+    }
+    const data = await r.json();
+    const badge = document.getElementById('email-errors-count');
+    if (badge) {
+      if (data.unresolved > 0) {
+        badge.style.display = '';
+        badge.textContent = data.unresolved + ' unresolved';
+      } else {
+        badge.style.display = 'none';
+      }
+    }
+    const rows = data.errors || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="8" class="text-dim" style="text-align:center;padding:14px">No ' +
+        (status === 'unresolved' ? 'unresolved ' : '') + 'errors. Either nothing has bounced, or everything has been reviewed.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(e => {
+      const showCell = e.show_id
+        ? `<a href="/shows/${e.show_id}?tab=export" target="_blank" rel="noopener" style="color:var(--accent)">${_emailErrEsc(e.show_name || ('#' + e.show_id))}</a>`
+        : '—';
+      const ctx = [e.pdf_type].filter(Boolean).map(_emailErrEsc).join(' / ') || '—';
+      const cls = e.resolved ? 'style="opacity:0.55"' : '';
+      const actions = e.resolved
+        ? '<span class="text-dim" style="font-size:11px">reviewed</span>'
+        : `<button class="btn btn-xs btn-ghost" onclick="resolveEmailError(${e.id})">✓ Reviewed</button>`;
+      return `
+        <tr ${cls}>
+          <td class="text-dim" style="font-size:11px;font-family:var(--font-mono,monospace)">${_emailErrFmtTime(e.sent_at)}</td>
+          <td style="font-size:12px"><strong>${_emailErrEsc(e.recipient || '—')}</strong>
+              ${e.subject ? `<div class="text-dim" style="font-size:10px">${_emailErrEsc(e.subject)}</div>` : ''}</td>
+          <td style="font-size:11px;color:var(--text);max-width:340px;word-break:break-word">${_emailErrEsc(e.error_msg || '')}</td>
+          <td class="text-dim" style="font-size:11px;font-family:var(--font-mono,monospace)">${_emailErrEsc(e.smtp_code || '')}</td>
+          <td class="text-dim" style="font-size:11px">${ctx}</td>
+          <td style="font-size:11px">${showCell}</td>
+          <td class="text-dim" style="font-size:11px">${_emailErrEsc(e.triggered_by || '')}</td>
+          <td style="text-align:center">${actions}</td>
+        </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-dim" style="text-align:center;padding:14px">Error loading.</td></tr>';
+  }
+}
+
+async function resolveEmailError(eid) {
+  const r = await fetch(`/settings/email-errors/${eid}/resolve`, { method: 'POST' });
+  if (!r.ok) { showSaveToast('✗ Could not mark reviewed', 'error'); return; }
+  showSaveToast('✓ Reviewed');
+  loadEmailErrors();
+}
+
+async function resolveAllEmailErrors() {
+  if (!confirm('Mark every unresolved email error as reviewed?')) return;
+  const r = await fetch('/settings/email-errors/resolve-all', { method: 'POST' });
+  if (!r.ok) { showSaveToast('✗ Could not mark all', 'error'); return; }
+  const d = await r.json();
+  showSaveToast(`✓ ${d.count || 0} marked reviewed`);
+  loadEmailErrors();
+}
+
+async function clearEmailErrors(scope) {
+  const label = scope === 'all' ? 'EVERY error row (resolved AND unresolved)' : 'all reviewed errors';
+  if (!confirm(`Permanently delete ${label}? This can't be undone.`)) return;
+  const r = await fetch('/settings/email-errors/clear', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ scope: scope || 'resolved' }),
+  });
+  if (!r.ok) { showSaveToast('✗ Could not clear', 'error'); return; }
+  const d = await r.json();
+  showSaveToast(`✓ Removed ${d.count || 0} row${d.count === 1 ? '' : 's'}`);
+  loadEmailErrors();
+}
+
+// Auto-load when the Email tab becomes visible (the existing switchSettingsTab
+// hides/shows panes; we just load whenever the section is on screen).
+if (document.getElementById('email-errors-tbody')) {
+  loadEmailErrors();
+}
 
 // ── AI Session Limit ──────────────────────────────────────────────────────────
 async function saveAiSessions() {
