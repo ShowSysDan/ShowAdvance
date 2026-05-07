@@ -161,7 +161,9 @@ CREATE TABLE IF NOT EXISTS form_fields (
     is_notes_field INTEGER DEFAULT 0,
     ai_hint TEXT DEFAULT NULL,
     display_as TEXT DEFAULT NULL,
-    allow_multi INTEGER DEFAULT 0
+    allow_multi INTEGER DEFAULT 0,
+    hide_from_pdf INTEGER DEFAULT 0,
+    upload_button_only INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS form_history (
@@ -788,7 +790,7 @@ FORM_FIELDS_SEED = [
         json.dumps(['-', 'N/A', 'Bay 1', 'Bay 2', 'Bay 3', 'Bay 4', 'Bay 5', 'Bay 1+2', 'Bay 1+2+3', 'Other — See Notes']),
         None, None, None, '', 'half', 0),
     ('arrival_parking', 'vehicle_type',                'VEHICLE TYPE',                             'select',   30,
-        json.dumps(['-', 'DPC Van (15-passenger)', 'DPC Truck', 'Rental Vehicle', 'Other']),
+        json.dumps(['-', 'dpc Van (15-passenger)', 'dpc Truck', 'Rental Vehicle', 'Other']),
         None, None, None, '', 'half', 0),
     ('arrival_parking', 'vehicle_notes',               'VEHICLE NOTES',                            'text',     35,  None, None, 'vehicle_type=Other', None, 'Describe vehicle...', 'half', 0),
     ('arrival_parking', 'runner_needed',               'RUNNER NEEDED?',                           'yes_no',   80,  None, None, None, None, '', 'third', 0),
@@ -797,7 +799,7 @@ FORM_FIELDS_SEED = [
     ('arrival_parking', 'runner_contact',              'RUNNER',                                   'contact_dropdown', 105, None, 'Runners', 'runner_needed=Yes', None, '', 'half', 0),
     ('arrival_parking', 'runner_time',                 'RUNNER PICKUP TIME',                       'text',     110, None, None, 'runner_needed=Yes', None, 'e.g. 2:00pm', 'half', 0),
     ('arrival_parking', 'runner_vehicle',              'RUNNER VEHICLE',                           'select',   120,
-        json.dumps(['-', 'DPC Van', 'DPC Truck', 'Rental Vehicle', 'Other']),
+        json.dumps(['-', 'dpc Van', 'dpc Truck', 'Rental Vehicle', 'Other']),
         None, 'runner_needed=Yes', None, '', 'half', 0),
     ('arrival_parking', 'parking_validations',         'PARKING VALIDATIONS NEEDED?',              'yes_no',   130, None, None, None, None, '', 'half', 0),
     ('arrival_parking', 'parking_validations_count',   'HOW MANY?',                                'number',   140, None, None, 'parking_validations=Yes', None, '', 'half', 0),
@@ -810,7 +812,7 @@ FORM_FIELDS_SEED = [
     # ── Security ──────────────────────────────────────────────────────────────
     ('security', 'backstage_headcount',    'HOW MANY PEOPLE BACKSTAGE (Cast/Crew/Staff)?', 'number',   10, None, None, None, None, '0',          'half', 0),
     ('security', 'credentials_badges',    'CREDENTIALS / BADGES?',                         'select',   20,
-        json.dumps(['-', 'Yes - Tour Provided', 'No - Use DPC Lanyards']),
+        json.dumps(['-', 'Yes - Tour Provided', 'No - Use dpc Lanyards']),
         None, None, None, '', 'half', 0),
     ('security', 'extra_security',        'EXTRA SECURITY NEEDS?',                         'yes_no',   30, None, None, None, None, '',           'half', 0),
     ('security', 'extra_security_details','DETAILS',                                        'textarea', 40, None, None, 'extra_security=Yes', None, '', 'full', 0),
@@ -1236,6 +1238,8 @@ def migrate_db():
         'ALTER TABLE form_fields ADD COLUMN ai_hint TEXT DEFAULT NULL',
         'ALTER TABLE form_fields ADD COLUMN display_as TEXT DEFAULT NULL',
         'ALTER TABLE form_fields ADD COLUMN allow_multi INTEGER DEFAULT 0',
+        'ALTER TABLE form_fields ADD COLUMN hide_from_pdf INTEGER DEFAULT 0',
+        'ALTER TABLE form_fields ADD COLUMN upload_button_only INTEGER DEFAULT 0',
         "ALTER TABLE labor_requests ADD COLUMN break_start TEXT DEFAULT ''",
         "ALTER TABLE labor_requests ADD COLUMN break_end TEXT DEFAULT ''",
         "ALTER TABLE labor_requests ADD COLUMN work_date DATE",
@@ -2001,7 +2005,9 @@ CREATE TABLE IF NOT EXISTS form_fields (
     is_notes_field INTEGER DEFAULT 0,
     ai_hint TEXT DEFAULT NULL,
     display_as TEXT DEFAULT NULL,
-    allow_multi INTEGER DEFAULT 0
+    allow_multi INTEGER DEFAULT 0,
+    hide_from_pdf INTEGER DEFAULT 0,
+    upload_button_only INTEGER DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS form_history (
@@ -2795,6 +2801,8 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS ai_hint TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS display_as TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS allow_multi INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS hide_from_pdf INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS upload_button_only INTEGER DEFAULT 0',
             f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_start TEXT DEFAULT ''",
             f"ALTER TABLE \"{app_schema}\".labor_requests ADD COLUMN IF NOT EXISTS break_end TEXT DEFAULT ''",
             f'ALTER TABLE "{app_schema}".labor_requests ADD COLUMN IF NOT EXISTS work_date DATE',

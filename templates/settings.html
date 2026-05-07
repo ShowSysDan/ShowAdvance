@@ -1810,6 +1810,20 @@
         </label>
       </div>
       <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" name="hide_from_pdf">
+          Hide from PDF exports (collected on screen, omitted from advance PDF)
+        </label>
+      </div>
+      <div class="upload-button-only-group" style="display:none">
+        <div class="field-group">
+          <label class="checkbox-label">
+            <input type="checkbox" name="upload_button_only">
+            Upload button only (hide the description text input)
+          </label>
+        </div>
+      </div>
+      <div class="field-group">
         <label class="field-label">AI HINT <span class="text-dim" style="font-size:10px">(optional — helps AI extract this field from documents)</span></label>
         <textarea name="ai_hint" class="field-input field-textarea" rows="2" placeholder="e.g. Maximum venue capacity, usually a round number like 500 or 2400"></textarea>
         <p class="field-hint">Describe what this field contains so the AI knows what to look for in uploaded documents.</p>

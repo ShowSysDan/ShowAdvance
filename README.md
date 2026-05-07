@@ -1,6 +1,6 @@
 # 3·2·1→THEATER — Production Management System
 
-3·2·1→THEATER (321Theater) is a web-based production advance and day-of-show management tool built for Dr. Phillips Center for the Performing Arts (DPC). It provides a central place to fill out advance forms, build production schedules, record post-show notes, manage labor requests, track inventory and rentals, send schedule emails, and share documents with crew and clients.
+3·2·1→THEATER (321Theater) is a web-based production advance and day-of-show management tool built for Dr. Phillips Center for the Performing Arts (dpc). It provides a central place to fill out advance forms, build production schedules, record post-show notes, manage labor requests, track inventory and rentals, send schedule emails, and share documents with crew and clients.
 
 ---
 
@@ -199,7 +199,7 @@ Contains all pre-show information: show details, contacts, arrival & parking, se
 
 **Timeline** — Time rows with Start, End, Description, Notes. Times are auto-normalised to 24-hour format on blur (e.g. "4pm" → "16:00", "1600" → "16:00").
 
-**Show Contacts** — All DPC contacts (PM, Hospitality, Programming, Event Manager, Education, Guest Services, Runner) are read-only, pulled from the Advance Sheet. Security Email is editable.
+**Show Contacts** — All dpc contacts (PM, Hospitality, Programming, Event Manager, Education, Guest Services, Runner) are read-only, pulled from the Advance Sheet. Security Email is editable.
 
 ### Post-Show Notes
 
@@ -426,7 +426,7 @@ Access via **Asset Reports** in the sidebar (admin only). Filter asset usage by 
 
 ### Contacts
 
-Add, edit, delete DPC contacts. Fields: name, title, department, phone, email. Contacts appear in dropdowns on advance and schedule forms.
+Add, edit, delete dpc contacts. Fields: name, title, department, phone, email. Contacts appear in dropdowns on advance and schedule forms.
 
 ### Users & Roles
 

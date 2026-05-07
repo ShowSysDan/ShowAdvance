@@ -150,8 +150,10 @@
     {% elif field.field_type == 'file_upload' %}
       <div class="adv-file-upload" data-field-key="{{ field.field_key }}">
         {% if not restricted %}
+        {% if not field.upload_button_only %}
         <input type="text" class="field-input adv-file-desc" placeholder="{{ field.placeholder or 'Description (optional)' }}"
                style="margin-bottom:6px;font-size:12px">
+        {% endif %}
         <label class="btn btn-sm btn-ghost adv-file-pick" style="cursor:pointer;display:inline-flex;align-items:center;gap:4px">
           <input type="file" class="adv-file-input" style="display:none"
                  accept=".pdf,application/pdf,image/*,.doc,.docx,.txt"
@@ -683,9 +685,9 @@ const SHOW_VENUE = {{ show.venue | tojson }};
                   placeholder="Name · Role · Phone / Email (one per line)" {% if restricted %}disabled{% endif %}>{{ meta('artist_contacts') }}</textarea>
       </div>
 
-      <h3 class="sub-section-label mt-md">DPC CONTACTS</h3>
+      <h3 class="sub-section-label mt-md"><span style="text-transform:none">dpc</span> CONTACTS</h3>
       <div class="form-row cols-2">
-        {# All DPC contacts come from the Advance Sheet (read-only here) #}
+        {# All dpc contacts come from the Advance Sheet (read-only here) #}
         {% for label, key in [
           ('PRODUCTION MANAGER', 'production_manager'),
           ('HOSPITALITY',        'hospitality_contact'),
@@ -809,7 +811,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     <div class="ml-auto" style="display:flex;gap:6px;align-items:center">
       <span id="assets-total-cost" style="font-size:12px;color:var(--text-dim);margin-right:8px"></span>
       <a href="/shows/{{ show.id }}/assets/invoice.pdf" target="_blank" class="btn btn-sm btn-ghost" title="Download PDF invoice">Invoice PDF</a>
-      {% if is_content_admin_user and not restricted %}
+      {% if can_edit_advance %}
       <button class="btn btn-sm btn-primary" onclick="openAssetSearch()">+ Add Asset</button>
       <button class="btn btn-sm btn-ghost" onclick="openExternalRentalModal()">+ External Rental</button>
       {% endif %}
@@ -829,7 +831,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
             <th>Unit Price</th>
             <th>Line Total</th>
             <th>Notes</th>
-            {% if is_content_admin_user %}<th style="width:80px"></th>{% endif %}
+            {% if can_edit_advance %}<th style="width:80px"></th>{% endif %}
           </tr>
         </thead>
         <tbody id="assets-tbody"></tbody>
@@ -850,7 +852,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
             <th>Description</th>
             <th>Cost</th>
             <th>PDF</th>
-            {% if is_content_admin_user %}<th style="width:60px"></th>{% endif %}
+            {% if can_edit_advance %}<th style="width:60px"></th>{% endif %}
           </tr>
         </thead>
         <tbody id="ext-rentals-tbody"></tbody>
@@ -927,7 +929,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 <div id="ext-rental-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeExternalRentalModal()">
   <div class="modal-card" style="max-width:480px">
     <div class="modal-header">
-      Add External Rental
+      <span id="er-modal-title">Add External Rental</span>
       <button onclick="closeExternalRentalModal()" class="modal-close">×</button>
     </div>
     <div class="modal-body">
@@ -940,8 +942,9 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         <input type="number" id="er-cost" class="field-input" value="0" min="0" step="0.01">
       </div>
       <div class="field-group">
-        <label class="field-label">RENTAL PDF (optional)</label>
+        <label class="field-label" id="er-pdf-label">RENTAL PDF (optional)</label>
         <input type="file" id="er-pdf" class="field-input" accept=".pdf">
+        <p id="er-pdf-current" class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;display:none"></p>
       </div>
       <div id="er-progress-wrap" style="display:none;margin-top:12px">
         <div style="background:var(--bg-hover);border-radius:4px;height:6px;overflow:hidden">
@@ -961,7 +964,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 // ── Assets Tab JS ─────────────────────────────────────────────────────────────
 (function() {
   const SHOW_ID = {{ show.id }};
-  const IS_ADMIN = {{ 'true' if is_content_admin_user else 'false' }};
+  const IS_ADMIN = {{ 'true' if can_edit_advance else 'false' }};
   let _allAssetTypes = null;
   let _currentAssetTypeId = null;
   let _currentAvailData = null;
@@ -1015,11 +1018,14 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         const lineTotal = (a.locked_price * a.quantity).toFixed(2);
         const hiddenBadge = a.is_hidden ? ' <span style="font-size:10px;color:var(--accent);background:rgba(245,127,32,.12);padding:1px 5px;border-radius:3px;margin-left:4px">HIDDEN</span>' : '';
         const label = [a.manufacturer, a.model].filter(Boolean).join(' ') || a.type_name;
+        const qtyCell = IS_ADMIN
+          ? `<input type="number" min="1" step="1" value="${a.quantity}" data-sa-id="${a.id}" data-orig="${a.quantity}" class="asset-qty-input field-input" style="width:64px;padding:2px 6px;font-size:12px;text-align:right">`
+          : `${a.quantity}`;
         const tr = document.createElement('tr');
         tr.innerHTML = `
           <td style="color:var(--text-dim);font-size:11px">${esc(a.category_name)}</td>
           <td>${esc(label)}${hiddenBadge}</td>
-          <td>${a.quantity}</td>
+          <td>${qtyCell}</td>
           <td style="font-size:11px">${a.rental_start||'—'} → ${a.rental_end||'—'}</td>
           <td>$${Number(a.locked_price).toFixed(2)}</td>
           <td>$${lineTotal}</td>
@@ -1030,6 +1036,13 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
           </td>` : ''}
         `;
         tbody.appendChild(tr);
+      });
+      tbody.querySelectorAll('.asset-qty-input').forEach(inp => {
+        inp.addEventListener('blur', () => updateAssetQuantity(inp));
+        inp.addEventListener('keydown', e => {
+          if (e.key === 'Enter') { e.preventDefault(); inp.blur(); }
+          if (e.key === 'Escape') { inp.value = inp.dataset.orig; inp.blur(); }
+        });
       });
     }
 
@@ -1045,7 +1058,10 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
           <td>${esc(er.description)}</td>
           <td>$${Number(er.cost).toFixed(2)}</td>
           <td>${er.pdf_filename ? `<a href="/shows/${SHOW_ID}/external-rentals/${er.id}/pdf" target="_blank" style="font-size:11px">View PDF</a>` : '—'}</td>
-          ${IS_ADMIN ? `<td><button class="btn btn-xs btn-ghost" style="color:#e53e3e" onclick="removeExternalRental(${er.id})">✕</button></td>` : ''}
+          ${IS_ADMIN ? `<td style="white-space:nowrap">
+            <button class="btn btn-xs btn-ghost" onclick='editExternalRental(${JSON.stringify(er)})' title="Edit">✎</button>
+            <button class="btn btn-xs btn-ghost" style="color:#e53e3e" onclick="removeExternalRental(${er.id})" title="Remove">✕</button>
+          </td>` : ''}
         `;
         erTbody.appendChild(tr);
       });
@@ -1283,15 +1299,66 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     loadAssetsTab();
   };
 
+  window.updateAssetQuantity = async function(inp) {
+    const saId = Number(inp.dataset.saId);
+    const orig = Number(inp.dataset.orig);
+    const next = Math.max(1, parseInt(inp.value, 10) || orig);
+    if (next === orig) { inp.value = orig; return; }
+    inp.disabled = true;
+    try {
+      const r = await fetch(`/shows/${SHOW_ID}/assets/${saId}`, {
+        method: 'PUT',
+        headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+        body: JSON.stringify({quantity: next})
+      });
+      if (!r.ok) throw new Error('Save failed');
+      if (typeof showSaveToast === 'function') showSaveToast('Quantity updated');
+      loadAssetsTab();
+    } catch(e) {
+      inp.value = orig;
+      if (typeof showSaveToast === 'function') showSaveToast('Failed to update quantity', 'error');
+      else alert('Failed to update quantity');
+    } finally {
+      inp.disabled = false;
+    }
+  };
+
   // ── External Rentals ──────────────────────────────────────────────────────
+  let _editingErId = null;
+
   window.openExternalRentalModal = function() {
+    _editingErId = null;
+    document.getElementById('er-modal-title').textContent = 'Add External Rental';
+    document.getElementById('er-pdf-label').textContent = 'RENTAL PDF (optional)';
+    document.getElementById('er-pdf-current').style.display = 'none';
+    document.getElementById('er-submit-btn').textContent = 'Add';
     document.getElementById('er-description').value = '';
     document.getElementById('er-cost').value = '0';
     document.getElementById('er-pdf').value = '';
     document.getElementById('ext-rental-modal').style.display = 'flex';
   };
 
+  window.editExternalRental = function(er) {
+    _editingErId = er.id;
+    document.getElementById('er-modal-title').textContent = 'Edit External Rental';
+    document.getElementById('er-pdf-label').textContent = 'REPLACE PDF (leave blank to keep existing)';
+    const cur = document.getElementById('er-pdf-current');
+    if (er.pdf_filename) {
+      cur.textContent = `Current file: ${er.pdf_filename}`;
+      cur.style.display = '';
+    } else {
+      cur.textContent = 'No PDF currently attached.';
+      cur.style.display = '';
+    }
+    document.getElementById('er-submit-btn').textContent = 'Save';
+    document.getElementById('er-description').value = er.description || '';
+    document.getElementById('er-cost').value = er.cost ?? 0;
+    document.getElementById('er-pdf').value = '';
+    document.getElementById('ext-rental-modal').style.display = 'flex';
+  };
+
   window.closeExternalRentalModal = function() {
+    _editingErId = null;
     document.getElementById('ext-rental-modal').style.display = 'none';
   };
 
@@ -1305,6 +1372,10 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     fd.append('description', desc);
     fd.append('cost', cost);
     if (pdfFile) fd.append('pdf', pdfFile);
+
+    const url = _editingErId
+      ? `/shows/${SHOW_ID}/external-rentals/${_editingErId}`
+      : `/shows/${SHOW_ID}/external-rentals`;
 
     const progressWrap  = document.getElementById('er-progress-wrap');
     const progressBar   = document.getElementById('er-progress-bar');
@@ -1348,7 +1419,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       alert('Network error during upload.');
     });
 
-    xhr.open('POST', `/shows/${SHOW_ID}/external-rentals`);
+    xhr.open('POST', url);
     xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
     xhr.send(fd);
   };
@@ -2827,8 +2898,26 @@ async function emailPdf(showId, pdfType, btn) {
     items.push({ btn, sec });
   });
 
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'form-side-nav-link form-side-nav-save';
+  const saveIcon = document.createElement('span');
+  saveIcon.className = 'nav-icon';
+  saveIcon.textContent = '💾';
+  const saveLabel = document.createElement('span');
+  saveLabel.className = 'nav-label';
+  saveLabel.textContent = 'Save Advance';
+  saveBtn.appendChild(saveIcon);
+  saveBtn.appendChild(saveLabel);
+  saveBtn.addEventListener('click', () => {
+    if (typeof saveActive === 'function') saveActive();
+    else if (typeof saveAdvance === 'function') saveAdvance();
+  });
+  nav.appendChild(saveBtn);
+
   function setActive(activeBtn) {
     nav.querySelectorAll('.form-side-nav-link').forEach(b => {
+      if (b.classList.contains('form-side-nav-save')) return;
       b.classList.toggle('active', b === activeBtn);
     });
   }

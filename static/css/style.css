@@ -25,7 +25,7 @@
   --text-muted:  #606060;
   --border:      #2e2e2e;
   --border-light:#3a3a3a;
-  --sidebar-w:   282px;
+  --sidebar-w:   267px;
 
   --font-main:  'Poppins', sans-serif;
   --font-cond:  'Poppins', sans-serif;
@@ -46,7 +46,7 @@ a:hover { text-decoration: underline; }
 
 /* ── App Layout ────────────────────────────────────────────────── */
 .app-layout { display: flex; min-height: 100vh; }
-.main-content { flex: 1; min-width: 0; padding: 36px 48px 64px; max-width: 1300px; }
+.main-content { flex: 1; min-width: 0; padding: 36px 48px 64px; max-width: 1315px; }
 
 /* ── Sidebar ───────────────────────────────────────────────────── */
 .sidebar {
@@ -402,6 +402,16 @@ html[data-theme="light"] select.field-input {
 }
 .form-side-nav:hover .form-side-nav-link .nav-label,
 .form-side-nav:focus-within .form-side-nav-link .nav-label { opacity: 1; }
+.form-side-nav-save {
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px !important;
+  color: var(--accent) !important;
+  font-weight: 600;
+}
+.form-side-nav-save:hover {
+  background: var(--accent-glow) !important;
+}
 @media (max-width: 900px) {
   .form-side-nav { display: none; }
 }
