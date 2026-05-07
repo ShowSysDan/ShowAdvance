@@ -781,10 +781,10 @@
     <div class="form-section-body no-pad">
       <table class="data-table" id="cluster-peers-table">
         <thead><tr>
-          <th>IP</th><th>HOSTNAME</th><th>PORT</th><th>STARTED</th>
+          <th>IP</th><th>HOSTNAME</th><th>WORKERS</th><th>PORT</th><th>STARTED</th>
           <th>LAST SEEN</th><th>VERSION</th><th>ROLE</th>
         </tr></thead>
-        <tbody><tr><td colspan="7" class="text-dim" style="padding:16px;font-size:12px">Loading...</td></tr></tbody>
+        <tbody><tr><td colspan="8" class="text-dim" style="padding:16px;font-size:12px">Loading...</td></tr></tbody>
       </table>
       <p class="text-dim" style="padding:10px 14px;font-size:11px;margin:0">
         Backups run on <strong>every</strong> instance for redundancy. Only scheduled PDF emails are restricted to the leader, so recipients receive each email exactly once.
@@ -2389,18 +2389,19 @@ async function loadClusterStatus() {
       selfEl.innerHTML =
         `<strong>IP:</strong> <code>${d.self_ip}</code> &nbsp; ` +
         `<strong>Hostname:</strong> <code>${d.self_hostname}</code> &nbsp; ${leaderBadge}<br>` +
-        `<strong>Instance ID:</strong> <code>${(d.self_id||'').slice(0,12)}…</code> &nbsp; ` +
-        `<strong>Started:</strong> <span class="text-dim">${_fmtRelTime(d.self_started_at)}</span><br>` +
+        `<strong>Worker ID:</strong> <code>${(d.self_id||'').slice(0,12)}…</code> &nbsp; ` +
+        `<strong>This worker started:</strong> <span class="text-dim">${_fmtRelTime(d.self_started_at)}</span><br>` +
         `<strong>Current leader:</strong> <code>${d.leader_ip || '—'}</code>` +
-        (d.is_leader ? ' (this instance)' : ' (remote)') +
-        forceLine + enabledLine;
+        (d.is_leader ? ' (this server)' : ' (remote)') +
+        forceLine + enabledLine +
+        '<br><span class="text-dim" style="font-size:11px">Each Gunicorn worker registers itself; the table below groups workers by server. Only one worker globally runs scheduled PDF emails.</span>';
     }
 
     // Peers table
     const tbody = document.querySelector('#cluster-peers-table tbody');
     if (tbody) {
       if (!d.peers || !d.peers.length) {
-        tbody.innerHTML = '<tr><td colspan="7" class="text-dim" style="padding:16px;font-size:12px">No live peers (heartbeat disabled or no instances responding).</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-dim" style="padding:16px;font-size:12px">No live peers (heartbeat disabled or no instances responding).</td></tr>';
       } else {
         tbody.innerHTML = d.peers.map(p => {
           const role = p.is_leader
@@ -2410,6 +2411,7 @@ async function loadClusterStatus() {
           return `<tr>
             <td><code>${p.ip}</code>${selfMark}</td>
             <td>${p.hostname || '—'}</td>
+            <td>${p.worker_count || 1}</td>
             <td>${p.port || '—'}</td>
             <td class="text-dim" style="font-size:11px">${_fmtRelTime(p.started_at)}</td>
             <td class="text-dim" style="font-size:11px">${_fmtRelTime(p.last_seen)}</td>
