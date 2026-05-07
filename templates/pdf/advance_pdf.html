@@ -22,7 +22,7 @@
   .doc-meta .version { font-size: 10pt; font-weight: bold; color: #B8840A; }
 
   /* ── Section ── */
-  .section { margin-bottom: 8px; border: 1px solid #ccc; }
+  .section { margin-bottom: 8px; border: 1px solid #ccc; page-break-inside: avoid; break-inside: avoid; }
   .section-head { background: #1a1a1a; color: #fff; font-size: 7pt; font-weight: bold; letter-spacing: 0.1em; padding: 4px 7px; text-transform: uppercase; }
   .section-body { padding: 0; }
 
@@ -97,7 +97,7 @@
           <img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">
           {% endif %}
           <div>
-            <div class="doc-title">DPC <span>{{ layout.label('header', 'ADVANCE') }}</span> SHEET</div>
+            <div class="doc-title"><span style="text-transform:none">dpc</span> <span>{{ layout.label('header', 'ADVANCE') }}</span> SHEET</div>
             <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
           </div>
         </div>
@@ -116,7 +116,7 @@
       {% if section %}
         {% set ns = namespace(has_content=false, notes_fields=[], regular_rows=[]) %}
         {% for field in section.fields %}
-          {% if layout.field_visible(skey, field.field_key) %}
+          {% if layout.field_visible(skey, field.field_key) and not field.hide_from_pdf %}
             {% set val = d.get(field.field_key, '')|string|trim %}
             {% if val and val not in ['-','—','None','none','false',''] %}
               {% set ns.has_content = true %}
@@ -200,7 +200,7 @@
       <img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">
       {% endif %}
       <div>
-        <div class="doc-title">DPC <span>ADVANCE</span> SHEET</div>
+        <div class="doc-title"><span style="text-transform:none">dpc</span> <span>ADVANCE</span> SHEET</div>
         <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
       </div>
     </div>

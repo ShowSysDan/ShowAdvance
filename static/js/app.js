@@ -1,5 +1,5 @@
 /* ================================================================
-   DPC Advance App — Frontend JS
+   dpc Advance App — Frontend JS
 ================================================================ */
 'use strict';
 
@@ -1442,9 +1442,11 @@ function _toggleFieldTypeOptions(type) {
   const optGroup = modal.querySelector('.options-group');
   const deptGroup = modal.querySelector('.contact-dept-group');
   const ynGroup = modal.querySelector('.yes-no-display-group');
+  const uploadGroup = modal.querySelector('.upload-button-only-group');
   if (optGroup) optGroup.style.display = (type === 'select') ? '' : 'none';
   if (deptGroup) deptGroup.style.display = (type === 'contact_dropdown') ? '' : 'none';
   if (ynGroup) ynGroup.style.display = (type === 'yes_no') ? '' : 'none';
+  if (uploadGroup) uploadGroup.style.display = (type === 'file_upload') ? '' : 'none';
 }
 
 function closeFieldModal() {

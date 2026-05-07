@@ -1,5 +1,5 @@
 """
-DPC Advance Sheet App — Flask Backend
+dpc Advance Sheet App — Flask Backend
 Run: python app.py  (after running init_db.py first)
 """
 import os
@@ -5050,8 +5050,8 @@ def add_form_field():
             (section_id, field_key, label, field_type, sort_order,
              options_json, contact_dept, conditional_show_when,
              help_text, placeholder, width_hint, is_notes_field, ai_hint,
-             display_as, allow_multi)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             display_as, allow_multi, hide_from_pdf, upload_button_only)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (section_id, field_key, label,
               data.get('field_type','text'), max_order + 10,
               options_json,
@@ -5063,7 +5063,9 @@ def add_form_field():
               1 if data.get('is_notes_field') else 0,
               data.get('ai_hint') or None,
               data.get('display_as') or None,
-              1 if data.get('allow_multi') else 0))
+              1 if data.get('allow_multi') else 0,
+              1 if data.get('hide_from_pdf') else 0,
+              1 if data.get('upload_button_only') else 0))
         fid = cur.lastrowid
         log_audit_change(db, 'FIELD_ADD', 'form_field', fid, detail=field_key,
                          table='form_fields')
@@ -5089,7 +5091,7 @@ def edit_form_field(fid):
             section_id=?, label=?, field_type=?,
             options_json=?, contact_dept=?, conditional_show_when=?,
             help_text=?, placeholder=?, width_hint=?, is_notes_field=?, ai_hint=?,
-            display_as=?, allow_multi=?
+            display_as=?, allow_multi=?, hide_from_pdf=?, upload_button_only=?
         WHERE id=?
     """, (data.get('section_id'), data.get('label',''),
           data.get('field_type','text'), options_json,
@@ -5100,6 +5102,8 @@ def edit_form_field(fid):
           data.get('ai_hint') or None,
           data.get('display_as') or None,
           1 if data.get('allow_multi') else 0,
+          1 if data.get('hide_from_pdf') else 0,
+          1 if data.get('upload_button_only') else 0,
           fid))
     after = _snapshot_row(db, 'form_fields', fid)
     log_audit(db, 'FIELD_EDIT', 'form_field', fid, detail=data.get('label',''),
@@ -10075,18 +10079,33 @@ def show_asset_add(show_id):
 def show_asset_edit(show_id, sa_id):
     data = request.get_json() or {}
     db = get_db()
+    existing = db.execute(
+        'SELECT * FROM show_assets WHERE id=? AND show_id=?',
+        (sa_id, show_id),
+    ).fetchone()
+    if not existing:
+        db.close()
+        return jsonify({'error': 'Not found'}), 404
+
+    if 'quantity' in data:
+        try:
+            quantity = max(1, int(data.get('quantity') or 1))
+        except (TypeError, ValueError):
+            db.close()
+            return jsonify({'error': 'Invalid quantity'}), 400
+    else:
+        quantity = existing['quantity']
+
+    rental_start = data['rental_start'] if 'rental_start' in data else existing['rental_start']
+    rental_end   = data['rental_end']   if 'rental_end'   in data else existing['rental_end']
+    is_hidden    = (1 if data.get('is_hidden') else 0) if 'is_hidden' in data else existing['is_hidden']
+    notes        = (data.get('notes') or '').strip()  if 'notes'      in data else existing['notes']
+
     db.execute("""
         UPDATE show_assets SET quantity=?, rental_start=?, rental_end=?,
                is_hidden=?, notes=?
         WHERE id=? AND show_id=?
-    """, (
-        int(data.get('quantity') or 1),
-        data.get('rental_start') or None,
-        data.get('rental_end') or None,
-        1 if data.get('is_hidden') else 0,
-        (data.get('notes') or '').strip(),
-        sa_id, show_id,
-    ))
+    """, (quantity, rental_start, rental_end, is_hidden, notes, sa_id, show_id))
     db.commit()
     log_audit(db, 'ASSET_SHOW_EDIT', 'show_asset', sa_id, show_id=show_id)
     _reset_asset_approval(db, show_id, 'asset_edited')
@@ -10181,6 +10200,78 @@ def external_rental_add(show_id):
     db.close()
     syslog_logger.info(f"EXTERNAL_RENTAL_ADD show_id={show_id} er_id={er_id} desc={description!r} by={session.get('username')}")
     return jsonify(result), 201
+
+
+@app.route('/shows/<int:show_id>/external-rentals/<int:er_id>', methods=['POST'])
+@show_advance_editor_required
+def external_rental_update(show_id, er_id):
+    """Update an existing external rental — description, cost, and optionally
+    replace the attached PDF. Sent as multipart/form-data so a new PDF can be
+    uploaded; if no file is attached the existing PDF is preserved."""
+    db = get_db()
+    row = db.execute('SELECT * FROM show_external_rentals WHERE id=? AND show_id=?',
+                     (er_id, show_id)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Not found'}), 404
+
+    description = (request.form.get('description') or '').strip()
+    if not description:
+        db.close()
+        return jsonify({'error': 'Description required'}), 400
+    try:
+        cost = float(request.form.get('cost') or 0)
+    except (TypeError, ValueError):
+        db.close()
+        return jsonify({'error': 'Invalid cost'}), 400
+
+    db.execute(
+        'UPDATE show_external_rentals SET description=?, cost=? WHERE id=?',
+        (description, cost, er_id),
+    )
+
+    f = request.files.get('pdf')
+    if f and f.filename:
+        new_bytes = f.read()
+        new_filename = secure_filename(f.filename)
+        old_s3_key = row['s3_key']
+        if old_s3_key:
+            try:
+                s3_storage.delete_file(old_s3_key)
+            except Exception as e:
+                app.logger.warning(f"S3 delete failed for old external rental PDF {er_id}: {e}")
+        if s3_storage.is_configured():
+            try:
+                s3_key = f"external-rentals/{er_id}/{new_filename}"
+                s3_storage.upload_file(s3_key, new_bytes, 'application/pdf')
+                db.execute(
+                    'UPDATE show_external_rentals SET s3_key=?, pdf_filename=?, pdf_data=NULL WHERE id=?',
+                    (s3_key, new_filename, er_id),
+                )
+            except Exception as e:
+                app.logger.warning(f"S3 upload failed for external rental {er_id}, falling back to DB: {e}")
+                db.execute(
+                    'UPDATE show_external_rentals SET pdf_data=?, pdf_filename=?, s3_key=NULL WHERE id=?',
+                    (new_bytes, new_filename, er_id),
+                )
+        else:
+            db.execute(
+                'UPDATE show_external_rentals SET pdf_data=?, pdf_filename=?, s3_key=NULL WHERE id=?',
+                (new_bytes, new_filename, er_id),
+            )
+
+    log_audit(db, 'EXTERNAL_RENTAL_UPDATE', 'show_external_rental', er_id, show_id=show_id,
+              detail=description)
+    _reset_asset_approval(db, show_id, 'external_rental_updated')
+    db.commit()
+    updated = db.execute('SELECT * FROM show_external_rentals WHERE id=?', (er_id,)).fetchone()
+    result = {k: v for k, v in dict(updated).items() if k not in ('pdf_data', 's3_key')}
+    db.close()
+    syslog_logger.info(
+        f"EXTERNAL_RENTAL_UPDATE show_id={show_id} er_id={er_id} desc={description!r} "
+        f"by={session.get('username')}"
+    )
+    return jsonify(result)
 
 
 @app.route('/shows/<int:show_id>/external-rentals/<int:er_id>', methods=['DELETE'])

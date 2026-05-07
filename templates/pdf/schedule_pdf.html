@@ -94,7 +94,7 @@
         <img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">
         {% endif %}
         <div>
-          <div class="doc-title">DPC <span>{{ layout.label('header', 'PRODUCTION') }}</span> SCHEDULE</div>
+          <div class="doc-title"><span style="text-transform:none">dpc</span> <span>{{ layout.label('header', 'PRODUCTION') }}</span> SCHEDULE</div>
           <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
         </div>
       </div>
@@ -215,7 +215,7 @@
         <div style="padding:6px 8px; white-space:pre-wrap; min-height:50px;">{{ m('artist_contacts') or '—' }}</div>
       </div>
       <div class="contacts-box">
-        <div class="contacts-box-head">DPC Contacts</div>
+        <div class="contacts-box-head"><span style="text-transform:none">dpc</span> Contacts</div>
         <table class="contacts-table">
           {% for role, key in [
             ('Production Manager', 'production_manager'),
