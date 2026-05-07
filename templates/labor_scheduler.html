@@ -189,9 +189,13 @@
     }[c]));
   }
 
-  function buildRow(lr) {
+  /* Build a row for a labor request. `endpointBase` is the URL prefix used
+     for PUT/DELETE — '/api/labor-scheduler' for show requests, or
+     '/api/overhead-crew/requests' for overhead crew lines. */
+  function buildRow(lr, endpointBase) {
     const tr = document.createElement('tr');
     tr.dataset.rid = lr.id;
+    tr.dataset.endpointBase = endpointBase || '/api/labor-scheduler';
     if (lr.is_scheduled) tr.classList.add('scheduled-row');
     tr.innerHTML = `
       <td class="sched-check-cell">
@@ -239,12 +243,8 @@
   }
 
   function renderShows(shows) {
+    if (!shows || !shows.length) return;
     const container = document.getElementById('scheduler-results');
-    if (!shows.length) {
-      container.innerHTML = '<div class="form-section"><div class="form-section-body"><div class="scheduler-empty">No labor requests found in this date range.</div></div></div>';
-      return;
-    }
-    container.innerHTML = '';
 
     shows.forEach(show => {
       const section = document.createElement('div');
@@ -289,7 +289,69 @@
         </thead>
       `;
       const tbody = document.createElement('tbody');
-      show.requests.forEach(lr => tbody.appendChild(buildRow(lr)));
+      show.requests.forEach(lr => tbody.appendChild(buildRow(lr, '/api/labor-scheduler')));
+      table.appendChild(tbody);
+      bodyWrap.appendChild(table);
+      section.appendChild(bodyWrap);
+      container.appendChild(section);
+    });
+  }
+
+  /* Render the Overhead & Project Crew portion. Each row PUT/DELETE goes to
+     /api/overhead-crew/requests/<id> instead of /api/labor-scheduler/<id>. */
+  function renderOverheadGroups(groups) {
+    if (!groups || !groups.length) return;
+    const container = document.getElementById('scheduler-results');
+
+    // Section header banner so the scheduler can quickly scan past show
+    // requests and jump into overhead lines.
+    const banner = document.createElement('div');
+    banner.style.cssText = 'margin:18px 0 8px;font-size:11px;letter-spacing:.06em;font-weight:700;text-transform:uppercase;color:var(--text-dim)';
+    banner.textContent = '— Overhead & Project Crew —';
+    container.appendChild(banner);
+
+    groups.forEach(g => {
+      const section = document.createElement('div');
+      section.className = 'form-section';
+      section.style.marginBottom = '16px';
+      section.dataset.groupId = g.group_id;
+
+      const header = document.createElement('div');
+      header.className = 'form-section-header';
+      header.innerHTML = `
+        <span class="section-icon">◈</span>
+        <div class="scheduler-show-header">
+          <strong style="text-transform:none;letter-spacing:normal;font-size:14px">${escapeHtml(g.project_name || g.group_name || 'General')}</strong>
+          <span class="text-dim" style="font-size:11px">
+            ${escapeHtml(g.project_client || '')}${g.work_date ? ' · ' + escapeHtml(g.work_date) : ''}
+          </span>
+          <a href="/overhead-crew" class="show-link" target="_blank" rel="noopener">Open overhead crew →</a>
+        </div>
+      `;
+      section.appendChild(header);
+
+      const bodyWrap = document.createElement('div');
+      bodyWrap.className = 'form-section-body no-pad';
+      const table = document.createElement('table');
+      table.className = 'data-table';
+      table.innerHTML = `
+        <thead>
+          <tr>
+            <th style="width:52px;text-align:center">SCHED ✓</th>
+            <th style="width:110px">DATE</th>
+            <th style="min-width:160px">POSITION</th>
+            <th style="width:80px">IN</th>
+            <th style="width:80px">LUNCH START</th>
+            <th style="width:80px">LUNCH END</th>
+            <th style="width:80px">OUT</th>
+            <th style="width:140px">REQUESTED</th>
+            <th>SCHEDULED TECH</th>
+            <th style="width:40px"></th>
+          </tr>
+        </thead>
+      `;
+      const tbody = document.createElement('tbody');
+      g.requests.forEach(lr => tbody.appendChild(buildRow(lr, '/api/overhead-crew/requests')));
       table.appendChild(tbody);
       bodyWrap.appendChild(table);
       section.appendChild(bodyWrap);
@@ -314,17 +376,49 @@
         return;
       }
       const data = await r.json();
-      renderShows(data.shows || []);
-      const total = (data.shows || []).reduce((n, s) => n + s.requests.length, 0);
-      status.textContent = `${total} request${total === 1 ? '' : 's'} across ${data.shows.length} show${data.shows.length === 1 ? '' : 's'}.`;
+      const shows           = data.shows || [];
+      const overheadGroups  = data.overhead_groups || [];
+      const container = document.getElementById('scheduler-results');
+      container.innerHTML = '';
+      renderShows(shows);
+      renderOverheadGroups(overheadGroups);
+      if (!container.children.length) {
+        container.innerHTML =
+          '<div class="form-section"><div class="form-section-body">' +
+          '<div class="scheduler-empty">No labor requests found in this date range.</div>' +
+          '</div></div>';
+      }
+      const showLines = shows.reduce((n, s) => n + s.requests.length, 0);
+      const ohLines   = overheadGroups.reduce((n, g) => n + g.requests.length, 0);
+      const parts = [];
+      if (shows.length)
+        parts.push(`${showLines} request${showLines===1?'':'s'} across ${shows.length} show${shows.length===1?'':'s'}`);
+      if (overheadGroups.length)
+        parts.push(`${ohLines} overhead line${ohLines===1?'':'s'} across ${overheadGroups.length} sub-group${overheadGroups.length===1?'':'s'}`);
+      status.textContent = parts.join(' · ') || 'No requests in range.';
     } catch (e) {
       status.textContent = 'Error loading data.';
       console.error(e);
     }
   }
 
-  async function putSchedulerUpdate(rid, payload) {
-    const r = await fetch(`/api/labor-scheduler/${rid}`, {
+  /* Resolve the API URL prefix for a row — show rows live under
+     /api/labor-scheduler, overhead rows under /api/overhead-crew/requests. */
+  function _endpointFor(elOrTr) {
+    const tr = elOrTr.tagName === 'TR' ? elOrTr : elOrTr.closest('tr');
+    return (tr && tr.dataset.endpointBase) || '/api/labor-scheduler';
+  }
+
+  async function putSchedulerUpdate(rowOrId, payload) {
+    let rid, base;
+    if (typeof rowOrId === 'object') {
+      rid  = rowOrId.dataset.rid;
+      base = _endpointFor(rowOrId);
+    } else {
+      rid  = rowOrId;
+      base = '/api/labor-scheduler';
+    }
+    const r = await fetch(`${base}/${rid}`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
@@ -339,10 +433,9 @@
 
   async function onScheduledToggle(checkbox) {
     const tr = checkbox.closest('tr');
-    const rid = tr.dataset.rid;
     const val = checkbox.checked;
     tr.classList.toggle('scheduled-row', val);
-    const res = await putSchedulerUpdate(rid, { is_scheduled: val });
+    const res = await putSchedulerUpdate(tr, { is_scheduled: val });
     if (!res || !res.success) {
       checkbox.checked = !val;
       tr.classList.toggle('scheduled-row', !val);
@@ -351,26 +444,23 @@
 
   async function onCrewChange(select) {
     const tr = select.closest('tr');
-    const rid = tr.dataset.rid;
-    await putSchedulerUpdate(rid, { scheduled_crew_member_id: select.value || null });
+    await putSchedulerUpdate(tr, { scheduled_crew_member_id: select.value || null });
   }
 
   async function onPositionChange(select) {
     const tr = select.closest('tr');
-    const rid = tr.dataset.rid;
-    await putSchedulerUpdate(rid, { position_id: parseInt(select.value) || null });
+    await putSchedulerUpdate(tr, { position_id: parseInt(select.value) || null });
   }
 
   async function onTimeChange(input) {
     const tr = input.closest('tr');
-    const rid = tr.dataset.rid;
     const payload = {
       in_time:     tr.querySelector('.sched-in').value.trim(),
       break_start: tr.querySelector('.sched-bstart').value.trim(),
       break_end:   tr.querySelector('.sched-bend').value.trim(),
       out_time:    tr.querySelector('.sched-out').value.trim(),
     };
-    await putSchedulerUpdate(rid, payload);
+    await putSchedulerUpdate(tr, payload);
   }
 
   async function addRow(btn, showId) {
@@ -395,7 +485,7 @@
     const rid = tr.dataset.rid;
     if (!rid) { tr.remove(); return; }
     if (!confirm('Remove this labor line?')) return;
-    const r = await fetch(`/api/labor-scheduler/${rid}`, { method: 'DELETE' });
+    const r = await fetch(`${_endpointFor(tr)}/${rid}`, { method: 'DELETE' });
     if (!r.ok) { showSaveToast('✗ Delete failed', 'error'); return; }
     tr.remove();
     showSaveToast('✓ Removed');
@@ -414,7 +504,7 @@
       const break_start= tr.querySelector('.sched-bstart')?.value.trim() || '';
       const break_end  = tr.querySelector('.sched-bend')?.value.trim()   || '';
       const out_time   = tr.querySelector('.sched-out')?.value.trim()    || '';
-      const r = await fetch(`/api/labor-scheduler/${rid}`, {
+      const r = await fetch(`${_endpointFor(tr)}/${rid}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ is_scheduled: isScheduled, scheduled_crew_member_id: crewId,

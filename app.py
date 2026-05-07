@@ -422,17 +422,27 @@ def staff_or_admin_required(f):
     return decorated
 
 
+def _can_schedule_labor():
+    """Mirror of scheduler_required's permission check, usable inline.
+    Returns True if the current session may toggle scheduled / assign techs."""
+    if 'user_id' not in session:
+        return False
+    if session.get('user_role') in ('admin', 'staff'):
+        return True
+    if session.get('is_labor_scheduler') or session.get('is_content_admin'):
+        return True
+    if session.get('is_scheduler'):
+        return True
+    return False
+
+
 def scheduler_required(f):
     """Allow admins, staff, scheduler_group members, or users with is_scheduler flag."""
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'user_id' not in session:
             return redirect(url_for('login'))
-        if session.get('user_role') in ('admin', 'staff'):
-            return f(*args, **kwargs)
-        if session.get('is_labor_scheduler') or session.get('is_content_admin'):
-            return f(*args, **kwargs)
-        if session.get('is_scheduler'):
+        if _can_schedule_labor():
             return f(*args, **kwargs)
         abort(403)
     return decorated
@@ -6454,7 +6464,6 @@ def api_labor_scheduler_list():
     sql += ' ORDER BY COALESCE(lr.work_date, s.show_date), s.name, pc.sort_order, jp.sort_order, lr.sort_order, lr.id'
 
     rows = db.execute(sql, params).fetchall()
-    db.close()
 
     # Group by show
     shows = {}
@@ -6473,7 +6482,54 @@ def api_labor_scheduler_list():
             }
             order.append(sid)
         shows[sid]['requests'].append(rd)
-    return jsonify({'shows': [shows[sid] for sid in order]})
+
+    # ── Overhead & Project Crew labor (not tied to any show) ─────────────────
+    # Pulled in here so the labor scheduler sees a single unified to-do list.
+    oh_rows = db.execute("""
+        SELECT r.id, r.group_id, r.work_date, r.position_id,
+               r.in_time, r.out_time, r.break_start, r.break_end,
+               r.requested_name, r.is_scheduled,
+               r.scheduled_crew_member_id, r.sort_order,
+               jp.name AS position_name,
+               pc.name AS category_name,
+               pc.sort_order AS category_sort,
+               cm.name AS scheduled_crew_name,
+               g.name AS group_name,
+               COALESCE(p.name, g.name) AS project_name,
+               p.client_name AS project_client
+        FROM overhead_labor_requests r
+        JOIN overhead_labor_groups g ON g.id = r.group_id
+        LEFT JOIN overhead_projects p ON p.id = g.project_id
+        LEFT JOIN job_positions jp ON jp.id = r.position_id
+        LEFT JOIN position_categories pc ON pc.id = jp.category_id
+        LEFT JOIN crew_members cm ON cm.id = r.scheduled_crew_member_id
+        WHERE r.work_date BETWEEN ? AND ?
+        ORDER BY r.work_date, g.sort_order, g.id, pc.sort_order, jp.sort_order,
+                 r.sort_order, r.id
+    """, (date_from, date_to)).fetchall()
+    db.close()
+
+    overhead_groups = {}
+    oh_order = []
+    for r in oh_rows:
+        rd = _normalize_row_dates(dict(r))
+        gid = rd['group_id']
+        if gid not in overhead_groups:
+            overhead_groups[gid] = {
+                'group_id':       gid,
+                'work_date':      rd['work_date'],
+                'project_name':   rd['project_name'],
+                'project_client': rd['project_client'],
+                'group_name':     rd['group_name'],
+                'requests':       [],
+            }
+            oh_order.append(gid)
+        overhead_groups[gid]['requests'].append(rd)
+
+    return jsonify({
+        'shows': [shows[sid] for sid in order],
+        'overhead_groups': [overhead_groups[gid] for gid in oh_order],
+    })
 
 
 @app.route('/api/labor-scheduler/<int:rid>', methods=['PUT'])
@@ -6748,6 +6804,7 @@ def overhead_crew_page():
         'overhead_crew.html',
         user=get_current_user(),
         can_edit=not session.get('is_readonly'),
+        can_schedule=_can_schedule_labor(),
     )
 
 
@@ -7317,6 +7374,16 @@ def api_overhead_request_update(rid):
     if not row:
         db.close()
         return jsonify({'success': False, 'error': 'Not found.'}), 404
+
+    # Scheduling fields (is_scheduled / scheduled_crew_member_id) are only
+    # writable by users with scheduler permission — anyone else is editing
+    # request details, not making the schedule.
+    if ('is_scheduled' in data or 'scheduled_crew_member_id' in data) and not _can_schedule_labor():
+        db.close()
+        return jsonify({
+            'success': False,
+            'error': 'Only labor schedulers can change the SCHED checkbox or assign technicians.',
+        }), 403
 
     updates, params, detail_parts = [], [], []
     if 'position_id' in data:
