@@ -7161,8 +7161,8 @@ def add_labor_request(show_id):
         'SELECT MAX(sort_order) FROM labor_requests WHERE show_id=?', (show_id,)
     ).fetchone()[0] or 0
     cur = db.execute("""
-        INSERT INTO labor_requests (show_id, position_id, work_date, in_time, out_time, break_start, break_end, requested_name, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO labor_requests (show_id, position_id, work_date, in_time, out_time, break_start, break_end, break2_start, break2_end, requested_name, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (show_id,
           data.get('position_id') or None,
           data.get('work_date') or None,
@@ -7170,6 +7170,8 @@ def add_labor_request(show_id):
           _normalize_perf_time(data.get('out_time', '')),
           _normalize_perf_time(data.get('break_start', '')),
           _normalize_perf_time(data.get('break_end', '')),
+          _normalize_perf_time(data.get('break2_start', '')),
+          _normalize_perf_time(data.get('break2_end', '')),
           data.get('requested_name', ''),
           max_order + 10))
     rid = cur.lastrowid
@@ -7192,7 +7194,9 @@ def update_labor_request(show_id, rid):
     db = get_db()
     db.execute("""
         UPDATE labor_requests
-        SET position_id=?, work_date=?, in_time=?, out_time=?, break_start=?, break_end=?, requested_name=?
+        SET position_id=?, work_date=?, in_time=?, out_time=?,
+            break_start=?, break_end=?, break2_start=?, break2_end=?,
+            requested_name=?
         WHERE id=? AND show_id=?
     """, (data.get('position_id') or None,
           data.get('work_date') or None,
@@ -7200,6 +7204,8 @@ def update_labor_request(show_id, rid):
           _normalize_perf_time(data.get('out_time', '')),
           _normalize_perf_time(data.get('break_start', '')),
           _normalize_perf_time(data.get('break_end', '')),
+          _normalize_perf_time(data.get('break2_start', '')),
+          _normalize_perf_time(data.get('break2_end', '')),
           data.get('requested_name', ''),
           rid, show_id))
     log_audit(db, 'LABOR_REQUEST_EDIT', 'labor_request', rid, show_id=show_id)
@@ -7250,7 +7256,8 @@ def reorder_labor_requests(show_id):
 def _calc_labor_cost_for_show(db, show_id):
     """Return labor line items and total cost for a show."""
     rows = db.execute("""
-        SELECT lr.id, lr.work_date, lr.in_time, lr.out_time, lr.break_start, lr.break_end,
+        SELECT lr.id, lr.work_date, lr.in_time, lr.out_time,
+               lr.break_start, lr.break_end, lr.break2_start, lr.break2_end,
                lr.is_scheduled, lr.scheduled_crew_member_id,
                jp.name as position_name, jp.override_rate,
                cm.name as tech_name,
@@ -7266,7 +7273,9 @@ def _calc_labor_cost_for_show(db, show_id):
     lines = []
     total = 0.0
     for r in rows:
-        hours = _calc_hours(r['in_time'], r['out_time'], r['break_start'], r['break_end'])
+        hours = _calc_hours(r['in_time'], r['out_time'],
+                            r['break_start'], r['break_end'],
+                            r['break2_start'], r['break2_end'])
         rate = r['override_rate'] if r['override_rate'] is not None else (r['level_rate'] or 0)
         cost = round(hours * rate, 2)
         total += cost
@@ -7286,11 +7295,12 @@ def _calc_labor_cost_for_show(db, show_id):
     return lines, round(total, 2)
 
 
-def _calc_hours(in_time, out_time, break_start=None, break_end=None):
-    """Calculate hours between in/out times, minus break duration.
+def _calc_hours(in_time, out_time, break_start=None, break_end=None,
+                break2_start=None, break2_end=None):
+    """Calculate hours between in/out times, minus up to two unpaid breaks.
 
     Accepts HH:MM or HHMM format on every field — values are normalised
-    via _normalize_perf_time before parsing.
+    via _normalize_perf_time before parsing. Either break can be omitted.
     """
     in_time  = _normalize_perf_time(in_time)
     out_time = _normalize_perf_time(out_time)
@@ -7304,13 +7314,17 @@ def _calc_hours(in_time, out_time, break_start=None, break_end=None):
         if t_out <= t_in:
             t_out = t_out.replace(day=t_out.day + 1)
         hours = (t_out - t_in).total_seconds() / 3600
-        bs = _normalize_perf_time(break_start)
-        be = _normalize_perf_time(break_end)
-        if bs and be:
-            t_bs = _dt.strptime(bs[:5], fmt)
-            t_be = _dt.strptime(be[:5], fmt)
-            if t_be > t_bs:
-                hours -= (t_be - t_bs).total_seconds() / 3600
+        for bs_raw, be_raw in (
+            (break_start,  break_end),
+            (break2_start, break2_end),
+        ):
+            bs = _normalize_perf_time(bs_raw)
+            be = _normalize_perf_time(be_raw)
+            if bs and be:
+                t_bs = _dt.strptime(bs[:5], fmt)
+                t_be = _dt.strptime(be[:5], fmt)
+                if t_be > t_bs:
+                    hours -= (t_be - t_bs).total_seconds() / 3600
         return max(0.0, hours)
     except Exception:
         return 0.0
@@ -7365,7 +7379,8 @@ def labor_overview():
             s.name AS show_name,
             s.venue AS venue,
             jp.name AS position_name,
-            lr.in_time, lr.out_time, lr.break_start, lr.break_end,
+            lr.in_time, lr.out_time,
+            lr.break_start, lr.break_end, lr.break2_start, lr.break2_end,
             lr.is_scheduled,
             cm.name AS scheduled_tech,
             lr.requested_name AS requested_tech,
@@ -7392,7 +7407,8 @@ def labor_overview():
             p.client_name AS client_name,
             p.color AS project_color,
             jp.name AS position_name,
-            r.in_time, r.out_time, r.break_start, r.break_end,
+            r.in_time, r.out_time,
+            r.break_start, r.break_end, r.break2_start, r.break2_end,
             r.is_scheduled,
             cm.name AS scheduled_tech,
             r.requested_name AS requested_tech,
@@ -7428,6 +7444,8 @@ def labor_overview():
             'in_time': r['in_time'] or '',
             'break_start': r['break_start'] or '',
             'break_end': r['break_end'] or '',
+            'break2_start': r['break2_start'] or '',
+            'break2_end': r['break2_end'] or '',
             'out_time': r['out_time'] or '',
             'tech': r['scheduled_tech'] or (r['requested_tech'] or ''),
             'is_scheduled': bool(r['is_scheduled']),
@@ -7448,6 +7466,8 @@ def labor_overview():
             'in_time': r['in_time'] or '',
             'break_start': r['break_start'] or '',
             'break_end': r['break_end'] or '',
+            'break2_start': r['break2_start'] or '',
+            'break2_end': r['break2_end'] or '',
             'out_time': r['out_time'] or '',
             'tech': r['scheduled_tech'] or (r['requested_tech'] or ''),
             'is_scheduled': bool(r['is_scheduled']),
@@ -7500,7 +7520,8 @@ def api_labor_scheduler_list():
 
     sql = """
         SELECT lr.id, lr.show_id, lr.position_id, lr.work_date,
-               lr.in_time, lr.out_time, lr.break_start, lr.break_end,
+               lr.in_time, lr.out_time,
+               lr.break_start, lr.break_end, lr.break2_start, lr.break2_end,
                lr.requested_name, lr.is_scheduled,
                lr.scheduled_crew_member_id, lr.sort_order,
                jp.name as position_name,
@@ -7553,7 +7574,8 @@ def api_labor_scheduler_list():
     # Pulled in here so the labor scheduler sees a single unified to-do list.
     oh_rows = db.execute("""
         SELECT r.id, r.group_id, r.work_date, r.position_id,
-               r.in_time, r.out_time, r.break_start, r.break_end,
+               r.in_time, r.out_time,
+               r.break_start, r.break_end, r.break2_start, r.break2_end,
                r.requested_name, r.is_scheduled,
                r.scheduled_crew_member_id, r.sort_order,
                jp.name AS position_name,
@@ -7630,10 +7652,11 @@ def api_labor_scheduler_update(rid):
         updates.append('scheduled_crew_member_id=?')
         params.append(cmid)
         detail_parts.append(f"crew_id={cmid}")
-    for field in ('in_time', 'out_time', 'break_start', 'break_end'):
+    for field in ('in_time', 'out_time', 'break_start', 'break_end',
+                  'break2_start', 'break2_end'):
         if field in data:
             updates.append(f'{field}=?')
-            params.append((data[field] or '').strip())
+            params.append(_normalize_perf_time((data[field] or '').strip()))
             detail_parts.append(f"{field}={data[field]}")
 
     if not updates:
@@ -7704,20 +7727,26 @@ def api_labor_scheduler_add():
     ).fetchone()[0] or 0
     cur = db.execute("""
         INSERT INTO labor_requests (show_id, position_id, work_date, in_time, out_time,
-                                    break_start, break_end, requested_name, sort_order)
-        VALUES (?,?,?,?,?,?,?,?,?)
+                                    break_start, break_end, break2_start, break2_end,
+                                    requested_name, sort_order)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?)
     """, (show_id,
           data.get('position_id') or None,
           data.get('work_date') or None,
-          data.get('in_time', ''), data.get('out_time', ''),
-          data.get('break_start', ''), data.get('break_end', ''),
+          _normalize_perf_time(data.get('in_time', '')),
+          _normalize_perf_time(data.get('out_time', '')),
+          _normalize_perf_time(data.get('break_start', '')),
+          _normalize_perf_time(data.get('break_end', '')),
+          _normalize_perf_time(data.get('break2_start', '')),
+          _normalize_perf_time(data.get('break2_end', '')),
           data.get('requested_name', ''), max_order + 10))
     rid = cur.lastrowid
     log_audit(db, 'LABOR_REQUEST_ADD', 'labor_request', rid, show_id=show_id, detail='via scheduler')
     db.commit()
     row = db.execute("""
         SELECT lr.id, lr.show_id, lr.position_id, lr.work_date, lr.in_time, lr.out_time,
-               lr.break_start, lr.break_end, lr.requested_name, lr.is_scheduled,
+               lr.break_start, lr.break_end, lr.break2_start, lr.break2_end,
+               lr.requested_name, lr.is_scheduled,
                lr.scheduled_crew_member_id, lr.sort_order,
                jp.name as position_name, pc.name as category_name,
                cm.name as scheduled_crew_name
@@ -7810,10 +7839,12 @@ def _annotate_request_metrics(req_dict, *, rate_keys=('scheduled_level_rate',)):
     is None (different SELECT aliases use different names)."""
     h_p = _calc_hours(
         req_dict.get('in_time'), req_dict.get('out_time'),
-        req_dict.get('break_start'), req_dict.get('break_end'))
+        req_dict.get('break_start'), req_dict.get('break_end'),
+        req_dict.get('break2_start'), req_dict.get('break2_end'))
     h_a = _calc_hours(
         req_dict.get('actual_in_time'), req_dict.get('actual_out_time'),
-        req_dict.get('actual_break_start'), req_dict.get('actual_break_end'))
+        req_dict.get('actual_break_start'), req_dict.get('actual_break_end'),
+        req_dict.get('actual_break2_start'), req_dict.get('actual_break2_end'))
     rate = req_dict.get('pay_rate_snapshot')
     if rate is None:
         for k in rate_keys:
@@ -8131,8 +8162,11 @@ def api_overhead_project_stats():
     # aggregation in Python so we can compute hours via _calc_hours (which deals
     # with break math + over-midnight wrap) consistently with the rest of the app.
     rows = db.execute("""
-        SELECT r.id, r.work_date, r.in_time, r.out_time, r.break_start, r.break_end,
-               r.actual_in_time, r.actual_out_time, r.actual_break_start, r.actual_break_end,
+        SELECT r.id, r.work_date, r.in_time, r.out_time,
+               r.break_start, r.break_end, r.break2_start, r.break2_end,
+               r.actual_in_time, r.actual_out_time,
+               r.actual_break_start, r.actual_break_end,
+               r.actual_break2_start, r.actual_break2_end,
                r.is_scheduled, r.pay_rate_snapshot,
                g.project_id, g.name AS group_name,
                prl.hourly_rate AS level_rate
@@ -8402,8 +8436,8 @@ def api_overhead_request_add():
     cur = db.execute("""
         INSERT INTO overhead_labor_requests
             (group_id, work_date, position_id, in_time, out_time, break_start, break_end,
-             requested_name, sort_order, created_by)
-        VALUES (?,?,?,?,?,?,?,?,?,?)
+             break2_start, break2_end, requested_name, sort_order, created_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
     """, (
         gid,
         grp['work_date'],
@@ -8412,6 +8446,8 @@ def api_overhead_request_add():
         _normalize_perf_time((data.get('out_time') or '').strip()),
         _normalize_perf_time((data.get('break_start') or '').strip()),
         _normalize_perf_time((data.get('break_end') or '').strip()),
+        _normalize_perf_time((data.get('break2_start') or '').strip()),
+        _normalize_perf_time((data.get('break2_end') or '').strip()),
         (data.get('requested_name') or '').strip(),
         _max_sort_order(db, 'overhead_labor_requests', 'group_id=?', (gid,)),
         session.get('user_id'),
@@ -8457,12 +8493,17 @@ def api_overhead_request_update(rid):
         pid = int(pid) if pid else None
         updates.append('position_id=?'); params.append(pid)
         detail_parts.append(f'pos={pid}')
-    for f in ('in_time', 'out_time', 'break_start', 'break_end', 'requested_name',
-              'actual_in_time', 'actual_out_time', 'actual_break_start', 'actual_break_end',
+    for f in ('in_time', 'out_time',
+              'break_start', 'break_end', 'break2_start', 'break2_end',
+              'requested_name',
+              'actual_in_time', 'actual_out_time',
+              'actual_break_start', 'actual_break_end',
+              'actual_break2_start', 'actual_break2_end',
               'notes'):
         if f in data:
             val = (data.get(f) or '').strip()
-            if f.endswith('_time') or f.startswith('break_') or f.startswith('actual_break_'):
+            if f.endswith('_time') or f.startswith('break_') or f.startswith('break2_') \
+                    or f.startswith('actual_break_') or f.startswith('actual_break2_'):
                 val = _normalize_perf_time(val)
             updates.append(f'{f}=?'); params.append(val)
     if 'is_scheduled' in data:
@@ -8630,10 +8671,12 @@ def _template_payload_from_request(data):
         'days_of_week':           days_csv,
         'start_date':             (_parse_iso_date(data.get('start_date')).isoformat() if data.get('start_date') else None),
         'end_date':               (_parse_iso_date(data.get('end_date')).isoformat() if data.get('end_date') else None),
-        'in_time':                (data.get('in_time') or '').strip(),
-        'out_time':               (data.get('out_time') or '').strip(),
-        'break_start':            (data.get('break_start') or '').strip(),
-        'break_end':              (data.get('break_end') or '').strip(),
+        'in_time':                _normalize_perf_time((data.get('in_time') or '').strip()),
+        'out_time':               _normalize_perf_time((data.get('out_time') or '').strip()),
+        'break_start':            _normalize_perf_time((data.get('break_start') or '').strip()),
+        'break_end':              _normalize_perf_time((data.get('break_end') or '').strip()),
+        'break2_start':           _normalize_perf_time((data.get('break2_start') or '').strip()),
+        'break2_end':             _normalize_perf_time((data.get('break2_end') or '').strip()),
         'default_group_name':     (data.get('default_group_name') or 'Overhead').strip() or 'Overhead',
         'default_contact_name':   (data.get('default_contact_name') or '').strip(),
         'default_contact_email':  (data.get('default_contact_email') or '').strip(),
@@ -8846,16 +8889,19 @@ def api_overhead_templates_generate():
                 else:
                     next_sort = _max_sort_order(db, 'overhead_labor_requests', 'group_id=?', (gid,))
                     for i in range(to_insert):
+                        _t_dict = dict(t)
                         db.execute("""
                             INSERT INTO overhead_labor_requests
                                 (group_id, template_id, work_date, position_id,
-                                 in_time, out_time, break_start, break_end,
+                                 in_time, out_time,
+                                 break_start, break_end, break2_start, break2_end,
                                  requested_name, sort_order, created_by)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
                         """, (
-                            gid, t['id'], iso, t['position_id'],
-                            t['in_time'] or '', t['out_time'] or '',
-                            t['break_start'] or '', t['break_end'] or '',
+                            gid, _t_dict['id'], iso, _t_dict['position_id'],
+                            _t_dict.get('in_time') or '', _t_dict.get('out_time') or '',
+                            _t_dict.get('break_start') or '', _t_dict.get('break_end') or '',
+                            _t_dict.get('break2_start') or '', _t_dict.get('break2_end') or '',
                             '', next_sort + (i * 10),
                             session.get('user_id'),
                         ))

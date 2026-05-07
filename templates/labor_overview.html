@@ -152,8 +152,8 @@
         <td class="lo-time {% if not r.in_time %}empty{% endif %}">{{ r.in_time or '—' }}</td>
         <td class="lo-time {% if not r.break_start %}empty{% endif %}">{{ r.break_start or '—' }}</td>
         <td class="lo-time {% if not r.break_end %}empty{% endif %}">{{ r.break_end or '—' }}</td>
-        <td class="lo-time empty">—</td>
-        <td class="lo-time empty">—</td>
+        <td class="lo-time {% if not r.break2_start %}empty{% endif %}">{{ r.break2_start or '—' }}</td>
+        <td class="lo-time {% if not r.break2_end %}empty{% endif %}">{{ r.break2_end or '—' }}</td>
         <td class="lo-time {% if not r.out_time %}empty{% endif %}">{{ r.out_time or '—' }}</td>
         <td class="lo-tech {% if not r.tech %}unscheduled{% endif %}">
           {{ r.tech or 'unassigned' }}
