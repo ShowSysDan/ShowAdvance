@@ -1814,12 +1814,27 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 
 /* Stacked Lunch 1 / Lunch 2 cells in staffing labor tables */
 .labor-stack-cell { padding: 4px 6px !important; }
-.labor-stack-cell > input + input { margin-top: 3px; }
-.labor-stack-cell .labor-field { width: 78px; }
+.labor-stack-cell .labor-stack-row {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 11px; line-height: 1.2;
+}
+.labor-stack-cell .labor-stack-row + .labor-stack-row { margin-top: 3px; }
+.labor-stack-cell .labor-stack-tag {
+  flex: 0 0 auto; min-width: 14px; padding: 0 4px;
+  font-size: 9px; font-weight: 700; letter-spacing: .04em;
+  color: var(--text-muted); text-align: center;
+}
+.labor-stack-cell .labor-field { flex: 1; width: auto; }
 .labor-day td.labor-stack-cell,
 .labor-day td:has(> input.labor-field[data-field="in_time"]),
 .labor-day td:has(> input.labor-field[data-field="out_time"]) {
   padding-left: 6px; padding-right: 6px;
+}
+/* Make the assigned tech name on each labor row read at a glance */
+.labor-day td.labor-scheduled-tech {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--text) !important;
 }
 
 /* ── Labor day blocks ───────────────────────────────── */
@@ -2288,12 +2303,24 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       <td><select class="field-input field-input-sm labor-field" data-field="position_id" ${RESTRICTED ? 'disabled' : ''}></select></td>
       <td><input type="text" class="field-input field-input-sm labor-field" data-field="in_time" value="${lr.in_time || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
       <td class="labor-stack-cell">
-        <input type="text" class="field-input field-input-sm labor-field" data-field="break_start"  value="${lr.break_start  || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}>
-        <input type="text" class="field-input field-input-sm labor-field" data-field="break2_start" value="${lr.break2_start || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}>
+        <div class="labor-stack-row">
+          <span class="labor-stack-tag">1</span>
+          <input type="text" class="field-input field-input-sm labor-field" data-field="break_start"  value="${lr.break_start  || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}>
+        </div>
+        <div class="labor-stack-row">
+          <span class="labor-stack-tag">2</span>
+          <input type="text" class="field-input field-input-sm labor-field" data-field="break2_start" value="${lr.break2_start || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}>
+        </div>
       </td>
       <td class="labor-stack-cell">
-        <input type="text" class="field-input field-input-sm labor-field" data-field="break_end"    value="${lr.break_end    || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}>
-        <input type="text" class="field-input field-input-sm labor-field" data-field="break2_end"   value="${lr.break2_end   || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}>
+        <div class="labor-stack-row">
+          <span class="labor-stack-tag">1</span>
+          <input type="text" class="field-input field-input-sm labor-field" data-field="break_end"    value="${lr.break_end    || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}>
+        </div>
+        <div class="labor-stack-row">
+          <span class="labor-stack-tag">2</span>
+          <input type="text" class="field-input field-input-sm labor-field" data-field="break2_end"   value="${lr.break2_end   || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}>
+        </div>
       </td>
       <td><input type="text" class="field-input field-input-sm labor-field" data-field="out_time" value="${lr.out_time || ''}" placeholder="HH:MM" pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" ${RESTRICTED ? 'disabled' : ''}></td>
       <td><select class="field-input field-input-sm labor-field" data-field="requested_name" ${RESTRICTED ? 'disabled' : ''}></select></td>
