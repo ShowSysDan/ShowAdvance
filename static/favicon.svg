@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 36 44" fill="none">
+  <!-- hang pipe -->
+  <rect x="16.5" y="0" width="3" height="6" rx="1.5" fill="rgba(245,127,32,0.55)"/>
+  <!-- fixture body -->
+  <rect x="10" y="5" width="16" height="12" rx="2.5" fill="#F57F20"/>
+  <!-- lens recess -->
+  <rect x="11.5" y="6.5" width="13" height="9" rx="1.5" fill="rgba(0,0,0,0.18)"/>
+  <!-- lens highlight -->
+  <ellipse cx="18" cy="11" rx="4.5" ry="3.2" fill="rgba(255,255,255,0.1)"/>
+  <ellipse cx="14.5" cy="8.2" rx="2.5" ry="1.5" fill="rgba(255,255,255,0.3)"/>
+  <!-- beam -->
+  <path d="M12,17 L24,17 L30,40 L6,40 Z" fill="rgba(245,127,32,0.13)"/>
+  <line x1="12" y1="17" x2="6" y2="40" stroke="rgba(245,127,32,0.3)" stroke-width="0.8"/>
+  <line x1="24" y1="17" x2="30" y2="40" stroke="rgba(245,127,32,0.3)" stroke-width="0.8"/>
+  <!-- stage floor -->
+  <rect x="4" y="40" width="28" height="2" rx="1" fill="rgba(245,127,32,0.4)"/>
+  <!-- floor glow -->
+  <ellipse cx="18" cy="41.5" rx="9" ry="2.5" fill="rgba(245,127,32,0.18)"/>
+</svg>
