@@ -10029,22 +10029,21 @@ def detect_service():
 # ─── User Registration & Recovery ─────────────────────────────────────────────
 
 def _send_simple_email(to_addr, subject, body_text, body_html=None):
-    """Send a plain email using the configured provider (reuses app email infra)."""
+    """Send a plain (single-recipient) email via the canonical _send_email
+    helper defined at the top of this file."""
     try:
-        _send_email(to_addr, subject, body_text, body_html)
-        return True
+        ok, msg = _send_email(
+            subject=subject,
+            recipients=[to_addr],
+            body_text=body_text,
+            body_html=body_html,
+        )
+        if not ok:
+            app.logger.error(f'Email send failed to {to_addr}: {msg}')
+        return ok
     except Exception as e:
         app.logger.error(f'Email send failed to {to_addr}: {e}')
         return False
-
-def _send_email(to_addr, subject, plain, html=None):
-    """Dispatch via SMTP or direct MX depending on settings."""
-    provider = get_app_setting('email_provider', 'smtp')
-    from_addr = get_app_setting('smtp_from', 'noreply@localhost')
-    if provider == 'smtp':
-        _send_email_smtp(from_addr, [to_addr], subject, plain, html)
-    else:
-        _send_email_direct(from_addr, [to_addr], subject, plain, html)
 
 
 def _register_route():
