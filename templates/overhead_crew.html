@@ -87,10 +87,10 @@
   }
   .oh-group-totals strong { color: var(--text); font-family: var(--font-mono, monospace); }
 
-  /* Compact contact + notes form (replaces the old multi-field grid) */
+  /* Compact Contact + Notes form (replaces the old multi-field grid) */
   .oh-group-meta-compact {
     display: grid;
-    grid-template-columns: minmax(280px, 1.4fr) minmax(220px, 1fr);
+    grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr);
     gap: 10px;
     margin-bottom: 10px;
     align-items: start;
@@ -99,11 +99,6 @@
   .oh-group-meta-compact label {
     font-size: 10px; letter-spacing: .04em;
     color: var(--text-dim); font-weight: 600; text-transform: uppercase;
-  }
-  .oh-contact-row {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 4px;
   }
   .oh-group-notes textarea {
     width: 100%; min-height: 48px; resize: vertical;
@@ -132,6 +127,8 @@
     border-radius: 4px;
     background: var(--bg-surface);
   }
+  /* `display: flex` above beats the browser default for [hidden]; force it. */
+  .oh-quickfill[hidden] { display: none !important; }
   .oh-quickfill .oh-qf-label {
     font-size: 11px; font-weight: 700; letter-spacing: .04em;
     text-transform: uppercase; color: var(--text-dim);
@@ -780,22 +777,12 @@
       </div>
 
       <div class="oh-group-meta-compact">
-        <div class="field-group oh-contact-trio">
+        <div class="field-group">
           <label>Contact${hasProject ? ' <span class="oh-inherited-hint">(blank = inherit from project)</span>' : ''}</label>
-          <div class="oh-contact-row">
-            <input type="text"  class="field-input field-input-sm oh-cn"
-                   value="${escapeHtml(group.contact_name  || '')}"
-                   placeholder="${escapeHtml(group.project_contact_name  || 'Name')}"
-                   ${CAN_EDIT ? '' : 'disabled'}>
-            <input type="email" class="field-input field-input-sm oh-ce"
-                   value="${escapeHtml(group.contact_email || '')}"
-                   placeholder="${escapeHtml(group.project_contact_email || 'email@example.com')}"
-                   ${CAN_EDIT ? '' : 'disabled'}>
-            <input type="text"  class="field-input field-input-sm oh-cp"
-                   value="${escapeHtml(group.contact_phone || '')}"
-                   placeholder="${escapeHtml(group.project_contact_phone || '(xxx) xxx-xxxx')}"
-                   ${CAN_EDIT ? '' : 'disabled'}>
-          </div>
+          <input type="text" class="field-input field-input-sm oh-cn"
+                 value="${escapeHtml(group.contact_name || '')}"
+                 placeholder="${escapeHtml(group.project_contact_name || 'Contact name')}"
+                 ${CAN_EDIT ? '' : 'disabled'}>
         </div>
         <div class="field-group oh-group-notes">
           <label>Notes${hasProject ? ' <span class="oh-inherited-hint">(blank = inherit from project)</span>' : ''}</label>
@@ -849,12 +836,10 @@
       const persist = () => {
         saveGroup(wrap, {
           contact_name:  wrap.querySelector('.oh-cn').value.trim(),
-          contact_email: wrap.querySelector('.oh-ce').value.trim(),
-          contact_phone: wrap.querySelector('.oh-cp').value.trim(),
           project_notes: wrap.querySelector('.oh-pn').value,
         });
       };
-      ['oh-cn','oh-ce','oh-cp','oh-pn'].forEach(cls => {
+      ['oh-cn', 'oh-pn'].forEach(cls => {
         const el = wrap.querySelector('.' + cls);
         if (el) el.addEventListener('change', persist);
       });
