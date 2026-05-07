@@ -3523,50 +3523,100 @@ def download_export_history(show_id, log_id):
     return resp
 
 
+def _send_pdf_email_async(show_id, pdf_type, triggered_by, exported_by_id):
+    """Run _send_pdf_email in a background daemon thread.
+
+    Used by the manual "send email" UI so the user can navigate away
+    immediately. Failures during the build / SMTP / audit-log stages are
+    surfaced through the email_send_errors panel rather than the original
+    HTTP response.
+    """
+    def _runner():
+        with app.app_context():
+            try:
+                ok, msg, count = _send_pdf_email(
+                    show_id, pdf_type, triggered_by,
+                    exported_by_id=exported_by_id,
+                )
+                if ok:
+                    try:
+                        _adb = get_db()
+                        log_audit(
+                            _adb, f'PDF_EMAIL_{pdf_type.upper()}', 'show', show_id,
+                            show_id=show_id,
+                            detail=f'Background email to {count} recipient(s)',
+                        )
+                        _adb.commit()
+                        _adb.close()
+                    except Exception as e:
+                        app.logger.warning(f'audit log failed for PDF_EMAIL_{pdf_type}: {e}')
+                    syslog_logger.info(
+                        f'PDF_EMAIL_BG_OK show_id={show_id} type={pdf_type} '
+                        f'by={triggered_by} recipients={count}'
+                    )
+                else:
+                    syslog_logger.warning(
+                        f'PDF_EMAIL_BG_FAIL show_id={show_id} type={pdf_type} '
+                        f'by={triggered_by} msg={msg!r}'
+                    )
+            except Exception as e:
+                app.logger.exception(
+                    f'email_pdf background failed show_id={show_id} type={pdf_type}'
+                )
+                syslog_logger.error(
+                    f'PDF_EMAIL_BG_CRASHED show_id={show_id} type={pdf_type} '
+                    f'by={triggered_by} error={e!r}'
+                )
+                # Best-effort: surface the crash in the email errors panel so
+                # an admin can see it without grepping syslog.
+                try:
+                    _log_email_error(
+                        ['(unknown)'],
+                        f'{pdf_type} for show {show_id}',
+                        f'Background send crashed: {e}',
+                        pdf_type=pdf_type,
+                        show_id=show_id,
+                        triggered_by=triggered_by,
+                    )
+                except Exception:
+                    pass
+
+    threading.Thread(
+        target=_runner,
+        name=f'email-{pdf_type}-{show_id}',
+        daemon=True,
+    ).start()
+
+
 @app.route('/shows/<int:show_id>/email/<pdf_type>', methods=['POST'])
 @login_required
 def email_pdf(show_id, pdf_type):
-    """Manually trigger a PDF email for advance, schedule, or postnotes."""
+    """Queue a PDF email for advance, schedule, or postnotes.
+
+    Returns 202 immediately; the actual PDF render + SMTP send runs on a
+    background thread. Any failures show up in
+    Settings → Email → Email Send Errors.
+    """
     if pdf_type not in ('advance', 'schedule', 'postnotes'):
         return jsonify({'success': False, 'error': 'Invalid PDF type.'}), 400
     if not can_access_show(session['user_id'], show_id):
         return jsonify({'success': False, 'error': 'Access denied.'}), 403
     get_show_or_404(show_id)
     triggered_by = session.get('username') or session.get('user_display') or 'user'
-    # Guard the entire send path so any unexpected exception (PDF render,
-    # SMTP, S3, audit log, etc.) comes back as JSON the client can parse,
-    # not an HTML 500 page.
-    try:
-        ok, msg, count = _send_pdf_email(
-            show_id, pdf_type, triggered_by,
-            exported_by_id=session.get('user_id')
-        )
-    except Exception as e:
-        app.logger.exception(
-            f'email_pdf failed show_id={show_id} type={pdf_type}'
-        )
-        syslog_logger.error(
-            f'PDF_EMAIL_FAILED show_id={show_id} type={pdf_type} '
-            f'by={session.get("username")} error={e!r}'
-        )
-        return jsonify({
-            'success': False,
-            'error':   f'Email send failed: {e}',
-            'message': f'Email send failed: {e}',
-            'recipients': 0,
-        }), 500
-    if ok:
-        try:
-            _adb = get_db()
-            log_audit(_adb, f'PDF_EMAIL_{pdf_type.upper()}', 'show', show_id,
-                      show_id=show_id, detail=f'Manual email to {count} recipient(s)')
-            _adb.commit()
-            _adb.close()
-        except Exception as e:
-            # Audit logging failure shouldn't poison the response — the email
-            # already went out successfully.
-            app.logger.warning(f'audit log failed for PDF_EMAIL_{pdf_type}: {e}')
-    return jsonify({'success': ok, 'message': msg, 'recipients': count})
+    exported_by_id = session.get('user_id')
+
+    _send_pdf_email_async(show_id, pdf_type, triggered_by, exported_by_id)
+
+    syslog_logger.info(
+        f'PDF_EMAIL_QUEUED show_id={show_id} type={pdf_type} by={triggered_by}'
+    )
+    return jsonify({
+        'success': True,
+        'queued':  True,
+        'message': ('Email queued. Delivery happens in the background — any '
+                    'failures will appear in Settings → Email → Email Send Errors.'),
+        'recipients': None,
+    }), 202
 
 
 def _build_postnotes_pdf(show_id, exported_by_id=None, base_url=None):
