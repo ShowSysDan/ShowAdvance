@@ -7484,6 +7484,67 @@ def api_overhead_templates_list():
     return jsonify([_template_row_to_dict(r) for r in rows])
 
 
+def _prune_template_requests(db, tid, *, today=None):
+    """Remove any future (work_date >= today) labor requests stamped with this
+    template_id that no longer fit the template's current
+    start_date / end_date / days_of_week / is_active values.
+
+    Past requests are preserved as historical records — only upcoming ones get
+    cleaned up so the running schedule stays in sync when a template is
+    shortened, has weekdays removed, or is deactivated.
+
+    Returns the number of rows deleted. Does NOT commit — caller does that.
+    """
+    today = today or date.today()
+    t = db.execute(
+        'SELECT id, start_date, end_date, days_of_week, is_active '
+        'FROM overhead_labor_templates WHERE id=?',
+        (tid,),
+    ).fetchone()
+    if not t:
+        return 0
+
+    is_active = bool(t['is_active'])
+    wanted_days = _parse_dow_csv(t['days_of_week'])
+    t_start = _parse_iso_date(t['start_date']) if t['start_date'] else None
+    t_end   = _parse_iso_date(t['end_date'])   if t['end_date']   else None
+
+    # Pull every future template-stamped request and keep the ones that no
+    # longer fit. Doing this in Python keeps the weekday math identical to
+    # the generator (Python weekday Mon=0..Sun=6 → JS getDay Sun=0..Sat=6).
+    rows = db.execute(
+        'SELECT id, work_date FROM overhead_labor_requests '
+        'WHERE template_id=? AND work_date >= ?',
+        (tid, today.isoformat()),
+    ).fetchall()
+    to_delete = []
+    for r in rows:
+        wd = _parse_iso_date(r['work_date'])
+        if not wd:
+            continue
+        # Inactive template → drop every future stamped row
+        if not is_active:
+            to_delete.append(r['id']); continue
+        if t_start and wd < t_start: to_delete.append(r['id']); continue
+        if t_end   and wd > t_end:   to_delete.append(r['id']); continue
+        # Empty wanted_days set means no weekday is allowed → drop everything
+        if not wanted_days:
+            to_delete.append(r['id']); continue
+        js_w = (wd.weekday() + 1) % 7
+        if js_w not in wanted_days:
+            to_delete.append(r['id'])
+
+    if not to_delete:
+        return 0
+
+    placeholders = ','.join(['?'] * len(to_delete))
+    db.execute(
+        f'DELETE FROM overhead_labor_requests WHERE id IN ({placeholders})',
+        to_delete,
+    )
+    return len(to_delete)
+
+
 def _template_payload_from_request(data):
     """Normalize an inbound payload into the column tuple/values we INSERT/UPDATE.
     Returns (col_assignments_dict)."""
@@ -7559,13 +7620,21 @@ def api_overhead_templates_update(tid):
         f'UPDATE overhead_labor_templates SET {set_clause} WHERE id=?',
         list(payload.values()) + [tid],
     )
+    # Sync future requests with the (possibly narrowed) template — drops any
+    # template-stamped lines that now fall outside the date range / weekdays,
+    # so shortening a template removes its leftover lines automatically.
+    pruned = _prune_template_requests(db, tid)
     log_audit(db, 'OVERHEAD_TEMPLATE_EDIT', 'overhead_labor_template', tid,
-              detail=payload['name'])
+              detail=f"{payload['name']} (pruned={pruned})" if pruned else payload['name'])
     db.commit()
     refreshed = db.execute(_OVERHEAD_TEMPLATE_JOIN_SELECT + ' WHERE t.id=?', (tid,)).fetchone()
     db.close()
-    _overhead_log('OVERHEAD_TEMPLATE_EDIT', id=tid, name=payload['name'])
-    return jsonify({'success': True, 'template': _template_row_to_dict(refreshed) if refreshed else None})
+    _overhead_log('OVERHEAD_TEMPLATE_EDIT', id=tid, name=payload['name'], pruned=pruned)
+    return jsonify({
+        'success': True,
+        'template': _template_row_to_dict(refreshed) if refreshed else None,
+        'pruned': pruned,
+    })
 
 
 @app.route('/api/overhead-crew/templates/<int:tid>', methods=['DELETE'])
@@ -7710,11 +7779,12 @@ def api_overhead_templates_generate():
                     for i in range(to_insert):
                         db.execute("""
                             INSERT INTO overhead_labor_requests
-                                (group_id, work_date, position_id, in_time, out_time,
-                                 break_start, break_end, requested_name, sort_order, created_by)
-                            VALUES (?,?,?,?,?,?,?,?,?,?)
+                                (group_id, template_id, work_date, position_id,
+                                 in_time, out_time, break_start, break_end,
+                                 requested_name, sort_order, created_by)
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?)
                         """, (
-                            gid, iso, t['position_id'],
+                            gid, t['id'], iso, t['position_id'],
                             t['in_time'] or '', t['out_time'] or '',
                             t['break_start'] or '', t['break_end'] or '',
                             '', next_sort + (i * 10),

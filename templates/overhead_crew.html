@@ -1541,8 +1541,15 @@
     const res = await fn(url, payload);
     if (!res || !res.success) { alert('Save failed: ' + ((res && res.error) || 'unknown')); return; }
     cancelTemplateForm();
-    showSaveToast('✓ Template saved');
+    if (res.pruned) {
+      showSaveToast(`✓ Saved · removed ${res.pruned} upcoming line${res.pruned === 1 ? '' : 's'} outside the new range`);
+    } else {
+      showSaveToast('✓ Template saved');
+    }
     await loadTemplates();
+    // The visible schedule may now be missing rows the template covered —
+    // refresh it so the UI matches the new state.
+    if (res.pruned) await load();
   }
   async function deleteTemplate(tid) {
     if (!confirm('Delete this recurring template? Already-generated requests stay.')) return;
