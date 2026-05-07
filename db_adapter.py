@@ -82,6 +82,7 @@ _CONFLICT_COLS = {
     'form_fields':       ['field_key'],
     'form_sections':     ['section_key'],
     'schedule_meta_fields': ['field_key'],
+    'cluster_instances': ['instance_id'],
 }
 
 

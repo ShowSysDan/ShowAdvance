@@ -656,6 +656,22 @@ CREATE TABLE IF NOT EXISTS ai_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_sessions_status ON ai_sessions(status);
+
+-- ── Cluster Heartbeat (multi-server leader election) ──────────────────────────
+-- Each running app instance writes its own row every ~10 s. Lowest-IP live row
+-- (last_seen within timeout) is leader and runs scheduled-PDF emails.
+
+CREATE TABLE IF NOT EXISTS cluster_instances (
+    instance_id TEXT PRIMARY KEY,
+    ip          TEXT NOT NULL,
+    hostname    TEXT,
+    port        INTEGER,
+    app_version TEXT,
+    started_at  TIMESTAMP,
+    last_seen   TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cluster_instances_last_seen ON cluster_instances(last_seen);
 """
 
 SEED_CONTACTS = [
@@ -1753,6 +1769,18 @@ def migrate_db():
             sort_order INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
+
+        CREATE TABLE IF NOT EXISTS cluster_instances (
+            instance_id TEXT PRIMARY KEY,
+            ip          TEXT NOT NULL,
+            hostname    TEXT,
+            port        INTEGER,
+            app_version TEXT,
+            started_at  TIMESTAMP,
+            last_seen   TIMESTAMP NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_cluster_instances_last_seen ON cluster_instances(last_seen);
     """)
 
     # Remove WiFi fields from schedule_meta_fields — WiFi is now global-only
@@ -2492,6 +2520,20 @@ CREATE TABLE IF NOT EXISTS ai_sessions (
 );
 
 CREATE INDEX IF NOT EXISTS idx_ai_sessions_status ON ai_sessions(status);
+
+-- ── Cluster Heartbeat (multi-server leader election) ──────────────────────────
+
+CREATE TABLE IF NOT EXISTS cluster_instances (
+    instance_id TEXT PRIMARY KEY,
+    ip          TEXT NOT NULL,
+    hostname    TEXT,
+    port        INTEGER,
+    app_version TEXT,
+    started_at  TIMESTAMP,
+    last_seen   TIMESTAMP NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cluster_instances_last_seen ON cluster_instances(last_seen);
 """
 
 

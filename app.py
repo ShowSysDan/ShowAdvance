@@ -15,6 +15,9 @@ import gzip
 import threading
 import secrets
 import re
+import socket
+import time
+import uuid
 import html as _html_mod
 from datetime import datetime, date, timedelta
 from functools import wraps
@@ -360,6 +363,286 @@ def get_db():
     """Return a normalized DB connection (SQLite or PostgreSQL based on settings)."""
     settings = db_adapter.read_db_settings(DATABASE)
     return db_adapter.connect(DATABASE, settings)
+
+
+# ─── Cluster Heartbeat (multi-server leader election) ────────────────────────
+#
+# PROTOCOL
+# --------
+# Each running app instance (each Gunicorn worker process counts as its own
+# instance) generates a UUID once at process start (`_CLUSTER_INSTANCE_ID`) and
+# writes a row to the shared `cluster_instances` table every
+# `cluster_heartbeat_interval_sec` (default 10 s) with last_seen=NOW().
+#
+# To find live peers, any code SELECTs rows whose last_seen is within
+# `cluster_peer_timeout_sec` (default 30 s) of now. Stale rows from crashed
+# instances are simply filtered out by that WHERE clause — no garbage
+# collector required.
+#
+# LEADER ELECTION
+# ---------------
+# The leader is the live peer with the lowest IPv4 address (compared as a
+# 4-tuple of ints, so 192.168.1.9 sorts before 192.168.1.10), tiebroken by
+# `instance_id`. Every instance arrives at the same answer independently —
+# no election message is exchanged. If the leader crashes or shuts down,
+# its row goes stale (or is DELETEd by atexit on graceful exit) and the
+# next-lowest IP becomes leader on the very next read.
+#
+# Three settings affect leader behaviour:
+#   cluster_heartbeat_enabled  ('1'/'0', default '1')
+#       Master toggle. When '0', the heartbeat thread is not started, no row
+#       is written for this instance, and `am_i_leader()` returns True
+#       unconditionally (single-server fallback).
+#   cluster_force_leader  ('auto' | 'always' | 'never', default 'auto')
+#       Operational escape hatch. 'always' = this instance is leader no
+#       matter what; 'never' = this instance never claims leadership.
+#   cluster_heartbeat_interval_sec / cluster_peer_timeout_sec
+#       Tune the heartbeat cadence and how long a missing peer takes to be
+#       considered dead.
+#
+# WRITING A NEW SCHEDULED TASK THAT MUST RUN ONCE CLUSTER-WIDE
+# ------------------------------------------------------------
+# Add the job to `start_scheduler()` at the bottom of this module like:
+#
+#     scheduler.add_job(my_periodic_task, 'interval',
+#                       hours=1, id='my_periodic_task')
+#
+# Then make the FIRST line of the task body:
+#
+#     def my_periodic_task():
+#         if not am_i_leader():
+#             app.logger.info('my_periodic_task skipped — not cluster leader')
+#             return
+#         ...real work here...
+#
+# That is the only change required. With Gunicorn running 4 workers per
+# server and 2 servers, your job will fire 8x per tick at the APScheduler
+# level, but only the single global leader executes it — the other 7
+# return immediately. No locks, no DB rows, no Redis required.
+#
+# WHEN NOT TO USE am_i_leader()
+# -----------------------------
+# Some scheduled tasks intentionally run on every instance — e.g. local
+# backups (`run_hourly_backup`, `run_daily_backup`) write to a per-server
+# /backups/ directory and we want both servers to keep their own copy in
+# case one dies. Those jobs deliberately do NOT call am_i_leader().
+#
+# Rule of thumb:
+#   - Sends external side-effects (email, SMS, webhooks)?       → gate on am_i_leader()
+#   - Modifies shared DB rows that should change exactly once?  → gate on am_i_leader()
+#   - Writes only to instance-local state (logs, local files)?  → do NOT gate
+#
+# The leader check is cached for 3 s, so calling it at the start of a job
+# that fires every minute is essentially free.
+
+_CLUSTER_INSTANCE_ID = uuid.uuid4().hex
+_CLUSTER_STARTED_AT = datetime.utcnow()
+_cluster_thread = None
+_cluster_stop_event = threading.Event()
+_cluster_lock = threading.RLock()
+_leader_cache = {'at': 0.0, 'is_leader': True, 'leader_id': None, 'leader_ip': None}
+_LEADER_CACHE_TTL = 3.0  # seconds
+
+
+def _get_local_ip():
+    """Discover the outbound interface IP without sending traffic."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(('8.8.8.8', 80))
+        return s.getsockname()[0]
+    except Exception:
+        return '127.0.0.1'
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
+
+
+def _ip_sort_key(ip):
+    """Convert '192.168.1.10' to (192, 168, 1, 10) for correct numeric ordering."""
+    try:
+        return tuple(int(p) for p in (ip or '').split('.'))
+    except Exception:
+        return (999, 999, 999, 999)
+
+
+def _cluster_heartbeat_iteration():
+    """Upsert this instance's row. Called on a timer; failures are logged."""
+    try:
+        ip = _get_local_ip()
+        hostname = socket.gethostname()
+        port_str = get_app_setting('app_port', '5400')
+        try:
+            port = int(port_str)
+        except ValueError:
+            port = 5400
+        version = get_app_setting('app_version', '') or ''
+        now = datetime.utcnow()
+        db = get_db()
+        try:
+            db.execute("""
+                INSERT OR REPLACE INTO cluster_instances
+                    (instance_id, ip, hostname, port, app_version, started_at, last_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (_CLUSTER_INSTANCE_ID, ip, hostname, port, version,
+                  _CLUSTER_STARTED_AT, now))
+            db.commit()
+        finally:
+            db.close()
+    except Exception as e:
+        app.logger.warning(f'cluster heartbeat failed: {e}')
+
+
+def _cluster_heartbeat_loop():
+    """Daemon thread loop. Heartbeats until stop_event is set."""
+    while not _cluster_stop_event.is_set():
+        if get_app_setting('cluster_heartbeat_enabled', '1') in ('1', 'true'):
+            _cluster_heartbeat_iteration()
+        try:
+            interval = int(get_app_setting('cluster_heartbeat_interval_sec', '10'))
+        except ValueError:
+            interval = 10
+        if interval < 2:
+            interval = 2
+        # Use Event.wait so a stop signal interrupts immediately
+        if _cluster_stop_event.wait(timeout=interval):
+            break
+
+
+def _query_live_peers():
+    """Return list of dicts for instances seen within the timeout window."""
+    try:
+        timeout = int(get_app_setting('cluster_peer_timeout_sec', '30'))
+    except ValueError:
+        timeout = 30
+    cutoff = datetime.utcnow() - timedelta(seconds=timeout)
+    db = get_db()
+    try:
+        rows = db.execute(
+            "SELECT instance_id, ip, hostname, port, app_version, "
+            "started_at, last_seen FROM cluster_instances "
+            "WHERE last_seen > ? ORDER BY ip, instance_id",
+            (cutoff,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        db.close()
+
+
+def _compute_leader(peers):
+    """Return the leader peer dict (lowest IP, tiebreak by instance_id) or None."""
+    if not peers:
+        return None
+    return min(peers, key=lambda p: (_ip_sort_key(p.get('ip', '')),
+                                     p.get('instance_id', '')))
+
+
+def get_cluster_status():
+    """Build the dict consumed by /api/cluster/peers."""
+    enabled = get_app_setting('cluster_heartbeat_enabled', '1') in ('1', 'true')
+    force = get_app_setting('cluster_force_leader', 'auto')
+    self_ip = _get_local_ip()
+    peers = _query_live_peers() if enabled else []
+    leader = _compute_leader(peers)
+
+    if force == 'always':
+        leader_id = _CLUSTER_INSTANCE_ID
+        leader_ip = self_ip
+        is_leader = True
+    elif force == 'never':
+        leader_id = leader.get('instance_id') if leader else None
+        leader_ip = leader.get('ip') if leader else None
+        is_leader = False
+    elif not enabled or not peers:
+        # Single-instance / disabled fallback: self is leader
+        leader_id = _CLUSTER_INSTANCE_ID
+        leader_ip = self_ip
+        is_leader = True
+    else:
+        leader_id = leader.get('instance_id')
+        leader_ip = leader.get('ip')
+        is_leader = (leader_id == _CLUSTER_INSTANCE_ID)
+
+    annotated = []
+    for p in peers:
+        d = dict(p)
+        # Convert datetimes to ISO strings for JSON
+        for k in ('started_at', 'last_seen'):
+            v = d.get(k)
+            if hasattr(v, 'isoformat'):
+                d[k] = v.isoformat()
+        d['is_self']   = (d.get('instance_id') == _CLUSTER_INSTANCE_ID)
+        d['is_leader'] = (d.get('instance_id') == leader_id)
+        annotated.append(d)
+
+    return {
+        'self_id':         _CLUSTER_INSTANCE_ID,
+        'self_ip':         self_ip,
+        'self_hostname':   socket.gethostname(),
+        'self_started_at': _CLUSTER_STARTED_AT.isoformat(),
+        'leader_id':       leader_id,
+        'leader_ip':       leader_ip,
+        'is_leader':       is_leader,
+        'enabled':         enabled,
+        'force_leader':    force,
+        'peers':           annotated,
+    }
+
+
+def am_i_leader():
+    """Return True if this instance should run scheduled jobs.
+
+    Cached for ~3 s to avoid hammering the DB if multiple callers exist.
+    Single-instance / disabled fallback returns True so existing single-server
+    installs keep firing scheduled emails with no config changes.
+    """
+    now = time.monotonic()
+    with _cluster_lock:
+        if (now - _leader_cache['at']) < _LEADER_CACHE_TTL:
+            return _leader_cache['is_leader']
+    status = get_cluster_status()
+    with _cluster_lock:
+        _leader_cache['at'] = now
+        _leader_cache['is_leader'] = status['is_leader']
+        _leader_cache['leader_id'] = status['leader_id']
+        _leader_cache['leader_ip'] = status['leader_ip']
+    return status['is_leader']
+
+
+def _cluster_cleanup_on_exit():
+    """Best-effort delete of this instance's row so failover is instant."""
+    try:
+        db = get_db()
+        try:
+            db.execute('DELETE FROM cluster_instances WHERE instance_id=?',
+                       (_CLUSTER_INSTANCE_ID,))
+            db.commit()
+        finally:
+            db.close()
+    except Exception:
+        pass
+
+
+def start_cluster_heartbeat():
+    """Spawn the heartbeat daemon thread. Idempotent."""
+    global _cluster_thread
+    if _cluster_thread and _cluster_thread.is_alive():
+        return _cluster_thread
+    _cluster_stop_event.clear()
+    _cluster_thread = threading.Thread(
+        target=_cluster_heartbeat_loop,
+        name='cluster-heartbeat',
+        daemon=True,
+    )
+    _cluster_thread.start()
+    atexit.register(_cluster_cleanup_on_exit)
+    return _cluster_thread
+
+
+def stop_cluster_heartbeat():
+    """Signal the heartbeat thread to stop; best-effort. Used for restarts."""
+    _cluster_stop_event.set()
 
 
 # ─── Auth Decorators ──────────────────────────────────────────────────────────
@@ -1189,6 +1472,9 @@ def run_scheduled_pdf_emails():
     APScheduler job: hourly tick.  Sends PDFs when the configured send hour
     matches the current hour and no send has been recorded for this show/type/day.
     """
+    if not am_i_leader():
+        app.logger.info('PDF email check skipped — not cluster leader')
+        return
     send_hour = int(get_app_setting('pdf_email_send_hour', '6'))
     if datetime.now().hour != send_hour:
         return
@@ -1258,11 +1544,36 @@ def run_scheduled_pdf_emails():
 
 
 def start_scheduler():
+    """Register all background jobs.
+
+    IMPORTANT — multi-server safety:
+    Under Gunicorn each worker process loads this module independently, so
+    `start_scheduler()` runs once per worker. With the default 4 workers on
+    a 2-server cluster, every job below is fired 8 times per tick. Most
+    jobs must therefore guard their entry point with `am_i_leader()` so
+    only the single global leader does the work. See the Cluster Heartbeat
+    section near the top of this file for the convention and exceptions
+    (backups intentionally run everywhere for redundancy).
+
+    To add a new job:
+      1. Add `scheduler.add_job(my_func, ..., id='my_func')` below.
+      2. Inside `my_func`, decide whether it should be leader-gated:
+         - Yes (almost always): start with
+             if not am_i_leader():
+                 app.logger.info('my_func skipped — not cluster leader')
+                 return
+         - No (only for instance-local effects like local backups): no gate.
+    """
     try:
         from apscheduler.schedulers.background import BackgroundScheduler
         scheduler = BackgroundScheduler()
+        # Backups: NOT leader-gated — every instance keeps its own copy on
+        # local disk so a failing primary doesn't take its backup history
+        # with it. The duplication is intentional.
         scheduler.add_job(run_hourly_backup, 'interval', hours=1, id='hourly_backup')
         scheduler.add_job(run_daily_backup, 'cron', hour=0, minute=0, id='daily_backup')
+        # PDF emails: leader-gated inside run_scheduled_pdf_emails() so
+        # recipients never receive a duplicate when multiple instances run.
         scheduler.add_job(run_scheduled_pdf_emails, 'interval', hours=1, id='pdf_email_check')
         scheduler.start()
         return scheduler
@@ -6101,6 +6412,57 @@ def save_pdf_email_settings():
     log_audit(db, 'SETTINGS_CHANGE', 'setting', None, after=data, detail='pdf_email_settings')
     db.commit(); db.close()
     syslog_logger.info(f"SETTINGS_CHANGE key=pdf_emails by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+# ─── Cluster (multi-server heartbeat & leader election) ──────────────────────
+
+@app.route('/api/cluster/peers', methods=['GET'])
+@admin_required
+def api_cluster_peers():
+    """Return cluster status (live peers, current leader, this instance)."""
+    return jsonify(get_cluster_status())
+
+
+@app.route('/settings/cluster', methods=['POST'])
+@admin_required
+def save_cluster_settings():
+    """Save cluster heartbeat settings. Restarts heartbeat thread if needed."""
+    data = request.get_json(force=True) or {}
+    valid_force = {'auto', 'always', 'never'}
+    keys = ('cluster_heartbeat_enabled',
+            'cluster_heartbeat_interval_sec',
+            'cluster_peer_timeout_sec',
+            'cluster_force_leader')
+    db = get_db()
+    for key in keys:
+        if key not in data:
+            continue
+        val = str(data[key])
+        if key == 'cluster_force_leader' and val not in valid_force:
+            val = 'auto'
+        if key in ('cluster_heartbeat_interval_sec', 'cluster_peer_timeout_sec'):
+            try:
+                ival = max(2, int(val))
+                val = str(ival)
+            except ValueError:
+                continue
+        if key == 'cluster_heartbeat_enabled':
+            val = '1' if val in ('1', 'true', 'on') else '0'
+        db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?,?)',
+                   (key, val))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None, after=data, detail='cluster_settings')
+    db.commit(); db.close()
+    db_adapter.clear_settings_cache()
+    # Invalidate leader cache so changes take effect on next call
+    with _cluster_lock:
+        _leader_cache['at'] = 0.0
+    # Restart heartbeat thread so a freshly-enabled cluster starts pinging
+    # immediately (or a freshly-disabled one will see the flag on next loop tick)
+    stop_cluster_heartbeat()
+    if get_app_setting('cluster_heartbeat_enabled', '1') in ('1', 'true'):
+        start_cluster_heartbeat()
+    syslog_logger.info(f"SETTINGS_CHANGE key=cluster by={session.get('username')}")
     return jsonify({'success': True})
 
 
@@ -11329,6 +11691,9 @@ if not (os.environ.get('WERKZEUG_RUN_MAIN') == 'false'):
     _scheduler = start_scheduler()
     if _scheduler:
         atexit.register(lambda: _scheduler.shutdown(wait=False))
+    # Cluster heartbeat for multi-server leader election
+    if get_app_setting('cluster_heartbeat_enabled', '1') in ('1', 'true'):
+        start_cluster_heartbeat()
 
 if __name__ == '__main__':
     if not os.path.exists(DATABASE):

@@ -564,6 +564,7 @@
     <button class="tab-btn system-sub-btn" data-stab="files" onclick="switchSystemTab('files')">Files</button>
     <button class="tab-btn system-sub-btn" data-stab="database" onclick="switchSystemTab('database')">Database</button>
     <button class="tab-btn system-sub-btn" data-stab="ai" onclick="switchSystemTab('ai')">AI</button>
+    <button class="tab-btn system-sub-btn" data-stab="cluster" onclick="switchSystemTab('cluster')">Cluster</button>
     <button class="tab-btn system-sub-btn" data-stab="godmode" onclick="switchSystemTab('godmode')">God Mode</button>
   </div>
 </div>
@@ -756,6 +757,83 @@
     </div>
   </div>
 </div>
+
+{# ── CLUSTER (admin only) ─────────────────────────────────────────────────── #}
+{% if user.role == 'admin' %}
+<div id="stab-cluster" class="stab-pane" style="display:none">
+
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> THIS INSTANCE
+      <button class="btn btn-sm btn-ghost ml-auto" onclick="loadClusterStatus()">Refresh</button>
+    </div>
+    <div class="form-section-body" style="max-width:720px">
+      <div id="cluster-self" class="field-hint" style="background:var(--bg-2,#23272e);border:1px solid var(--border,#333);border-radius:6px;padding:12px 14px;line-height:1.8">
+        <p class="text-dim text-sm">Loading...</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span> DETECTED INSTANCES
+    </div>
+    <div class="form-section-body no-pad">
+      <table class="data-table" id="cluster-peers-table">
+        <thead><tr>
+          <th>IP</th><th>HOSTNAME</th><th>PORT</th><th>STARTED</th>
+          <th>LAST SEEN</th><th>VERSION</th><th>ROLE</th>
+        </tr></thead>
+        <tbody><tr><td colspan="7" class="text-dim" style="padding:16px;font-size:12px">Loading...</td></tr></tbody>
+      </table>
+      <p class="text-dim" style="padding:10px 14px;font-size:11px;margin:0">
+        Backups run on <strong>every</strong> instance for redundancy. Only scheduled PDF emails are restricted to the leader, so recipients receive each email exactly once.
+      </p>
+    </div>
+  </div>
+
+  <div class="form-section">
+    <div class="form-section-header"><span class="section-icon">◈</span> CLUSTER SETTINGS</div>
+    <div class="form-section-body" style="max-width:520px">
+      <form onsubmit="event.preventDefault(); saveClusterSettings(this)">
+        <div class="field-group">
+          <label class="field-label">
+            <input type="checkbox" name="cluster_heartbeat_enabled"
+                   {% if syslog_settings.get('cluster_heartbeat_enabled', '1') in ('1','true') %}checked{% endif %}>
+            Enable cluster heartbeat
+          </label>
+          <p class="field-hint" style="font-size:11px">When off, this instance acts as sole leader (single-server behavior).</p>
+        </div>
+        <div class="field-group">
+          <label class="field-label">HEARTBEAT INTERVAL (seconds)</label>
+          <input type="number" name="cluster_heartbeat_interval_sec" class="field-input"
+                 min="2" max="300" style="max-width:140px"
+                 value="{{ syslog_settings.get('cluster_heartbeat_interval_sec', '10') }}">
+        </div>
+        <div class="field-group">
+          <label class="field-label">PEER TIMEOUT (seconds)</label>
+          <input type="number" name="cluster_peer_timeout_sec" class="field-input"
+                 min="5" max="600" style="max-width:140px"
+                 value="{{ syslog_settings.get('cluster_peer_timeout_sec', '30') }}">
+          <p class="field-hint" style="font-size:11px">Instances not heard from within this window are dropped from the leader pool.</p>
+        </div>
+        <div class="field-group">
+          <label class="field-label">FORCE LEADER OVERRIDE</label>
+          <select name="cluster_force_leader" class="field-input" style="max-width:240px">
+            {% set _fl = syslog_settings.get('cluster_force_leader', 'auto') %}
+            <option value="auto"   {% if _fl=='auto'   %}selected{% endif %}>Auto (lowest IP wins)</option>
+            <option value="always" {% if _fl=='always' %}selected{% endif %}>Always leader (this instance)</option>
+            <option value="never"  {% if _fl=='never'  %}selected{% endif %}>Never leader (this instance)</option>
+          </select>
+          <p class="field-hint" style="font-size:11px">Operational escape hatch — leave on Auto in normal operation.</p>
+        </div>
+        <p id="cluster-settings-msg" class="field-msg" style="display:none;margin:8px 0"></p>
+        <button type="submit" class="btn btn-primary">Save Cluster Settings</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endif %}
 
 {# ── GOD MODE (admin only) ────────────────────────────────────────────────── #}
 <div id="stab-godmode" class="stab-pane" style="display:none">
@@ -2277,6 +2355,120 @@ async function loadGodMode() {
   }
 }
 
+/* ── Cluster (multi-server heartbeat & leader election) ─────────── */
+let _clusterPollHandle = null;
+
+function _fmtRelTime(iso) {
+  if (!iso) return '—';
+  try {
+    const t = new Date(iso + (iso.endsWith('Z') ? '' : 'Z')).getTime();
+    const secs = Math.max(0, Math.round((Date.now() - t) / 1000));
+    if (secs < 60)   return secs + 's ago';
+    if (secs < 3600) return Math.round(secs/60) + 'm ago';
+    if (secs < 86400) return Math.round(secs/3600) + 'h ago';
+    return Math.round(secs/86400) + 'd ago';
+  } catch(e) { return iso; }
+}
+
+async function loadClusterStatus() {
+  try {
+    const resp = await fetch('/api/cluster/peers');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    const d = await resp.json();
+
+    // Self panel
+    const selfEl = document.getElementById('cluster-self');
+    if (selfEl) {
+      const leaderBadge = d.is_leader
+        ? '<span class="role-badge role-admin" style="background:#1a8754">LEADER</span>'
+        : '<span class="role-badge" style="background:#6c757d">FOLLOWER</span>';
+      const forceLine = d.force_leader && d.force_leader !== 'auto'
+        ? `<br><strong>Override:</strong> <code>${d.force_leader}</code>`
+        : '';
+      const enabledLine = d.enabled ? '' : '<br><span style="color:#dc3545">Cluster heartbeat is <strong>disabled</strong> — this instance acts as sole leader.</span>';
+      selfEl.innerHTML =
+        `<strong>IP:</strong> <code>${d.self_ip}</code> &nbsp; ` +
+        `<strong>Hostname:</strong> <code>${d.self_hostname}</code> &nbsp; ${leaderBadge}<br>` +
+        `<strong>Instance ID:</strong> <code>${(d.self_id||'').slice(0,12)}…</code> &nbsp; ` +
+        `<strong>Started:</strong> <span class="text-dim">${_fmtRelTime(d.self_started_at)}</span><br>` +
+        `<strong>Current leader:</strong> <code>${d.leader_ip || '—'}</code>` +
+        (d.is_leader ? ' (this instance)' : ' (remote)') +
+        forceLine + enabledLine;
+    }
+
+    // Peers table
+    const tbody = document.querySelector('#cluster-peers-table tbody');
+    if (tbody) {
+      if (!d.peers || !d.peers.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-dim" style="padding:16px;font-size:12px">No live peers (heartbeat disabled or no instances responding).</td></tr>';
+      } else {
+        tbody.innerHTML = d.peers.map(p => {
+          const role = p.is_leader
+            ? '<span class="role-badge role-admin" style="background:#1a8754">LEADER</span>'
+            : '<span class="text-dim">follower</span>';
+          const selfMark = p.is_self ? ' <span class="text-dim" style="font-size:10px">(this)</span>' : '';
+          return `<tr>
+            <td><code>${p.ip}</code>${selfMark}</td>
+            <td>${p.hostname || '—'}</td>
+            <td>${p.port || '—'}</td>
+            <td class="text-dim" style="font-size:11px">${_fmtRelTime(p.started_at)}</td>
+            <td class="text-dim" style="font-size:11px">${_fmtRelTime(p.last_seen)}</td>
+            <td class="text-dim" style="font-size:11px">${p.app_version || '—'}</td>
+            <td>${role}</td>
+          </tr>`;
+        }).join('');
+      }
+    }
+  } catch(e) {
+    const selfEl = document.getElementById('cluster-self');
+    if (selfEl) selfEl.innerHTML = '<p class="text-dim text-sm" style="color:#dc3545">Failed to load cluster status: ' + (e.message || e) + '</p>';
+  }
+}
+
+function startClusterPolling() {
+  loadClusterStatus();
+  if (_clusterPollHandle) clearInterval(_clusterPollHandle);
+  _clusterPollHandle = setInterval(loadClusterStatus, 5000);
+}
+
+function stopClusterPolling() {
+  if (_clusterPollHandle) {
+    clearInterval(_clusterPollHandle);
+    _clusterPollHandle = null;
+  }
+}
+
+async function saveClusterSettings(form) {
+  const fd = new FormData(form);
+  const payload = {
+    cluster_heartbeat_enabled:      fd.get('cluster_heartbeat_enabled') ? '1' : '0',
+    cluster_heartbeat_interval_sec: fd.get('cluster_heartbeat_interval_sec') || '10',
+    cluster_peer_timeout_sec:       fd.get('cluster_peer_timeout_sec') || '30',
+    cluster_force_leader:           fd.get('cluster_force_leader') || 'auto',
+  };
+  const msg = document.getElementById('cluster-settings-msg');
+  try {
+    const resp = await fetch('/settings/cluster', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify(payload),
+    });
+    const d = await resp.json();
+    if (msg) {
+      msg.style.display = '';
+      msg.textContent = d.success ? '✓ Cluster settings saved.' : '✗ Failed to save settings.';
+      msg.style.color = d.success ? '#1a8754' : '#dc3545';
+    }
+    setTimeout(loadClusterStatus, 500);
+  } catch(e) {
+    if (msg) {
+      msg.style.display = '';
+      msg.textContent = '✗ ' + (e.message || e);
+      msg.style.color = '#dc3545';
+    }
+  }
+}
+
 /* ── File Manager ───────────────────────────────────────────────── */
 function _fmtBytes(b) {
   if (b > 1048576) return (b/1048576).toFixed(1) + ' MB';
@@ -2329,7 +2521,7 @@ async function adminDeleteFile(deleteUrl, btn) {
   loadShowOptions();
   // Activate tab from URL hash or server-side default
   const hash = location.hash.replace('#','');
-  const validTabs = ['contacts','users','groups','fields','arts-groups','positions','technicians','system','syslog','backups','account','files','godmode','database','ai','email','dashboards','messages','update'];
+  const validTabs = ['contacts','users','groups','fields','arts-groups','positions','technicians','system','syslog','backups','account','files','godmode','database','ai','cluster','email','dashboards','messages','update'];
   const defaultTab = {% if user.role == 'admin' or is_content_admin %}'contacts'{% else %}'users'{% endif %};
   switchSettingsTab(validTabs.includes(hash) ? hash : {% if active_tab %}'{{ active_tab }}'{% else %}defaultTab{% endif %});
 })();
@@ -3321,7 +3513,7 @@ async function pollUpdateStatus() {
 }
 
 /* ── System sub-tab routing ─────────────────────────────────────── */
-const _SYSTEM_SUBS = ['messages','update','syslog','backups','files','database','ai','godmode'];
+const _SYSTEM_SUBS = ['messages','update','syslog','backups','files','database','ai','cluster','godmode'];
 let _curSystemSub = 'messages';
 
 function switchSystemTab(name) {
@@ -3341,6 +3533,7 @@ function switchSystemTab(name) {
   if (name === 'update')   detectService();
   if (name === 'backups')  loadBackupStatus();
   if (name === 'files')    loadFileManager();
+  if (name === 'cluster')  startClusterPolling(); else stopClusterPolling();
   if (name === 'godmode')  loadGodMode();
 }
 
