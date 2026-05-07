@@ -164,6 +164,32 @@
   .oh-time-input:focus { outline: none; border-color: var(--accent); }
   .oh-scheduled-row { background: rgba(72, 187, 120, 0.08); }
 
+  /* ── Compact stacked cells (Lunch 1/2 share a column, Tech req+sched share) ── */
+  .oh-stack-cell { padding: 3px 4px !important; }
+  .oh-stack-cell > input + input { margin-top: 3px; }
+  .oh-stack-cell .oh-stack-row {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; line-height: 1.2;
+  }
+  .oh-stack-cell .oh-stack-row + .oh-stack-row { margin-top: 3px; }
+  .oh-stack-cell .oh-stack-tag {
+    flex: 0 0 38px;
+    font-size: 9px; font-weight: 700; letter-spacing: .06em;
+    color: var(--text-muted); text-transform: uppercase;
+  }
+  .oh-stack-cell .oh-stack-row .field-input { flex: 1; }
+  .oh-stack-cell .oh-tech-readout {
+    flex: 1; color: var(--text-dim);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  /* Tighten the spacing between IN / lunches / OUT */
+  table.data-table td.oh-stack-cell,
+  table.data-table td:has(> input.oh-time-input) {
+    padding-left: 6px; padding-right: 6px;
+  }
+  /* Slightly slimmer time inputs in the row */
+  .oh-stack-cell .oh-time-input { width: 70px; }
+
   /* ── Project summary section ───────────────────────────────────── */
   .oh-summary { margin-bottom: 16px; }
   .oh-summary-toggle {
@@ -668,20 +694,29 @@
                 ${CAN_EDIT ? '' : 'disabled'}></select>
       </td>
       <td><input type="text" class="oh-time-input oh-in"     value="${escapeHtml(req.in_time||'')}"     placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
-      <td><input type="text" class="oh-time-input oh-bstart" value="${escapeHtml(req.break_start||'')}" placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
-      <td><input type="text" class="oh-time-input oh-bend"   value="${escapeHtml(req.break_end||'')}"   placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
-      <td><input type="text" class="oh-time-input oh-b2start" value="${escapeHtml(req.break2_start||'')}" placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
-      <td><input type="text" class="oh-time-input oh-b2end"   value="${escapeHtml(req.break2_end||'')}"   placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
+      <td class="oh-stack-cell">
+        <input type="text" class="oh-time-input oh-bstart"  value="${escapeHtml(req.break_start||'')}"  placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+        <input type="text" class="oh-time-input oh-b2start" value="${escapeHtml(req.break2_start||'')}" placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+      </td>
+      <td class="oh-stack-cell">
+        <input type="text" class="oh-time-input oh-bend"    value="${escapeHtml(req.break_end||'')}"    placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+        <input type="text" class="oh-time-input oh-b2end"   value="${escapeHtml(req.break2_end||'')}"   placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}>
+      </td>
       <td><input type="text" class="oh-time-input oh-out"    value="${escapeHtml(req.out_time||'')}"    placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
       <td class="oh-hours-cell" style="text-align:right;font-family:var(--font-mono,monospace);font-size:11px;color:var(--text-dim)">
         ${fmtHours(req.hours_planned || 0)}
       </td>
-      <td>
-        <select class="field-input field-input-sm oh-req-name"
-                ${CAN_EDIT ? '' : 'disabled'}></select>
+      <td class="oh-stack-cell oh-tech-cell">
+        <div class="oh-stack-row">
+          <span class="oh-stack-tag">REQ</span>
+          <select class="field-input field-input-sm oh-req-name"
+                  ${CAN_EDIT ? '' : 'disabled'}></select>
+        </div>
+        <div class="oh-stack-row oh-scheduled-tech" title="Set by the labor scheduler">
+          <span class="oh-stack-tag">SCHED</span>
+          <span class="oh-tech-readout">${escapeHtml(req.scheduled_crew_name || '—')}</span>
+        </div>
       </td>
-      <td class="oh-scheduled-tech" style="font-size:12px;color:var(--text-dim)"
-          title="Set by the labor scheduler">${escapeHtml(req.scheduled_crew_name || '—')}</td>
       ${CAN_EDIT ? `
       <td style="text-align:center">
         <button class="btn btn-xs btn-danger-ghost" title="Remove line"
@@ -880,14 +915,11 @@
               <th style="width:36px;text-align:center" title="Set by the labor scheduler">✓</th>
               <th style="min-width:160px">POSITION</th>
               <th style="width:72px">IN</th>
-              <th style="width:72px;white-space:nowrap">LUNCH 1 IN</th>
-              <th style="width:72px;white-space:nowrap">LUNCH 1 OUT</th>
-              <th style="width:72px;white-space:nowrap">LUNCH 2 IN</th>
-              <th style="width:72px;white-space:nowrap">LUNCH 2 OUT</th>
+              <th style="width:72px;white-space:nowrap">LUNCH START</th>
+              <th style="width:72px;white-space:nowrap">LUNCH END</th>
               <th style="width:72px">OUT</th>
               <th style="width:60px;text-align:right">HOURS</th>
-              <th style="min-width:160px">REQUESTED</th>
-              <th style="min-width:160px">SCHEDULED</th>
+              <th style="min-width:170px">TECH</th>
               ${CAN_EDIT ? '<th style="width:40px"></th>' : ''}
             </tr>
           </thead>
