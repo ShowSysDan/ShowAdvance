@@ -1430,6 +1430,26 @@ def migrate_db():
         );
 
         CREATE INDEX IF NOT EXISTS idx_email_send_log_show ON email_send_log(show_id, pdf_type, sent_at);
+
+        CREATE TABLE IF NOT EXISTS email_send_errors (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            sent_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            recipient     TEXT DEFAULT '',
+            subject       TEXT DEFAULT '',
+            error_msg     TEXT DEFAULT '',
+            smtp_code     TEXT DEFAULT '',
+            pdf_type      TEXT DEFAULT '',
+            show_id       INTEGER REFERENCES shows(id) ON DELETE SET NULL,
+            triggered_by  TEXT DEFAULT '',
+            resolved      INTEGER DEFAULT 0,
+            resolved_at   TIMESTAMP,
+            resolved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_email_send_errors_unresolved
+            ON email_send_errors(resolved, sent_at);
+        CREATE INDEX IF NOT EXISTS idx_email_send_errors_recipient
+            ON email_send_errors(recipient);
     """)
 
     # Asset manager tables (safe to rerun)
@@ -2250,6 +2270,28 @@ CREATE TABLE IF NOT EXISTS email_send_log (
 
 CREATE INDEX IF NOT EXISTS idx_email_send_log_show ON email_send_log(show_id, pdf_type, sent_at);
 
+-- Email send failures: one row per address that failed to deliver, so the
+-- admin can review bounces, invalid addresses, transient SMTP errors, etc.
+CREATE TABLE IF NOT EXISTS email_send_errors (
+    id            SERIAL PRIMARY KEY,
+    sent_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    recipient     TEXT DEFAULT '',
+    subject       TEXT DEFAULT '',
+    error_msg     TEXT DEFAULT '',
+    smtp_code     TEXT DEFAULT '',
+    pdf_type      TEXT DEFAULT '',
+    show_id       INTEGER REFERENCES shows(id) ON DELETE SET NULL,
+    triggered_by  TEXT DEFAULT '',
+    resolved      INTEGER DEFAULT 0,
+    resolved_at   TIMESTAMP,
+    resolved_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_send_errors_unresolved
+    ON email_send_errors(resolved, sent_at);
+CREATE INDEX IF NOT EXISTS idx_email_send_errors_recipient
+    ON email_send_errors(recipient);
+
 -- ── Asset Manager ─────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS warehouse_locations (
@@ -2828,7 +2870,8 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
         'show_performances', 'show_group_access', 'form_history',
         'show_comments', 'show_attachments', 'advance_reads', 'export_log',
         'schedule_template_rows', 'active_sessions', 'labor_requests',
-        'crew_members', 'asset_items', 'asset_dashboards', 'email_send_log',
+        'crew_members', 'asset_items', 'asset_dashboards',
+        'email_send_log', 'email_send_errors',
         # ── Depend on asset_items / show_comments / crew_members ──────────────
         'asset_logs', 'asset_maintenance', 'show_assets', 'show_external_rentals',
         'comment_versions', 'crew_qualifications', 'audit_log',
@@ -2979,7 +3022,7 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
         # Added in v2.0.0+
         'position_categories', 'job_positions', 'labor_requests',
         'crew_members', 'crew_qualifications', 'audit_log', 'comment_versions',
-        'email_send_log', 'warehouse_locations',
+        'email_send_log', 'email_send_errors', 'warehouse_locations',
         'asset_categories', 'asset_types', 'asset_items', 'asset_maintenance',
         'show_assets', 'show_external_rentals',
         'user_pending_registration', 'password_reset_tokens',
