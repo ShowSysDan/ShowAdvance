@@ -214,6 +214,10 @@
                  onchange="window.__scheduler.onTimeChange(this)"></td>
       <td><input type="text" class="sched-time-input sched-bend"  value="${escapeHtml(lr.break_end||'')}"  placeholder="HH:MM" maxlength="5"
                  onchange="window.__scheduler.onTimeChange(this)"></td>
+      <td><input type="text" class="sched-time-input sched-b2start" value="${escapeHtml(lr.break2_start||'')}" placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)"></td>
+      <td><input type="text" class="sched-time-input sched-b2end"  value="${escapeHtml(lr.break2_end||'')}"  placeholder="HH:MM" maxlength="5"
+                 onchange="window.__scheduler.onTimeChange(this)"></td>
       <td><input type="text" class="sched-time-input sched-out"  value="${escapeHtml(lr.out_time||'')}"   placeholder="HH:MM" maxlength="5"
                  onchange="window.__scheduler.onTimeChange(this)"></td>
       <td style="font-size:12px;color:var(--text-dim)">${escapeHtml(lr.requested_name || '—')}</td>
@@ -278,10 +282,12 @@
             <th style="width:52px;text-align:center">SCHED ✓</th>
             <th style="width:110px">DATE</th>
             <th style="min-width:160px">POSITION</th>
-            <th style="width:80px">IN</th>
-            <th style="width:80px">LUNCH START</th>
-            <th style="width:80px">LUNCH END</th>
-            <th style="width:80px">OUT</th>
+            <th style="width:72px">IN</th>
+            <th style="width:72px;white-space:nowrap">LUNCH 1 START</th>
+            <th style="width:72px;white-space:nowrap">LUNCH 1 END</th>
+            <th style="width:72px;white-space:nowrap">LUNCH 2 START</th>
+            <th style="width:72px;white-space:nowrap">LUNCH 2 END</th>
+            <th style="width:72px">OUT</th>
             <th style="width:140px">REQUESTED</th>
             <th>SCHEDULED TECH</th>
             <th style="width:40px"></th>
@@ -341,10 +347,12 @@
             <th style="width:52px;text-align:center">SCHED ✓</th>
             <th style="width:110px">DATE</th>
             <th style="min-width:160px">POSITION</th>
-            <th style="width:80px">IN</th>
-            <th style="width:80px">LUNCH START</th>
-            <th style="width:80px">LUNCH END</th>
-            <th style="width:80px">OUT</th>
+            <th style="width:72px">IN</th>
+            <th style="width:72px;white-space:nowrap">LUNCH 1 START</th>
+            <th style="width:72px;white-space:nowrap">LUNCH 1 END</th>
+            <th style="width:72px;white-space:nowrap">LUNCH 2 START</th>
+            <th style="width:72px;white-space:nowrap">LUNCH 2 END</th>
+            <th style="width:72px">OUT</th>
             <th style="width:140px">REQUESTED</th>
             <th>SCHEDULED TECH</th>
             <th style="width:40px"></th>
@@ -456,10 +464,12 @@
   async function onTimeChange(input) {
     const tr = input.closest('tr');
     const payload = {
-      in_time:     tr.querySelector('.sched-in').value.trim(),
-      break_start: tr.querySelector('.sched-bstart').value.trim(),
-      break_end:   tr.querySelector('.sched-bend').value.trim(),
-      out_time:    tr.querySelector('.sched-out').value.trim(),
+      in_time:      tr.querySelector('.sched-in').value.trim(),
+      break_start:  tr.querySelector('.sched-bstart').value.trim(),
+      break_end:    tr.querySelector('.sched-bend').value.trim(),
+      break2_start: tr.querySelector('.sched-b2start')?.value.trim() || '',
+      break2_end:   tr.querySelector('.sched-b2end')?.value.trim()   || '',
+      out_time:     tr.querySelector('.sched-out').value.trim(),
     };
     await putSchedulerUpdate(tr, payload);
   }
@@ -517,15 +527,19 @@
       const isScheduled = tr.querySelector('.sched-check')?.checked ? true : false;
       const crewId = tr.querySelector('.sched-tech')?.value || null;
       const positionId = parseInt(tr.querySelector('.sched-pos')?.value) || null;
-      const in_time    = tr.querySelector('.sched-in')?.value.trim()     || '';
-      const break_start= tr.querySelector('.sched-bstart')?.value.trim() || '';
-      const break_end  = tr.querySelector('.sched-bend')?.value.trim()   || '';
-      const out_time   = tr.querySelector('.sched-out')?.value.trim()    || '';
+      const in_time     = tr.querySelector('.sched-in')?.value.trim()      || '';
+      const break_start = tr.querySelector('.sched-bstart')?.value.trim()  || '';
+      const break_end   = tr.querySelector('.sched-bend')?.value.trim()    || '';
+      const break2_start= tr.querySelector('.sched-b2start')?.value.trim() || '';
+      const break2_end  = tr.querySelector('.sched-b2end')?.value.trim()   || '';
+      const out_time    = tr.querySelector('.sched-out')?.value.trim()     || '';
       const r = await fetch(`${_endpointFor(tr)}/${rid}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ is_scheduled: isScheduled, scheduled_crew_member_id: crewId,
-                               position_id: positionId, in_time, break_start, break_end, out_time }),
+                               position_id: positionId, in_time,
+                               break_start, break_end, break2_start, break2_end,
+                               out_time }),
       });
       if (r.ok) ok++; else fail++;
     }
