@@ -1333,6 +1333,7 @@ def migrate_db():
         CREATE TABLE IF NOT EXISTS overhead_labor_requests (
             id                          INTEGER PRIMARY KEY AUTOINCREMENT,
             group_id                    INTEGER NOT NULL REFERENCES overhead_labor_groups(id) ON DELETE CASCADE,
+            template_id                 INTEGER,
             work_date                   DATE NOT NULL,
             position_id                 INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
             in_time                     TEXT DEFAULT '',
@@ -2148,6 +2149,11 @@ CREATE TABLE IF NOT EXISTS overhead_labor_groups (
 CREATE TABLE IF NOT EXISTS overhead_labor_requests (
     id                          SERIAL PRIMARY KEY,
     group_id                    INTEGER NOT NULL REFERENCES overhead_labor_groups(id) ON DELETE CASCADE,
+    -- Provenance: which recurring template generated this row (NULL = manual).
+    -- Plain INTEGER (not FK) because the templates table is defined later in
+    -- this script and a forward reference fails on PostgreSQL. A stale id is
+    -- harmless — we only use it to scope template-driven prunes / re-syncs.
+    template_id                 INTEGER,
     work_date                   DATE NOT NULL,
     position_id                 INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
     in_time                     TEXT DEFAULT '',
@@ -2732,6 +2738,7 @@ def migrate_db_postgres():
             # ── Overhead & Project Crew ──────────────────────────────────────
             f'ALTER TABLE "{app_schema}".overhead_labor_groups ADD COLUMN IF NOT EXISTS project_id INTEGER',
             f'ALTER TABLE "{app_schema}".overhead_labor_groups ADD COLUMN IF NOT EXISTS created_by INTEGER',
+            f'ALTER TABLE "{app_schema}".overhead_labor_requests ADD COLUMN IF NOT EXISTS template_id INTEGER',
             f'ALTER TABLE "{app_schema}".overhead_labor_requests ADD COLUMN IF NOT EXISTS pay_rate_snapshot REAL DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".overhead_labor_requests ADD COLUMN IF NOT EXISTS pay_rate_level_id_snapshot INTEGER DEFAULT NULL',
             f"ALTER TABLE \"{app_schema}\".overhead_labor_requests ADD COLUMN IF NOT EXISTS actual_in_time TEXT DEFAULT ''",
