@@ -1328,6 +1328,8 @@ async function openSchedFieldModal(id) {
         modal.querySelector('[name="field_type"]').value      = field.field_type || 'text';
         modal.querySelector('[name="width_hint"]').value      = field.width_hint || 'half';
         if (advSel) advSel.value = field.advance_field_key || '';
+        const sicEl = modal.querySelector('[name="show_in_contacts"]');
+        if (sicEl) sicEl.checked = !!field.show_in_contacts;
       }
     } catch(_) {}
   }
@@ -1349,6 +1351,7 @@ async function saveSchedField() {
     field_type:        modal.querySelector('[name="field_type"]').value,
     width_hint:        modal.querySelector('[name="width_hint"]').value,
     advance_field_key: modal.querySelector('[name="advance_field_key"]').value.trim(),
+    show_in_contacts:  !!modal.querySelector('[name="show_in_contacts"]')?.checked,
   };
   if (!data.label) { alert('Label is required.'); return; }
   if (!_editSchedFieldId) {

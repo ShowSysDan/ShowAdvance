@@ -413,6 +413,7 @@
               <th style="width:90px">TYPE</th>
               <th style="width:90px">WIDTH</th>
               <th>FROM ADVANCE FIELD</th>
+              <th style="width:90px">SECTION</th>
               <th style="width:80px">ACTIONS</th>
             </tr>
           </thead>
@@ -424,6 +425,7 @@
               <td><span class="field-type-badge">{{ f.field_type }}</span></td>
               <td class="text-dim" style="font-size:11px">{{ f.width_hint }}</td>
               <td class="text-dim" style="font-size:11px;font-family:var(--font-mono)">{{ f.advance_field_key or '—' }}</td>
+              <td class="text-dim" style="font-size:11px">{% if f.show_in_contacts %}Contacts{% else %}Venue/Tech{% endif %}</td>
               <td>
                 <div class="action-btns">
                   <button class="btn btn-xs btn-ghost" onclick="openSchedFieldModal({{ f.id }})">Edit</button>
@@ -1932,6 +1934,15 @@
         </select>
         <p class="field-hint" style="margin-top:4px;font-size:11px;color:var(--text-muted)">
           If linked, this field will be read-only and auto-populated from the advance form.
+        </p>
+      </div>
+      <div class="field-group">
+        <label class="checkbox-label">
+          <input type="checkbox" name="show_in_contacts">
+          Render in the Show Contacts section (instead of Venue &amp; Tech Info)
+        </label>
+        <p class="field-hint" style="margin-top:4px;font-size:11px;color:var(--text-muted)">
+          When checked, this field appears alongside the dpc Contacts list on the schedule and in the schedule PDF.
         </p>
       </div>
     </div>
