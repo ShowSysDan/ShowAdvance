@@ -94,8 +94,11 @@ Version history:
    - [SQLite (Default)](#sqlite-default)
    - [PostgreSQL (Dual-Schema)](#postgresql-dual-schema)
    - [Migrating from SQLite to PostgreSQL](#migrating-from-sqlite-to-postgresql)
-7. [Security](#security)
-8. [Troubleshooting](#troubleshooting)
+7. [Multi-Server Deployment](#multi-server-deployment)
+   - [Cluster Heartbeat & Leader Election](#cluster-heartbeat--leader-election)
+   - [Adding a New Scheduled Task](#adding-a-new-scheduled-task)
+8. [Security](#security)
+9. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -717,6 +720,84 @@ If the app is already set to `db_type=postgres`, go to **Settings → Database**
 | `python3 init_db.py --migrate` | Run schema migrations on existing SQLite DB |
 | `python3 init_db.py --init-postgres` | Create PostgreSQL schemas + tables from `db_config.ini` |
 | `python3 init_db.py --migrate-to-postgres` | Copy all SQLite data → PostgreSQL |
+
+---
+
+## Multi-Server Deployment
+
+321Theater can run on multiple servers behind a load balancer or VRRP/keepalived virtual IP. Both instances connect to the same shared PostgreSQL database, which already handles all persistent state. Sessions are signed cookies (no sticky-sessions required) and file uploads go to S3/SeaweedFS, so most of the app needs zero changes to run clustered.
+
+The one thing that **does** need coordination is **scheduled tasks** — without it, both servers would run the hourly job at the same time and recipients would get duplicate emails. 321Theater solves this with **cluster heartbeat + leader election** stored in PostgreSQL.
+
+### Cluster Heartbeat & Leader Election
+
+**How it works:**
+
+1. Each running app instance (each Gunicorn worker process counts as one instance) generates a UUID at startup and writes a row to the `cluster_instances` table every ~10 seconds with `last_seen=NOW()`.
+2. Any code that needs to know "am I the leader?" runs a query: `SELECT … FROM cluster_instances WHERE last_seen > NOW() - INTERVAL '30 seconds' ORDER BY ip, instance_id` and the row at the top of the result is the leader.
+3. Lowest IPv4 address wins. Ties (e.g. multiple Gunicorn workers on the same server) are broken by the lowest `instance_id` UUID.
+4. If the leader crashes, its `last_seen` stops updating. Within 30 seconds the row is filtered out by the `WHERE` clause and the next-lowest IP becomes leader on the very next read — **no failover script, no coordination message**, just the natural result of every instance reading the same table.
+5. On a graceful shutdown (SIGTERM), the instance `DELETE`s its own row via `atexit`, so failover is instant rather than waiting 30 seconds.
+
+**View / configure cluster status:** `Settings → System → Cluster` (admin only). Shows every detected instance, its uptime, and which one is currently in charge. From here you can:
+- Toggle the heartbeat on or off (off = single-server mode, this instance is sole leader)
+- Tune the heartbeat interval and peer-timeout window
+- Force this instance to be `always` or `never` leader (operational escape hatch — leave on `auto` in normal operation)
+
+**What runs only on the leader:**
+- `run_scheduled_pdf_emails` (hourly tick that emails the advance / production schedule PDFs)
+
+**What runs on every instance:**
+- `run_hourly_backup` and `run_daily_backup` — each server keeps its own `/backups/` directory so a failing primary doesn't take its backup history with it. The duplication is intentional.
+
+**Single-server installs are unaffected.** If only one instance is alive, that instance is its own leader by definition and scheduled tasks fire as before. If the heartbeat is disabled entirely (`cluster_heartbeat_enabled = 0`), `am_i_leader()` returns `True` unconditionally — same behaviour as before this feature existed.
+
+**Defence-in-depth:** Even if leader election fails (e.g. a network partition causes split-brain), the existing `email_send_log` per-show/per-day deduplication in `run_scheduled_pdf_emails` provides a second line of defence against duplicate sends.
+
+### Adding a New Scheduled Task
+
+If you add a new APScheduler job, decide whether it should run **once cluster-wide** (most jobs) or **on every instance** (rare; usually only for instance-local writes like local file backups).
+
+**Step 1 — Register the job** in `start_scheduler()` near the bottom of `app.py`:
+
+```python
+scheduler.add_job(my_periodic_task, 'interval', hours=1, id='my_periodic_task')
+```
+
+**Step 2 — Decide on leader-gating:**
+
+| What the task does | Leader-gate? |
+|---|---|
+| Sends email / SMS / webhook / external API call | **Yes** |
+| Modifies shared DB rows that should change exactly once per tick | **Yes** |
+| Writes only to instance-local state (logs, on-disk backups) | No |
+
+**Step 3 — If leader-gated, make the first line of the task body:**
+
+```python
+def my_periodic_task():
+    if not am_i_leader():
+        app.logger.info('my_periodic_task skipped — not cluster leader')
+        return
+    # … real work here …
+```
+
+That is the only change required. With the default 4 Gunicorn workers per server and 2 servers, the job will fire 8x per tick at the APScheduler level, but only the single global leader executes it; the other 7 return immediately. No locks, no Redis, no Celery.
+
+The leader check is cached for 3 seconds per process, so calling it at the start of a job that fires every minute is essentially free.
+
+**Existing examples to copy:**
+- `run_scheduled_pdf_emails` (`app.py`) — leader-gated; sends external email
+- `run_hourly_backup` (`app.py`) — NOT gated; writes to local disk on every server
+
+### Load-Balancer / VRRP Setup Notes
+
+The app's HTTP layer is stateless beyond the signed-cookie session, so any standard load balancer works (HAProxy, nginx, a router-held VIP via keepalived/VRRP, etc.). A few practical points:
+
+- **Same `SECRET_KEY` on every instance.** Otherwise sessions issued by one instance won't validate on the other. Copy the value from `.env` between machines.
+- **Same `db_config.ini`** so every instance points at the shared PostgreSQL.
+- **S3 / SeaweedFS for uploads** — when configured in `Settings → System → Files`, attachments and PDF exports land in shared storage. Without it, uploads fall back to database blobs, which is also safe (just slower).
+- **Backups remain per-instance.** Either accept the redundancy (each server keeps its own copy) or mount `/backups/` on shared NFS / send to S3.
 
 ---
 
