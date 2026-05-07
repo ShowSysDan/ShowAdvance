@@ -1029,13 +1029,20 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         'schedule': 'Production Schedule',
         'postnotes': 'Post-Show Report',
     }).get(pdf_type, 'Production Schedule')
-    subject_parts = ['3·2·1→Theater', type_label, show_name]
+    # PostgreSQL returns DATE columns as datetime.date — coerce every part to
+    # string before join() so we never hit
+    # "sequence item N: expected str instance, datetime.date found".
+    def _s(v):
+        if v is None: return ''
+        if isinstance(v, (datetime, date)): return v.isoformat()[:10]
+        return str(v)
+    subject_parts = ['3·2·1→Theater', type_label, _s(show_name)]
     if show_date:
-        subject_parts.append(show_date)
+        subject_parts.append(_s(show_date))
     if venue:
-        subject_parts.append(venue)
+        subject_parts.append(_s(venue))
     if pm_name:
-        subject_parts.append(f'PM: {pm_name}')
+        subject_parts.append(f'PM: {_s(pm_name)}')
     subject = ' | '.join(subject_parts)
 
     # Email body
