@@ -26,6 +26,7 @@ from io import BytesIO
 import db_adapter
 from db_adapter import DBIntegrityError
 import s3_storage
+import pdf_layouts
 
 from flask import (Flask, render_template, request, redirect, url_for,
                    flash, session, jsonify, make_response, abort, send_file)
@@ -3439,6 +3440,8 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
         if s.get('asset_category_id')
     }
 
+    layout = pdf_layouts.PdfLayout('advance', get_app_setting, form_sections=form_sections)
+
     try:
         html = render_template('pdf/advance_pdf.html',
                                show=show, advance_data=advance_data,
@@ -3447,6 +3450,7 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
                                assets_by_section=assets_by_section,
                                logo_data=logo_data,
                                version=new_v,
+                               layout=layout,
                                export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
     except Exception as e:
         app.logger.error(f'advance_pdf template error for show {show_id}: {e}')
@@ -3457,6 +3461,7 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
                                assets_by_section={},
                                logo_data=logo_data,
                                version=new_v,
+                               layout=layout,
                                export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
 
     # Generate PDF bytes (S3 push is handled by the caller)
@@ -3745,6 +3750,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
                            wifi_qr_b64=wifi_qr_b64,
                            crew_call_times=crew_call_times,
                            version=new_v,
+                           layout=pdf_layouts.PdfLayout('schedule', get_app_setting),
                            export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
 
     # Generate PDF bytes (S3 push is handled by the caller)
@@ -4008,6 +4014,7 @@ def _build_postnotes_pdf(show_id, exported_by_id=None, base_url=None):
     db.commit()
     db.close()
 
+    layout = pdf_layouts.PdfLayout('postnotes', get_app_setting)
     html = render_template('pdf/postnotes_pdf.html',
                            show=show,
                            notes_data=notes_data,
@@ -4015,6 +4022,7 @@ def _build_postnotes_pdf(show_id, exported_by_id=None, base_url=None):
                            schedule_rows=sched_rows,
                            logo_data=logo_data,
                            version=new_v,
+                           layout=layout,
                            export_date=datetime.now().strftime('%B %d, %Y at %I:%M %p'))
     try:
         from weasyprint import HTML as WP_HTML
@@ -5171,6 +5179,183 @@ def reorder_form_sections():
         db.execute('UPDATE form_sections SET sort_order=? WHERE id=?', (i * 10, sid))
     db.commit(); db.close()
     return jsonify({'success': True})
+
+
+# ─── PDF Layout Designer (admin) ──────────────────────────────────────────────
+#
+# Admin-only editor that lets content admins reorder, hide, relabel, and font-
+# size sections (and per-section fields) for the 5 PDF exports. Layouts are
+# stored as JSON in app_settings under `pdf_layout_<type>`. See pdf_layouts.py
+# for the catalog (what's configurable) and PdfLayout (template-side helper).
+# Phase rollout: only `advance` is enabled in v1; other types return 404.
+
+PDF_DESIGNER_ENABLED_TYPES = {'advance', 'postnotes', 'asset_invoice', 'post_show_invoice', 'schedule'}
+
+
+def _resolve_advance_form_sections():
+    """Helper: returns form_sections (or [] on failure) for advance catalog."""
+    try:
+        return get_form_fields_for_template()
+    except Exception as e:
+        app.logger.warning(f'pdf_designer: form_sections fetch failed: {e}')
+        return []
+
+
+def _pdf_designer_catalog(pdf_type):
+    if pdf_type == 'advance':
+        return pdf_layouts.get_catalog('advance', form_sections=_resolve_advance_form_sections())
+    return pdf_layouts.get_catalog(pdf_type)
+
+
+@app.route('/admin/pdf-designer')
+@content_admin_required
+def pdf_designer_page():
+    db = get_db()
+    recent_shows = db.execute(
+        "SELECT id, name, show_date FROM shows "
+        "WHERE status != 'archived' "
+        "ORDER BY show_date DESC, id DESC LIMIT 10"
+    ).fetchall()
+    db.close()
+    return render_template('pdf_designer.html',
+                           pdf_types=list(pdf_layouts.PDF_TYPES),
+                           enabled_types=sorted(PDF_DESIGNER_ENABLED_TYPES),
+                           recent_shows=[dict(r) for r in recent_shows],
+                           font_size_choices=list(pdf_layouts.FONT_SIZE_CHOICES),
+                           user=get_current_user())
+
+
+@app.route('/admin/pdf-designer/<pdf_type>/catalog.json')
+@content_admin_required
+def pdf_designer_catalog(pdf_type):
+    if pdf_type not in pdf_layouts.PDF_TYPES:
+        abort(404)
+    if pdf_type not in PDF_DESIGNER_ENABLED_TYPES:
+        return jsonify({'error': 'pdf type not enabled yet'}), 404
+    return jsonify({'pdf_type': pdf_type, 'catalog': _pdf_designer_catalog(pdf_type)})
+
+
+@app.route('/admin/pdf-designer/<pdf_type>/layout.json', methods=['GET'])
+@content_admin_required
+def pdf_designer_layout_get(pdf_type):
+    if pdf_type not in pdf_layouts.PDF_TYPES:
+        abort(404)
+    if pdf_type not in PDF_DESIGNER_ENABLED_TYPES:
+        return jsonify({'error': 'pdf type not enabled yet'}), 404
+    catalog = _pdf_designer_catalog(pdf_type)
+    raw = get_app_setting(f'pdf_layout_{pdf_type}', '')
+    layout = pdf_layouts._parse_or_default(raw, catalog, pdf_type)
+    return jsonify({'pdf_type': pdf_type, 'layout': layout, 'catalog': catalog})
+
+
+@app.route('/admin/pdf-designer/<pdf_type>/layout.json', methods=['POST'])
+@content_admin_required
+def pdf_designer_layout_save(pdf_type):
+    if pdf_type not in pdf_layouts.PDF_TYPES:
+        abort(404)
+    if pdf_type not in PDF_DESIGNER_ENABLED_TYPES:
+        return jsonify({'error': 'pdf type not enabled yet'}), 404
+    payload = request.get_json(force=True, silent=True)
+    if payload is None:
+        return jsonify({'error': 'invalid JSON body'}), 400
+    catalog = _pdf_designer_catalog(pdf_type)
+    cleaned, err = pdf_layouts.validate_payload(payload, catalog, pdf_type)
+    if err:
+        return jsonify({'error': err}), 400
+    db = get_db()
+    key = f'pdf_layout_{pdf_type}'
+    before_raw = get_app_setting(key, '')
+    try:
+        before_obj = json.loads(before_raw) if before_raw else None
+    except Exception:
+        before_obj = None
+    new_value = json.dumps(cleaned)
+    db.execute('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
+               (key, new_value))
+    log_audit_change(db, 'LAYOUT_EDIT', 'pdf_layout', None,
+                     detail=pdf_type, before=before_obj, after=cleaned)
+    db.commit(); db.close()
+    return jsonify({'success': True, 'layout': cleaned})
+
+
+@app.route('/admin/pdf-designer/<pdf_type>/reset', methods=['POST'])
+@content_admin_required
+def pdf_designer_layout_reset(pdf_type):
+    if pdf_type not in pdf_layouts.PDF_TYPES:
+        abort(404)
+    if pdf_type not in PDF_DESIGNER_ENABLED_TYPES:
+        return jsonify({'error': 'pdf type not enabled yet'}), 404
+    db = get_db()
+    key = f'pdf_layout_{pdf_type}'
+    before_raw = get_app_setting(key, '')
+    try:
+        before_obj = json.loads(before_raw) if before_raw else None
+    except Exception:
+        before_obj = None
+    db.execute('DELETE FROM app_settings WHERE key=?', (key,))
+    log_audit_change(db, 'LAYOUT_RESET', 'pdf_layout', None,
+                     detail=pdf_type, before=before_obj, after=None)
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/admin/pdf-designer/<pdf_type>/preview.pdf')
+@content_admin_required
+def pdf_designer_preview(pdf_type):
+    if pdf_type not in pdf_layouts.PDF_TYPES:
+        abort(404)
+    if pdf_type not in PDF_DESIGNER_ENABLED_TYPES:
+        return ('PDF type not enabled yet', 404)
+    try:
+        show_id = int(request.args.get('show_id', '0'))
+    except (TypeError, ValueError):
+        show_id = 0
+    if show_id <= 0:
+        return ('show_id query param required', 400)
+
+    db = get_db()
+    show = db.execute('SELECT id FROM shows WHERE id=?', (show_id,)).fetchone()
+    db.close()
+    if not show:
+        return ('show not found', 404)
+
+    # Tuple-returning builders (advance, schedule, postnotes): unpack 5-tuple.
+    tuple_builders = {
+        'advance': _build_advance_pdf,
+        'postnotes': _build_postnotes_pdf,
+        'schedule': _build_schedule_pdf,
+    }
+    # Response-returning route handlers (invoices): call directly, extract .data.
+    response_builders = {
+        'asset_invoice': show_asset_invoice,
+        'post_show_invoice': show_post_invoice,
+    }
+
+    pdf_bytes = None
+    try:
+        if pdf_type in tuple_builders:
+            _html, _ver, _show, pdf_bytes, _log_id = tuple_builders[pdf_type](show_id)
+        elif pdf_type in response_builders:
+            sub_resp = response_builders[pdf_type](show_id)
+            if hasattr(sub_resp, 'data'):
+                pdf_bytes = sub_resp.data
+            elif isinstance(sub_resp, (bytes, bytearray)):
+                pdf_bytes = bytes(sub_resp)
+            else:
+                return ('builder returned unsupported type', 500)
+        else:
+            return ('builder not wired', 404)
+    except Exception as e:
+        app.logger.error(f'pdf_designer preview {pdf_type} show={show_id}: {e}')
+        return (f'preview failed: {e}', 500)
+
+    if not pdf_bytes:
+        return ('empty PDF', 500)
+    resp = make_response(pdf_bytes)
+    resp.headers['Content-Type'] = 'application/pdf'
+    resp.headers['Content-Disposition'] = f'inline; filename="{pdf_type}_preview.pdf"'
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 @app.route('/api/form-fields')
@@ -10381,6 +10566,7 @@ def show_asset_invoice(show_id):
         external_subtotal=external_subtotal,
         grand_total=grand_total,
         performance_company=performance_company,
+        layout=pdf_layouts.PdfLayout('asset_invoice', get_app_setting),
         generated_date=date.today().isoformat(),
     )
 
@@ -10464,6 +10650,7 @@ def show_post_invoice(show_id):
         labor_total=labor_total,
         grand_total=grand_total,
         performance_company=performance_company,
+        layout=pdf_layouts.PdfLayout('post_show_invoice', get_app_setting),
         generated_date=date.today().isoformat(),
     )
 

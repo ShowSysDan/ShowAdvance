@@ -32,100 +32,113 @@
 </head>
 <body>
 
-<div class="header">
-  <div>
-    <div class="org-name">3·2·1→THEATER</div>
-    <div class="org-sub">Asset &amp; Rental Invoice</div>
+{% set _section_keys = ['header','show_block','asset_rentals','external_rentals','total_bar','footer'] %}
+{% for skey in layout.iter_sections(_section_keys) if layout.visible(skey) %}
+  {% if layout.page_break_before(skey) %}<div style="page-break-before: always"></div>{% endif %}
+
+  {% if skey == 'header' %}
+  <div class="header">
+    <div>
+      <div class="org-name">3·2·1→THEATER</div>
+      <div class="org-sub">{{ layout.label('header', 'Asset & Rental Invoice') }}</div>
+    </div>
+    <div class="doc-title">
+      <h1>Invoice</h1>
+      <div class="doc-date">Generated {{ generated_date }}</div>
+    </div>
   </div>
-  <div class="doc-title">
-    <h1>Invoice</h1>
-    <div class="doc-date">Generated {{ generated_date }}</div>
+
+  {% elif skey == 'show_block' %}
+  <div class="show-block" style="font-size: {{ layout.font_size('show_block', '11px') }}">
+    <div class="show-name">{{ show.name }}</div>
+    <div class="show-meta">
+      {% if show.show_date %}<span><strong>Date:</strong> {{ show.show_date }}</span>{% endif %}
+      {% if show.venue %}<span><strong>Venue:</strong> {{ show.venue }}</span>{% endif %}
+      {% if performance_company %}<span><strong>Company:</strong> {{ performance_company }}</span>{% endif %}
+    </div>
   </div>
-</div>
 
-<div class="show-block">
-  <div class="show-name">{{ show.name }}</div>
-  <div class="show-meta">
-    {% if show.show_date %}<span><strong>Date:</strong> {{ show.show_date }}</span>{% endif %}
-    {% if show.venue %}<span><strong>Venue:</strong> {{ show.venue }}</span>{% endif %}
-    {% if performance_company %}<span><strong>Company:</strong> {{ performance_company }}</span>{% endif %}
+  {% elif skey == 'asset_rentals' %}
+  {% if assets %}
+  <div class="section-title">{{ layout.label('asset_rentals', 'Asset Rentals') }}</div>
+  <table style="font-size: {{ layout.font_size('asset_rentals', '11px') }}">
+    <thead>
+      <tr>
+        <th>Category</th>
+        <th>Item</th>
+        <th class="num">Qty</th>
+        <th>Rental Period</th>
+        <th class="num">Unit Price</th>
+        <th class="num">Line Total</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for a in assets %}
+      <tr>
+        <td class="text-dim">{{ a.category_name }}</td>
+        <td>
+          <strong>{{ a.type_name }}</strong>
+          {% if a.manufacturer %}<br><span class="text-dim">{{ a.manufacturer }}{% if a.model %} {{ a.model }}{% endif %}</span>{% endif %}
+          {% if a.notes %}<br><span class="text-dim">{{ a.notes }}</span>{% endif %}
+        </td>
+        <td class="num">{{ a.quantity }}</td>
+        <td class="text-dim">
+          {% if a.rental_start %}{{ a.rental_start }}{% endif %}
+          {% if a.rental_start and a.rental_end and a.rental_start != a.rental_end %} – {{ a.rental_end }}{% endif %}
+        </td>
+        <td class="num">${{ '%.2f' | format(a.locked_price or 0) }}</td>
+        <td class="num">${{ '%.2f' | format((a.locked_price or 0) * a.quantity) }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="total-row">
+        <td colspan="5" class="num">Asset Rental Subtotal</td>
+        <td class="num">${{ '%.2f' | format(assets_subtotal) }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% elif skey == 'external_rentals' %}
+  {% if external_rentals %}
+  <div class="section-title">{{ layout.label('external_rentals', 'External Rentals') }}</div>
+  <table style="font-size: {{ layout.font_size('external_rentals', '11px') }}">
+    <thead>
+      <tr>
+        <th>Description</th>
+        <th class="num">Cost</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for er in external_rentals %}
+      <tr>
+        <td>
+          {{ er.description }}
+          {% if er.pdf_filename %}<br><span class="text-dim badge">PDF: {{ er.pdf_filename }}</span>{% endif %}
+        </td>
+        <td class="num">${{ '%.2f' | format(er.cost or 0) }}</td>
+      </tr>
+      {% endfor %}
+      <tr class="total-row">
+        <td class="num">External Rental Subtotal</td>
+        <td class="num">${{ '%.2f' | format(external_subtotal) }}</td>
+      </tr>
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% elif skey == 'total_bar' %}
+  <div class="grand-total">
+    <span class="grand-total-label">{{ layout.label('total_bar', 'Total') }}</span>
+    <span class="grand-total-amount">${{ '%.2f' | format(grand_total) }}</span>
   </div>
-</div>
 
-{% if assets %}
-<div class="section-title">Asset Rentals</div>
-<table>
-  <thead>
-    <tr>
-      <th>Category</th>
-      <th>Item</th>
-      <th class="num">Qty</th>
-      <th>Rental Period</th>
-      <th class="num">Unit Price</th>
-      <th class="num">Line Total</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for a in assets %}
-    <tr>
-      <td class="text-dim">{{ a.category_name }}</td>
-      <td>
-        <strong>{{ a.type_name }}</strong>
-        {% if a.manufacturer %}<br><span class="text-dim">{{ a.manufacturer }}{% if a.model %} {{ a.model }}{% endif %}</span>{% endif %}
-        {% if a.notes %}<br><span class="text-dim">{{ a.notes }}</span>{% endif %}
-      </td>
-      <td class="num">{{ a.quantity }}</td>
-      <td class="text-dim">
-        {% if a.rental_start %}{{ a.rental_start }}{% endif %}
-        {% if a.rental_start and a.rental_end and a.rental_start != a.rental_end %} – {{ a.rental_end }}{% endif %}
-      </td>
-      <td class="num">${{ '%.2f' | format(a.locked_price or 0) }}</td>
-      <td class="num">${{ '%.2f' | format((a.locked_price or 0) * a.quantity) }}</td>
-    </tr>
-    {% endfor %}
-    <tr class="total-row">
-      <td colspan="5" class="num">Asset Rental Subtotal</td>
-      <td class="num">${{ '%.2f' | format(assets_subtotal) }}</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
+  {% elif skey == 'footer' %}
+  <div class="footer">
+    3·2·1→THEATER — Dr. Phillips Center for the Performing Arts &nbsp;·&nbsp; {{ generated_date }}
+  </div>
+  {% endif %}
 
-{% if external_rentals %}
-<div class="section-title">External Rentals</div>
-<table>
-  <thead>
-    <tr>
-      <th>Description</th>
-      <th class="num">Cost</th>
-    </tr>
-  </thead>
-  <tbody>
-    {% for er in external_rentals %}
-    <tr>
-      <td>
-        {{ er.description }}
-        {% if er.pdf_filename %}<br><span class="text-dim badge">PDF: {{ er.pdf_filename }}</span>{% endif %}
-      </td>
-      <td class="num">${{ '%.2f' | format(er.cost or 0) }}</td>
-    </tr>
-    {% endfor %}
-    <tr class="total-row">
-      <td class="num">External Rental Subtotal</td>
-      <td class="num">${{ '%.2f' | format(external_subtotal) }}</td>
-    </tr>
-  </tbody>
-</table>
-{% endif %}
-
-<div class="grand-total">
-  <span class="grand-total-label">Total</span>
-  <span class="grand-total-amount">${{ '%.2f' | format(grand_total) }}</span>
-</div>
-
-<div class="footer">
-  3·2·1→THEATER — Dr. Phillips Center for the Performing Arts &nbsp;·&nbsp; {{ generated_date }}
-</div>
+{% endfor %}
 
 </body>
 </html>

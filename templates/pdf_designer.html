@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}PDF Designer — 3·2·1→Theater{% endblock %}
+
+{% block head %}
+<style>
+  .pd-layout { display: flex; gap: 16px; height: calc(100vh - 200px); min-height: 600px; }
+  .pd-edit-pane { width: 40%; min-width: 380px; max-width: 560px; overflow: auto;
+                  border: 1px solid var(--border-light); border-radius: 6px; padding: 14px; background: var(--bg-card); }
+  .pd-preview-pane { flex: 1; border: 1px solid var(--border-light); border-radius: 6px; overflow: hidden; background: #f7f7f7; }
+  .pd-preview-pane iframe { width: 100%; height: 100%; border: none; }
+
+  .pd-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px; padding: 10px 12px;
+                background: var(--bg-card); border: 1px solid var(--border-light); border-radius: 6px; }
+  .pd-toolbar select, .pd-toolbar .pd-spacer { margin-left: auto; }
+
+  .pd-type-tabs { display: flex; gap: 4px; margin-bottom: 12px; flex-wrap: wrap; }
+  .pd-type-tab { padding: 6px 12px; border: 1px solid var(--border-light); background: var(--bg-card); color: var(--text-dim);
+                 border-radius: 4px; cursor: pointer; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+  .pd-type-tab.active { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
+  .pd-type-tab[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+  .pd-section-row { border: 1px solid var(--border-light); border-radius: 5px; margin-bottom: 8px; background: var(--bg-card-alt, var(--bg-card)); }
+  .pd-section-row.dragging { opacity: 0.4; }
+  .pd-section-row.dragover { border-color: var(--accent); }
+  .pd-section-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px; }
+  .pd-section-head .drag-handle { font-size: 16px; }
+  .pd-section-head .pd-required-tag { font-size: 9px; padding: 1px 5px; border-radius: 3px; background: rgba(245,127,32,0.2);
+                                       color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; font-weight: 600; }
+  .pd-section-head input[type="text"] { flex: 1; min-width: 0; }
+  .pd-section-head select { width: 90px; }
+
+  .pd-toggle-fields { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 6px; font-size: 12px; }
+  .pd-toggle-fields:hover { color: var(--accent); }
+
+  .pd-section-controls { display: flex; gap: 12px; padding: 4px 10px 8px 32px; font-size: 11px; color: var(--text-muted); align-items: center; }
+  .pd-section-controls label { display: flex; align-items: center; gap: 4px; }
+
+  .pd-fields { padding: 4px 10px 10px 32px; border-top: 1px solid var(--border-light); display: none; }
+  .pd-fields.open { display: block; }
+  .pd-field-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 12px; }
+  .pd-field-row input[type="text"] { flex: 1; min-width: 0; padding: 3px 6px; font-size: 12px; }
+  .pd-field-row .pd-field-key { color: var(--text-muted); font-family: monospace; font-size: 10.5px; min-width: 110px; }
+
+  .pd-status { font-size: 11px; color: var(--text-muted); margin-left: 8px; }
+  .pd-status.error { color: var(--red, #ef4444); }
+  .pd-status.success { color: #10b981; }
+
+  .pd-empty-msg { padding: 40px 20px; text-align: center; color: var(--text-muted); font-size: 13px; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">PDF Designer</h1>
+    <p class="page-sub">Reorder sections, hide fields, override labels, and adjust font size for each PDF export type. Layouts apply globally.</p>
+  </div>
+</div>
+
+<div class="pd-type-tabs" id="pd-type-tabs">
+  {% for t in pdf_types %}
+  <button type="button" class="pd-type-tab"
+          data-type="{{ t }}"
+          {% if t not in enabled_types %}disabled title="Coming soon — wired in a later phase"{% endif %}>
+    {{ t.replace('_',' ') }}
+  </button>
+  {% endfor %}
+</div>
+
+<div class="pd-toolbar">
+  <button type="button" class="btn btn-primary" id="pd-save-btn">Save</button>
+  <button type="button" class="btn btn-ghost" id="pd-reset-btn">Reset to defaults</button>
+  <span class="pd-status" id="pd-status"></span>
+  <span class="pd-spacer"></span>
+  <label style="font-size:11px;color:var(--text-muted)">Preview show:
+    <select id="pd-show-select">
+      {% for s in recent_shows %}
+      <option value="{{ s.id }}">{{ s.name }} — {{ s.show_date or '—' }}</option>
+      {% endfor %}
+    </select>
+  </label>
+</div>
+
+<div class="pd-layout">
+  <div class="pd-edit-pane" id="pd-edit-pane">
+    <div class="pd-empty-msg">Select a PDF type above to begin.</div>
+  </div>
+  <div class="pd-preview-pane">
+    <iframe id="pd-preview-iframe" title="PDF preview"></iframe>
+  </div>
+</div>
+
+<script>
+window.PD_FONT_CHOICES = {{ font_size_choices | tojson }};
+window.PD_ENABLED_TYPES = {{ enabled_types | tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/pdf_designer.js') }}"></script>
+{% endblock %}
