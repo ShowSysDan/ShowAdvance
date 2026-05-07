@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Labor Overview — 3·2·1→Theater{% endblock %}
+
+{% block head %}
+<style>
+  .lo-toolbar {
+    display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+    margin-bottom: 18px;
+  }
+  .lo-week-range {
+    font-size: 14px; font-weight: 600; min-width: 220px;
+    letter-spacing: .02em; color: var(--text);
+  }
+  .lo-week-range .lo-week-sub {
+    display: block; font-size: 11px; font-weight: 400;
+    color: var(--text-dim); margin-top: 2px; letter-spacing: 0;
+  }
+  .lo-jump { display: flex; gap: 4px; align-items: center; }
+  .lo-jump input[type=date] {
+    padding: 4px 8px; font-size: 12px;
+    border: 1px solid var(--border); background: var(--bg-card);
+    color: var(--text); border-radius: var(--radius);
+  }
+
+  .lo-day {
+    margin-bottom: 18px;
+    border: 1px solid var(--border); border-radius: var(--radius-lg);
+    background: var(--bg-card); overflow: hidden;
+  }
+  .lo-day-head {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 8px 14px;
+    background: var(--bg-hover);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px; font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text);
+  }
+  .lo-day-head.empty { color: var(--text-dim); font-weight: 500; }
+  .lo-day-count { font-size: 11px; color: var(--text-dim); font-weight: 500; }
+
+  .lo-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .lo-table thead th {
+    text-align: left; padding: 6px 8px;
+    font-size: 10px; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-dim); font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg);
+  }
+  .lo-table tbody td {
+    padding: 7px 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    vertical-align: middle;
+  }
+  .lo-table tbody tr:last-child td { border-bottom: none; }
+  .lo-table tbody tr.lo-row-show     td:first-child { box-shadow: inset 3px 0 0 0 var(--accent); }
+  .lo-table tbody tr.lo-row-overhead td:first-child { box-shadow: inset 3px 0 0 0 #6c7a89; }
+  .lo-table .lo-name a { color: var(--text); text-decoration: none; }
+  .lo-table .lo-name a:hover { color: var(--accent); }
+  .lo-table .lo-venue { color: var(--text-dim); }
+  .lo-time {
+    font-family: var(--font-mono, monospace); font-size: 11.5px;
+    text-align: center; white-space: nowrap; color: var(--text);
+    width: 70px;
+  }
+  .lo-time.empty { color: var(--text-muted); }
+  .lo-tech.unscheduled { color: var(--text-muted); font-style: italic; }
+  .lo-pm { color: var(--text-dim); font-size: 11.5px; }
+  .lo-empty { padding: 18px; text-align: center; color: var(--text-muted); font-size: 12px; }
+
+  .lo-color-dot {
+    display: inline-block; width: 9px; height: 9px; border-radius: 50%;
+    margin-right: 6px; vertical-align: middle;
+    border: 1px solid rgba(0,0,0,.15);
+  }
+  .lo-kind-badge {
+    display: inline-block; font-size: 9px; letter-spacing: .08em;
+    padding: 1px 5px; border-radius: 3px; margin-left: 6px;
+    text-transform: uppercase; font-weight: 600;
+    background: rgba(108,122,137,.15); color: #6c7a89;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <h1 class="page-title">Labor Overview</h1>
+  <p class="page-sub">Week-at-a-glance look at every scheduled show and project labor line.</p>
+</div>
+
+<div class="lo-toolbar">
+  <a href="{{ url_for('labor_overview', start=prev_week) }}" class="btn btn-sm btn-ghost" title="Previous week">← Prev Week</a>
+  <a href="{{ url_for('labor_overview', start=today_iso) }}" class="btn btn-sm btn-ghost" title="Jump to this week">Today</a>
+  <a href="{{ url_for('labor_overview', start=next_week) }}" class="btn btn-sm btn-ghost" title="Next week">Next Week →</a>
+
+  <div class="lo-week-range">
+    {{ week_start.strftime('%a, %b %-d') }} → {{ week_end.strftime('%a, %b %-d, %Y') }}
+    <span class="lo-week-sub">Week starts Monday · {{ week_start.isoformat() }} – {{ week_end.isoformat() }}</span>
+  </div>
+
+  <form method="get" action="{{ url_for('labor_overview') }}" class="lo-jump ml-auto">
+    <label for="lo-jump-input" style="font-size:11px;color:var(--text-dim);margin-right:4px">JUMP TO</label>
+    <input type="date" id="lo-jump-input" name="start" value="{{ week_start.isoformat() }}">
+    <button type="submit" class="btn btn-sm btn-ghost">Go</button>
+  </form>
+</div>
+
+{% set _has_any = days | selectattr('count') | list %}
+{% if not _has_any %}
+<div class="lo-empty">
+  No labor scheduled for this week. Use the arrows to browse another week, or the date picker to jump.
+</div>
+{% endif %}
+
+{% for day in days %}
+<div class="lo-day">
+  <div class="lo-day-head {% if not day.count %}empty{% endif %}">
+    <span>{{ day.pretty }}</span>
+    <span class="lo-day-count">{% if day.count %}{{ day.count }} line{{ '' if day.count == 1 else 's' }}{% else %}No labor scheduled{% endif %}</span>
+  </div>
+  {% if day.count %}
+  <table class="lo-table">
+    <thead>
+      <tr>
+        <th>Show / Project</th>
+        <th>Venue / Client</th>
+        <th>Role</th>
+        <th class="lo-time">Call</th>
+        <th class="lo-time">Meal 1 Start</th>
+        <th class="lo-time">Meal 1 End</th>
+        <th class="lo-time">Meal 2 Start</th>
+        <th class="lo-time">Meal 2 End</th>
+        <th class="lo-time">Wrap</th>
+        <th>Tech Name</th>
+        <th>PM / Contact</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in day.rows %}
+      <tr class="lo-row-{{ r.kind }}">
+        <td class="lo-name">
+          {% if r.color %}<span class="lo-color-dot" style="background: {{ r.color }}"></span>{% endif %}
+          {% if r.kind == 'show' %}
+            <a href="{{ url_for('show_page', show_id=r.show_id, tab='staffing') }}">{{ r.name }}</a>
+          {% else %}
+            <a href="{{ url_for('overhead_crew_page') }}">{{ r.name }}</a>
+            <span class="lo-kind-badge">OH</span>
+          {% endif %}
+        </td>
+        <td class="lo-venue">{{ r.venue }}</td>
+        <td>{{ r.position }}</td>
+        <td class="lo-time {% if not r.in_time %}empty{% endif %}">{{ r.in_time or '—' }}</td>
+        <td class="lo-time {% if not r.break_start %}empty{% endif %}">{{ r.break_start or '—' }}</td>
+        <td class="lo-time {% if not r.break_end %}empty{% endif %}">{{ r.break_end or '—' }}</td>
+        <td class="lo-time empty">—</td>
+        <td class="lo-time empty">—</td>
+        <td class="lo-time {% if not r.out_time %}empty{% endif %}">{{ r.out_time or '—' }}</td>
+        <td class="lo-tech {% if not r.tech %}unscheduled{% endif %}">
+          {{ r.tech or 'unassigned' }}
+        </td>
+        <td class="lo-pm">{{ r.pm }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

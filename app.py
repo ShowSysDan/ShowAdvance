@@ -7335,6 +7335,155 @@ def labor_scheduler():
     return render_template('labor_scheduler.html', user=get_current_user())
 
 
+@app.route('/labor-overview')
+@login_required
+def labor_overview():
+    """Read-only week-at-a-time view of every scheduled labor line — both
+    show labor and overhead/project crew. Anyone logged in can view; nothing
+    here is editable."""
+    from datetime import date, datetime, timedelta
+
+    raw_start = (request.args.get('start') or '').strip()
+    try:
+        anchor = date.fromisoformat(raw_start) if raw_start else date.today()
+    except ValueError:
+        anchor = date.today()
+    # Snap to Monday of the anchor's week (weekday(): Mon=0..Sun=6)
+    week_start = anchor - timedelta(days=anchor.weekday())
+    week_end   = week_start + timedelta(days=6)
+    prev_week  = (week_start - timedelta(days=7)).isoformat()
+    next_week  = (week_start + timedelta(days=7)).isoformat()
+    today_iso  = date.today().isoformat()
+
+    db = get_db()
+
+    # ── Show labor — joined with the show, position, and the scheduled tech.
+    show_rows = db.execute("""
+        SELECT
+            COALESCE(lr.work_date, s.show_date) AS work_date,
+            s.id   AS show_id,
+            s.name AS show_name,
+            s.venue AS venue,
+            jp.name AS position_name,
+            lr.in_time, lr.out_time, lr.break_start, lr.break_end,
+            lr.is_scheduled,
+            cm.name AS scheduled_tech,
+            lr.requested_name AS requested_tech,
+            lr.sort_order AS sort_order,
+            ad.field_value AS pm_name
+        FROM labor_requests lr
+        JOIN shows s ON s.id = lr.show_id
+        LEFT JOIN job_positions jp ON jp.id = lr.position_id
+        LEFT JOIN crew_members cm ON cm.id = lr.scheduled_crew_member_id
+        LEFT JOIN advance_data ad
+               ON ad.show_id = s.id AND ad.field_key = 'production_manager'
+        WHERE COALESCE(s.status, 'active') != 'archived'
+          AND COALESCE(lr.work_date, s.show_date) BETWEEN ? AND ?
+        ORDER BY work_date, s.name, lr.sort_order, lr.id
+    """, (week_start.isoformat(), week_end.isoformat())).fetchall()
+
+    # ── Overhead / project labor — group provides the contact name; project
+    # provides a fallback contact and a colour for visual grouping.
+    oh_rows = db.execute("""
+        SELECT
+            COALESCE(r.work_date, g.work_date) AS work_date,
+            g.id AS group_id,
+            COALESCE(p.name, g.name, 'General') AS project_name,
+            p.client_name AS client_name,
+            p.color AS project_color,
+            jp.name AS position_name,
+            r.in_time, r.out_time, r.break_start, r.break_end,
+            r.is_scheduled,
+            cm.name AS scheduled_tech,
+            r.requested_name AS requested_tech,
+            r.sort_order AS sort_order,
+            COALESCE(NULLIF(g.contact_name, ''), p.contact_name) AS contact_name
+        FROM overhead_labor_requests r
+        JOIN overhead_labor_groups g ON g.id = r.group_id
+        LEFT JOIN overhead_projects p ON p.id = g.project_id
+        LEFT JOIN job_positions jp ON jp.id = r.position_id
+        LEFT JOIN crew_members cm ON cm.id = r.scheduled_crew_member_id
+        WHERE COALESCE(r.work_date, g.work_date) BETWEEN ? AND ?
+        ORDER BY work_date, project_name, r.sort_order, r.id
+    """, (week_start.isoformat(), week_end.isoformat())).fetchall()
+    db.close()
+
+    def _iso(v):
+        if v is None: return ''
+        return str(v)[:10] if not isinstance(v, str) else v[:10]
+
+    # Build a dict keyed by ISO date so the template can render every day
+    # of the week, even ones with no entries.
+    by_day = {(week_start + timedelta(days=i)).isoformat(): [] for i in range(7)}
+
+    for r in show_rows:
+        d = _iso(r['work_date'])
+        if d not in by_day:
+            continue
+        by_day[d].append({
+            'kind': 'show',
+            'name': r['show_name'] or '—',
+            'venue': r['venue'] or '',
+            'position': r['position_name'] or '—',
+            'in_time': r['in_time'] or '',
+            'break_start': r['break_start'] or '',
+            'break_end': r['break_end'] or '',
+            'out_time': r['out_time'] or '',
+            'tech': r['scheduled_tech'] or (r['requested_tech'] or ''),
+            'is_scheduled': bool(r['is_scheduled']),
+            'pm': r['pm_name'] or '',
+            'color': '',
+            'show_id': r['show_id'],
+        })
+
+    for r in oh_rows:
+        d = _iso(r['work_date'])
+        if d not in by_day:
+            continue
+        by_day[d].append({
+            'kind': 'overhead',
+            'name': r['project_name'] or 'General',
+            'venue': r['client_name'] or '',
+            'position': r['position_name'] or '—',
+            'in_time': r['in_time'] or '',
+            'break_start': r['break_start'] or '',
+            'break_end': r['break_end'] or '',
+            'out_time': r['out_time'] or '',
+            'tech': r['scheduled_tech'] or (r['requested_tech'] or ''),
+            'is_scheduled': bool(r['is_scheduled']),
+            'pm': r['contact_name'] or '',
+            'color': r['project_color'] or '',
+            'group_id': r['group_id'],
+        })
+
+    # Build the per-day list in calendar order with day labels
+    day_names = ['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday']
+    days = []
+    for i in range(7):
+        d = (week_start + timedelta(days=i))
+        d_iso = d.isoformat()
+        rows = by_day[d_iso]
+        # Within a day, sort by call time then name so the table reads top-down
+        rows.sort(key=lambda r: ((r['in_time'] or '99:99'), r['name'].lower()))
+        days.append({
+            'name': day_names[i],
+            'date': d,
+            'iso': d_iso,
+            'pretty': d.strftime('%A, %B %-d, %Y'),
+            'rows': rows,
+            'count': len(rows),
+        })
+
+    return render_template('labor_overview.html',
+                           user=get_current_user(),
+                           days=days,
+                           week_start=week_start,
+                           week_end=week_end,
+                           prev_week=prev_week,
+                           next_week=next_week,
+                           today_iso=today_iso)
+
+
 @app.route('/api/labor-scheduler', methods=['GET'])
 @scheduler_required
 def api_labor_scheduler_list():
