@@ -243,7 +243,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.9.0'
+APP_VERSION = '2.10.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -1280,25 +1280,29 @@ def log_audit(db, action, entity_type, entity_id=None, show_id=None,
 # either use a separate restore flow or are not reversibly logged.
 
 UNDO_TABLE_MAP = {
-    'contact':              'contacts',
-    'form_field':           'form_fields',
-    'form_section':         'form_sections',
-    'schedule_template':    'schedule_templates',
-    'position_category':    'position_categories',
-    'job_position':         'job_positions',
-    'labor_request':        'labor_requests',
-    'pay_rate_level':       'pay_rate_levels',
-    'crew_member':          'crew_members',
-    'warehouse_location':   'warehouse_locations',
-    'asset_category':       'asset_categories',
-    'arts_group':           'arts_groups',
-    'asset_type':           'asset_types',
-    'asset_item':           'asset_items',
-    'show_asset':           'show_assets',
-    'show_external_rental': 'show_external_rentals',
-    'site_message':         'site_messages',
-    'group':                'user_groups',
-    'schedule_meta_field':  'schedule_meta_fields',
+    'contact':                'contacts',
+    'form_field':             'form_fields',
+    'form_section':           'form_sections',
+    'schedule_template':      'schedule_templates',
+    'position_category':      'position_categories',
+    'job_position':           'job_positions',
+    'labor_request':          'labor_requests',
+    'pay_rate_level':         'pay_rate_levels',
+    'crew_member':            'crew_members',
+    'warehouse_location':     'warehouse_locations',
+    'asset_category':         'asset_categories',
+    'arts_group':             'arts_groups',
+    'asset_type':             'asset_types',
+    'asset_item':             'asset_items',
+    'show_asset':             'show_assets',
+    'show_external_rental':   'show_external_rentals',
+    'site_message':           'site_messages',
+    'group':                  'user_groups',
+    'schedule_meta_field':    'schedule_meta_fields',
+    'overhead_project':       'overhead_projects',
+    'overhead_labor_group':   'overhead_labor_groups',
+    'overhead_labor_request': 'overhead_labor_requests',
+    'overhead_labor_template':'overhead_labor_templates',
 }
 
 # Action suffixes we know how to reverse. Maps suffix → operation kind.
@@ -6604,6 +6608,1077 @@ def api_labor_scheduler_add():
     db.close()
     syslog_logger.info(f"LABOR_REQUEST_ADD (scheduler) show_id={show_id} id={rid} by={session.get('username')}")
     return jsonify({'success': True, 'row': _normalize_row_dates(dict(row)) if row else {'id': rid}})
+
+
+# ─── Overhead & Project Crew ─────────────────────────────────────────────────
+#
+# Standalone labor scheduling that isn't tied to a show — running list of days,
+# each with one or more sub-groups (per project / contact) and labor requests
+# beneath them. Recurring templates can auto-generate requests for repeating
+# weekly needs (e.g. 2 overhead techs Mon–Fri).
+#
+# Access: any logged-in user may view; read-only users cannot mutate.
+
+def _overhead_write_check():
+    """Return None if the caller may mutate, otherwise a (json, status) tuple."""
+    if 'user_id' not in session:
+        return jsonify({'success': False, 'error': 'Not signed in.'}), 403
+    if session.get('is_readonly'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    return None
+
+
+def _parse_iso_date(s):
+    """Parse 'YYYY-MM-DD' (or empty) → datetime.date or None. Never raises."""
+    if not s:
+        return None
+    try:
+        return datetime.strptime(str(s)[:10], '%Y-%m-%d').date()
+    except Exception:
+        return None
+
+
+# ── Shared overhead helpers ──────────────────────────────────────────────────
+
+# SELECT used in three places — keep it here so the column list / joins stay
+# in sync between create/update endpoints and the list view.
+_OVERHEAD_REQUEST_JOIN_SELECT = """
+    SELECT r.*,
+           jp.name AS position_name,
+           pc.name AS category_name,
+           cm.name AS scheduled_crew_name,
+           prl.name AS scheduled_level_name,
+           prl.hourly_rate AS scheduled_level_rate
+    FROM overhead_labor_requests r
+    LEFT JOIN job_positions jp ON jp.id = r.position_id
+    LEFT JOIN position_categories pc ON pc.id = jp.category_id
+    LEFT JOIN crew_members cm ON cm.id = r.scheduled_crew_member_id
+    LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
+"""
+
+_OVERHEAD_GROUP_JOIN_SELECT = """
+    SELECT g.*,
+           p.name AS project_name,
+           p.client_name,
+           p.color,
+           p.contact_name  AS project_contact_name,
+           p.contact_email AS project_contact_email,
+           p.contact_phone AS project_contact_phone,
+           p.project_notes AS project_default_notes
+    FROM overhead_labor_groups g
+    LEFT JOIN overhead_projects p ON p.id = g.project_id
+"""
+
+
+def _fetch_overhead_request(db, rid):
+    """Fetch a single labor request row joined to position + crew + rate level."""
+    return db.execute(_OVERHEAD_REQUEST_JOIN_SELECT + ' WHERE r.id=?', (rid,)).fetchone()
+
+
+def _fetch_overhead_group(db, gid):
+    """Fetch a single sub-group row joined to its project (if any)."""
+    return db.execute(_OVERHEAD_GROUP_JOIN_SELECT + ' WHERE g.id=?', (gid,)).fetchone()
+
+
+def _annotate_request_metrics(req_dict, *, rate_keys=('scheduled_level_rate',)):
+    """Attach hours_planned / hours_actual / effective_rate / cost_* fields
+    in-place. Snapshot rate is used when present so historical cost is stable.
+
+    `rate_keys` lists the dict keys to fall back to when `pay_rate_snapshot`
+    is None (different SELECT aliases use different names)."""
+    h_p = _calc_hours(
+        req_dict.get('in_time'), req_dict.get('out_time'),
+        req_dict.get('break_start'), req_dict.get('break_end'))
+    h_a = _calc_hours(
+        req_dict.get('actual_in_time'), req_dict.get('actual_out_time'),
+        req_dict.get('actual_break_start'), req_dict.get('actual_break_end'))
+    rate = req_dict.get('pay_rate_snapshot')
+    if rate is None:
+        for k in rate_keys:
+            if req_dict.get(k) is not None:
+                rate = req_dict.get(k)
+                break
+    rate = float(rate or 0)
+    req_dict['hours_planned'] = round(h_p, 4)
+    req_dict['hours_actual']  = round(h_a, 4)
+    req_dict['effective_rate'] = rate
+    req_dict['cost_planned'] = round(h_p * rate, 2)
+    req_dict['cost_actual']  = round(h_a * rate, 2)
+    return req_dict
+
+
+def _parse_dow_csv(csv):
+    """Parse a CSV of weekday digits (0=Sun..6=Sat) → sorted set of valid ints."""
+    out = set()
+    for piece in (csv or '').split(','):
+        piece = piece.strip()
+        if not piece:
+            continue
+        try:
+            n = int(piece)
+        except ValueError:
+            continue
+        if 0 <= n <= 6:
+            out.add(n)
+    return out
+
+
+def _max_sort_order(db, table, where_sql='', where_params=()):
+    """Return next sort_order value (current max + 10). Centralizes the pattern."""
+    sql = f'SELECT COALESCE(MAX(sort_order), 0) FROM {table}'
+    if where_sql:
+        sql += ' WHERE ' + where_sql
+    return (db.execute(sql, where_params).fetchone()[0] or 0) + 10
+
+
+def _overhead_log(action, **kw):
+    """Single syslog entry point for overhead crew mutations.
+    Keeps the line format consistent with the rest of the app
+    (LABOR_REQUEST_ADD show_id=… id=… by=…)."""
+    parts = [f'{k}={v}' for k, v in kw.items() if v is not None]
+    parts.append(f"by={session.get('username')}")
+    syslog_logger.info(f"{action} {' '.join(parts)}")
+
+
+@app.route('/overhead-crew')
+@login_required
+def overhead_crew_page():
+    """Render the Overhead & Project Crew running schedule."""
+    return render_template(
+        'overhead_crew.html',
+        user=get_current_user(),
+        can_edit=not session.get('is_readonly'),
+    )
+
+
+@app.route('/api/overhead-crew/list', methods=['GET'])
+@login_required
+def api_overhead_list():
+    """Return all groups + requests whose work_date falls in [from, to] (inclusive),
+    grouped by date then group, sorted closest-date first."""
+    date_from = (request.args.get('from') or '').strip()
+    date_to   = (request.args.get('to') or '').strip()
+    if not date_from or not date_to:
+        return jsonify({'error': 'from and to dates required'}), 400
+
+    db = get_db()
+    groups = db.execute(
+        _OVERHEAD_GROUP_JOIN_SELECT +
+        ' WHERE g.work_date BETWEEN ? AND ? ORDER BY g.work_date, g.sort_order, g.id',
+        (date_from, date_to),
+    ).fetchall()
+
+    requests_rows = db.execute(
+        _OVERHEAD_REQUEST_JOIN_SELECT +
+        ' WHERE r.work_date BETWEEN ? AND ? ORDER BY r.work_date, r.group_id, r.sort_order, r.id',
+        (date_from, date_to),
+    ).fetchall()
+    db.close()
+
+    # Index requests by group id, attaching pre-computed hours/cost so the
+    # client doesn't have to mirror the time-math logic.
+    by_group = {}
+    for r in requests_rows:
+        rd = _annotate_request_metrics(_normalize_row_dates(dict(r)))
+        by_group.setdefault(rd['group_id'], []).append(rd)
+
+    # Build days[] → groups[] → requests[]
+    days = {}
+    day_order = []
+    for g in groups:
+        gd = _normalize_row_dates(dict(g))
+        wd = gd['work_date']
+        if wd not in days:
+            days[wd] = {'work_date': wd, 'groups': []}
+            day_order.append(wd)
+        gd['requests'] = by_group.get(gd['id'], [])
+        # Display name = group's own override if non-empty, else the project's name
+        gd['display_name'] = (
+            gd.get('name')
+            if (gd.get('name') and gd.get('name') != 'General')
+            else (gd.get('project_name') or gd.get('name') or 'General')
+        )
+        days[wd]['groups'].append(gd)
+
+    return jsonify({
+        'days': [days[d] for d in sorted(day_order)],
+        'from': date_from,
+        'to':   date_to,
+    })
+
+
+# ── Projects (sub-group catalog) ─────────────────────────────────────────────
+
+@app.route('/api/overhead-crew/projects', methods=['GET'])
+@login_required
+def api_overhead_projects_list():
+    include_archived = request.args.get('include_archived') == '1'
+    db = get_db()
+    sql = """
+        SELECT p.*,
+               (SELECT COUNT(*) FROM overhead_labor_groups g WHERE g.project_id = p.id) AS group_count,
+               (SELECT MIN(g.work_date) FROM overhead_labor_groups g WHERE g.project_id = p.id) AS first_date,
+               (SELECT MAX(g.work_date) FROM overhead_labor_groups g WHERE g.project_id = p.id) AS last_date
+        FROM overhead_projects p
+    """
+    if not include_archived:
+        sql += ' WHERE COALESCE(p.archived, 0) = 0'
+    sql += ' ORDER BY p.archived ASC, p.sort_order, p.name'
+    rows = db.execute(sql).fetchall()
+    db.close()
+    return jsonify([_normalize_row_dates(dict(r)) for r in rows])
+
+
+def _project_payload(data):
+    return {
+        'name':          (data.get('name') or '').strip(),
+        'description':   (data.get('description') or '').strip(),
+        'client_name':   (data.get('client_name') or '').strip(),
+        'billing_code':  (data.get('billing_code') or '').strip(),
+        'contact_name':  (data.get('contact_name') or '').strip(),
+        'contact_email': (data.get('contact_email') or '').strip(),
+        'contact_phone': (data.get('contact_phone') or '').strip(),
+        'project_notes': data.get('project_notes') or '',
+        'color':         (data.get('color') or '').strip(),
+        'archived':      1 if data.get('archived') else 0,
+    }
+
+
+def _find_or_create_project(db, name, *, defaults=None):
+    """Look up a project by name (case-insensitive). If missing, create it with
+    optional default contact / notes. Returns the project id."""
+    name = (name or '').strip()
+    if not name:
+        return None
+    row = db.execute(
+        'SELECT id FROM overhead_projects WHERE LOWER(name) = LOWER(?)',
+        (name,)
+    ).fetchone()
+    if row:
+        return row['id']
+    d = defaults or {}
+    cur = db.execute("""
+        INSERT INTO overhead_projects
+            (name, description, client_name, billing_code,
+             contact_name, contact_email, contact_phone, project_notes, color,
+             archived, sort_order, created_by)
+        VALUES (?,?,?,?,?,?,?,?,?,0,?,?)
+    """, (
+        name,
+        (d.get('description') or '').strip(),
+        (d.get('client_name') or '').strip(),
+        (d.get('billing_code') or '').strip(),
+        (d.get('contact_name') or '').strip(),
+        (d.get('contact_email') or '').strip(),
+        (d.get('contact_phone') or '').strip(),
+        d.get('project_notes') or '',
+        (d.get('color') or '').strip(),
+        _max_sort_order(db, 'overhead_projects'),
+        session.get('user_id'),
+    ))
+    pid = cur.lastrowid
+    log_audit(db, 'OVERHEAD_PROJECT_ADD', 'overhead_project', pid,
+              detail=f'auto-created via group: {name}')
+    _overhead_log('OVERHEAD_PROJECT_ADD', id=pid, name=name, source='auto')
+    return pid
+
+
+@app.route('/api/overhead-crew/projects', methods=['POST'])
+@login_required
+def api_overhead_projects_add():
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    payload = _project_payload(data)
+    if not payload['name']:
+        return jsonify({'success': False, 'error': 'Project name is required.'}), 400
+    db = get_db()
+    existing = db.execute(
+        'SELECT id FROM overhead_projects WHERE LOWER(name) = LOWER(?)', (payload['name'],)
+    ).fetchone()
+    if existing:
+        db.close()
+        return jsonify({'success': False, 'error': 'A project with that name already exists.'}), 409
+    cur = db.execute("""
+        INSERT INTO overhead_projects
+            (name, description, client_name, billing_code,
+             contact_name, contact_email, contact_phone, project_notes, color,
+             archived, sort_order, created_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    """, (
+        payload['name'], payload['description'], payload['client_name'],
+        payload['billing_code'], payload['contact_name'], payload['contact_email'],
+        payload['contact_phone'], payload['project_notes'], payload['color'],
+        payload['archived'], _max_sort_order(db, 'overhead_projects'),
+        session.get('user_id'),
+    ))
+    pid = cur.lastrowid
+    log_audit(db, 'OVERHEAD_PROJECT_ADD', 'overhead_project', pid, detail=payload['name'])
+    db.commit()
+    row = db.execute('SELECT * FROM overhead_projects WHERE id=?', (pid,)).fetchone()
+    db.close()
+    _overhead_log('OVERHEAD_PROJECT_ADD', id=pid, name=payload['name'])
+    return jsonify({'success': True, 'project': _normalize_row_dates(dict(row)) if row else {'id': pid}})
+
+
+@app.route('/api/overhead-crew/projects/<int:pid>', methods=['PUT'])
+@login_required
+def api_overhead_projects_update(pid):
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    payload = _project_payload(data)
+    if not payload['name']:
+        return jsonify({'success': False, 'error': 'Project name is required.'}), 400
+    db = get_db()
+    row = db.execute('SELECT id FROM overhead_projects WHERE id=?', (pid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    # Detect a name collision against a *different* project
+    dup = db.execute(
+        'SELECT id FROM overhead_projects WHERE LOWER(name) = LOWER(?) AND id <> ?',
+        (payload['name'], pid)
+    ).fetchone()
+    if dup:
+        db.close()
+        return jsonify({'success': False, 'error': 'Another project already uses that name.'}), 409
+    set_clause = ', '.join(f'{k}=?' for k in payload.keys())
+    db.execute(
+        f'UPDATE overhead_projects SET {set_clause} WHERE id=?',
+        list(payload.values()) + [pid],
+    )
+    log_audit(db, 'OVERHEAD_PROJECT_EDIT', 'overhead_project', pid, detail=payload['name'])
+    db.commit()
+    refreshed = db.execute('SELECT * FROM overhead_projects WHERE id=?', (pid,)).fetchone()
+    db.close()
+    _overhead_log('OVERHEAD_PROJECT_EDIT', id=pid, name=payload['name'])
+    return jsonify({'success': True, 'project': _normalize_row_dates(dict(refreshed)) if refreshed else None})
+
+
+@app.route('/api/overhead-crew/projects/<int:pid>', methods=['DELETE'])
+@login_required
+def api_overhead_projects_delete(pid):
+    """Archive a project (soft delete) by default. Hard delete only if no groups
+    reference it. Existing groups keep their override name/contact when unlinked."""
+    block = _overhead_write_check()
+    if block: return block
+    hard = request.args.get('hard') == '1'
+    db = get_db()
+    row = db.execute('SELECT * FROM overhead_projects WHERE id=?', (pid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    in_use = db.execute(
+        'SELECT COUNT(*) FROM overhead_labor_groups WHERE project_id=?', (pid,)
+    ).fetchone()[0] or 0
+    if hard and not in_use:
+        db.execute('DELETE FROM overhead_projects WHERE id=?', (pid,))
+        log_audit(db, 'OVERHEAD_PROJECT_DELETE', 'overhead_project', pid, detail=row['name'])
+        action = 'OVERHEAD_PROJECT_DELETE'
+    else:
+        db.execute('UPDATE overhead_projects SET archived=1 WHERE id=?', (pid,))
+        log_audit(db, 'OVERHEAD_PROJECT_ARCHIVE', 'overhead_project', pid,
+                  detail=f"{row['name']} (in_use={in_use})")
+        action = 'OVERHEAD_PROJECT_ARCHIVE'
+    db.commit()
+    db.close()
+    _overhead_log(action, id=pid, name=row['name'], in_use=in_use)
+    return jsonify({'success': True, 'archived_only': bool(in_use) or not hard})
+
+
+@app.route('/api/overhead-crew/project-stats', methods=['GET'])
+@login_required
+def api_overhead_project_stats():
+    """Return per-project stats (range + lifetime) for the date range and overall.
+
+    Each project's `range_*` numbers cover the [from, to] window if provided;
+    `lifetime_*` numbers are computed across every overhead labor request ever
+    logged against that project's groups.
+    """
+    date_from = (request.args.get('from') or '').strip() or None
+    date_to   = (request.args.get('to')   or '').strip() or None
+
+    db = get_db()
+    projects = db.execute(
+        'SELECT * FROM overhead_projects ORDER BY archived, sort_order, name'
+    ).fetchall()
+
+    # Pull ALL requests joined to their group → project. We do the per-project
+    # aggregation in Python so we can compute hours via _calc_hours (which deals
+    # with break math + over-midnight wrap) consistently with the rest of the app.
+    rows = db.execute("""
+        SELECT r.id, r.work_date, r.in_time, r.out_time, r.break_start, r.break_end,
+               r.actual_in_time, r.actual_out_time, r.actual_break_start, r.actual_break_end,
+               r.is_scheduled, r.pay_rate_snapshot,
+               g.project_id, g.name AS group_name,
+               prl.hourly_rate AS level_rate
+        FROM overhead_labor_requests r
+        JOIN overhead_labor_groups g ON g.id = r.group_id
+        LEFT JOIN crew_members cm ON cm.id = r.scheduled_crew_member_id
+        LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
+    """).fetchall()
+    db.close()
+
+    def _empty_bucket():
+        return {
+            'lifetime_hours_planned': 0.0, 'lifetime_hours_actual':  0.0,
+            'lifetime_cost_planned':  0.0, 'lifetime_cost_actual':   0.0,
+            'lifetime_lines': 0,
+            'lifetime_first_date': None, 'lifetime_last_date': None,
+            'range_hours_planned': 0.0, 'range_hours_actual': 0.0,
+            'range_cost_planned': 0.0, 'range_cost_actual': 0.0,
+            'range_lines': 0,
+        }
+
+    by_pid = {}
+    # Track unmatched (no project) lines under a synthetic project_id = None bucket
+    for r in rows:
+        rd = _annotate_request_metrics(
+            _normalize_row_dates(dict(r)),
+            rate_keys=('level_rate',),
+        )
+        pid = rd['project_id']
+        rec = by_pid.setdefault(pid, _empty_bucket())
+        wd = rd.get('work_date') or ''
+        h_p, h_a = rd['hours_planned'], rd['hours_actual']
+        cp, ca   = rd['cost_planned'],  rd['cost_actual']
+
+        rec['lifetime_hours_planned'] += h_p
+        rec['lifetime_hours_actual']  += h_a
+        rec['lifetime_cost_planned']  += cp
+        rec['lifetime_cost_actual']   += ca
+        rec['lifetime_lines']         += 1
+        if wd:
+            if rec['lifetime_first_date'] is None or wd < rec['lifetime_first_date']:
+                rec['lifetime_first_date'] = wd
+            if rec['lifetime_last_date'] is None or wd > rec['lifetime_last_date']:
+                rec['lifetime_last_date'] = wd
+
+        in_range = bool(wd)
+        if in_range and date_from and wd < date_from: in_range = False
+        if in_range and date_to   and wd > date_to:   in_range = False
+        if in_range:
+            rec['range_hours_planned'] += h_p
+            rec['range_hours_actual']  += h_a
+            rec['range_cost_planned']  += cp
+            rec['range_cost_actual']   += ca
+            rec['range_lines']         += 1
+
+    _NUM_KEYS = (
+        'lifetime_hours_planned', 'lifetime_hours_actual',
+        'lifetime_cost_planned',  'lifetime_cost_actual',
+        'range_hours_planned',    'range_hours_actual',
+        'range_cost_planned',     'range_cost_actual',
+    )
+    def _round_bucket(b):
+        for k in _NUM_KEYS:
+            b[k] = round(b[k], 2)
+        return b
+
+    out = []
+    for p in projects:
+        pd = _normalize_row_dates(dict(p))
+        bucket = by_pid.get(pd['id']) or _empty_bucket()
+        out.append({**pd, **_round_bucket(bucket)})
+
+    # Also include un-projected lines (project_id=NULL) as a synthetic row
+    if None in by_pid:
+        out.append({
+            'id': None, 'name': '(No project)', 'archived': 0,
+            **_round_bucket(by_pid[None]),
+        })
+
+    return jsonify({'from': date_from, 'to': date_to, 'projects': out})
+
+
+@app.route('/api/overhead-crew/groups', methods=['POST'])
+@login_required
+def api_overhead_group_add():
+    """Create a sub-group under a date.
+
+    Body: {
+      work_date,
+      project_id?:     int      (existing project — preferred when known)
+      project_name?:   string   (auto-creates if a project with that name doesn't exist)
+      name?:           string   (per-group display override; falls back to project name)
+      contact_*?:      strings  (per-group override)
+      project_notes?:  string   (per-group override)
+    }
+
+    If neither project_id nor project_name is given the group is "ungrouped" —
+    it still appears under its date but won't roll up to a project total.
+    """
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    wd = _parse_iso_date(data.get('work_date'))
+    if not wd:
+        return jsonify({'success': False, 'error': 'Valid work_date is required.'}), 400
+    db = get_db()
+
+    project_id = data.get('project_id') or None
+    if project_id:
+        try:
+            project_id = int(project_id)
+        except (TypeError, ValueError):
+            project_id = None
+    if not project_id and (data.get('project_name') or '').strip():
+        project_id = _find_or_create_project(
+            db, data.get('project_name'),
+            defaults={
+                'contact_name':  data.get('contact_name'),
+                'contact_email': data.get('contact_email'),
+                'contact_phone': data.get('contact_phone'),
+                'project_notes': data.get('project_notes'),
+            },
+        )
+
+    # Pull project defaults so the group display can resolve a sensible name
+    proj = None
+    if project_id:
+        proj = db.execute('SELECT * FROM overhead_projects WHERE id=?', (project_id,)).fetchone()
+
+    # Sub-group display name: prefer explicit override, then project name, then 'General'
+    name = (data.get('name') or '').strip()
+    if not name:
+        name = (proj['name'] if proj else (data.get('project_name') or '').strip()) or 'General'
+
+    cur = db.execute("""
+        INSERT INTO overhead_labor_groups
+            (work_date, project_id, name, contact_name, contact_email, contact_phone,
+             project_notes, sort_order, created_by)
+        VALUES (?,?,?,?,?,?,?,?,?)
+    """, (
+        wd.isoformat(),
+        project_id,
+        name,
+        (data.get('contact_name') or '').strip(),
+        (data.get('contact_email') or '').strip(),
+        (data.get('contact_phone') or '').strip(),
+        data.get('project_notes') or '',
+        _max_sort_order(db, 'overhead_labor_groups', 'work_date=?', (wd.isoformat(),)),
+        session.get('user_id'),
+    ))
+    gid = cur.lastrowid
+    log_audit(db, 'OVERHEAD_GROUP_ADD', 'overhead_labor_group', gid,
+              detail=f"{wd.isoformat()} · project={project_id} · {name}")
+    db.commit()
+    row = _fetch_overhead_group(db, gid)
+    db.close()
+    out = _normalize_row_dates(dict(row)) if row else {'id': gid}
+    out['requests'] = []
+    _overhead_log('OVERHEAD_GROUP_ADD',
+                  id=gid, date=wd.isoformat(), project_id=project_id, name=name)
+    return jsonify({'success': True, 'group': out})
+
+
+@app.route('/api/overhead-crew/groups/<int:gid>', methods=['PUT'])
+@login_required
+def api_overhead_group_update(gid):
+    """Update sub-group fields.
+
+    Body: any of {work_date, project_id, project_name, name, contact_*, project_notes}.
+    Passing project_id=null clears the project link. Passing project_name auto-
+    creates the project if necessary (same upsert as the create endpoint).
+    """
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    row = db.execute('SELECT * FROM overhead_labor_groups WHERE id=?', (gid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+
+    updates, params = [], []
+    if 'work_date' in data:
+        wd = _parse_iso_date(data.get('work_date'))
+        if not wd:
+            db.close()
+            return jsonify({'success': False, 'error': 'Invalid work_date.'}), 400
+        updates.append('work_date=?'); params.append(wd.isoformat())
+        # Cascade work_date to all requests under this group so the running list
+        # stays consistent if the group's date is changed.
+        db.execute(
+            'UPDATE overhead_labor_requests SET work_date=? WHERE group_id=?',
+            (wd.isoformat(), gid)
+        )
+
+    # Project linking — accept either an explicit id or a name (to upsert)
+    if 'project_id' in data:
+        pid = data.get('project_id')
+        if pid in (None, '', 0):
+            updates.append('project_id=?'); params.append(None)
+        else:
+            try:
+                updates.append('project_id=?'); params.append(int(pid))
+            except (TypeError, ValueError):
+                pass
+    elif 'project_name' in data:
+        nm = (data.get('project_name') or '').strip()
+        if nm:
+            new_pid = _find_or_create_project(db, nm)
+            updates.append('project_id=?'); params.append(new_pid)
+        else:
+            updates.append('project_id=?'); params.append(None)
+
+    for key in ('name', 'contact_name', 'contact_email', 'contact_phone', 'project_notes'):
+        if key in data:
+            updates.append(f'{key}=?')
+            params.append((data.get(key) or '').strip() if key != 'project_notes' else (data.get(key) or ''))
+    if not updates:
+        db.close()
+        return jsonify({'success': False, 'error': 'No changes.'}), 400
+    params.append(gid)
+    db.execute(f"UPDATE overhead_labor_groups SET {', '.join(updates)} WHERE id=?", params)
+    log_audit(db, 'OVERHEAD_GROUP_EDIT', 'overhead_labor_group', gid)
+    db.commit()
+    refreshed = _fetch_overhead_group(db, gid)
+    db.close()
+    _overhead_log('OVERHEAD_GROUP_EDIT', id=gid)
+    return jsonify({'success': True, 'group': _normalize_row_dates(dict(refreshed)) if refreshed else None})
+
+
+@app.route('/api/overhead-crew/groups/<int:gid>', methods=['DELETE'])
+@login_required
+def api_overhead_group_delete(gid):
+    """Delete a sub-group and all its requests (ON DELETE CASCADE)."""
+    block = _overhead_write_check()
+    if block: return block
+    db = get_db()
+    row = db.execute('SELECT * FROM overhead_labor_groups WHERE id=?', (gid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    db.execute('DELETE FROM overhead_labor_requests WHERE group_id=?', (gid,))
+    db.execute('DELETE FROM overhead_labor_groups WHERE id=?', (gid,))
+    log_audit(db, 'OVERHEAD_GROUP_DELETE', 'overhead_labor_group', gid,
+              detail=f"{row['work_date']} · {row['name']}")
+    db.commit()
+    db.close()
+    _overhead_log('OVERHEAD_GROUP_DELETE', id=gid, date=row['work_date'], name=row['name'])
+    return jsonify({'success': True})
+
+
+@app.route('/api/overhead-crew/requests', methods=['POST'])
+@login_required
+def api_overhead_request_add():
+    """Add a labor line to a sub-group."""
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    gid = data.get('group_id')
+    if not gid:
+        return jsonify({'success': False, 'error': 'group_id required'}), 400
+    db = get_db()
+    grp = db.execute('SELECT id, work_date FROM overhead_labor_groups WHERE id=?', (gid,)).fetchone()
+    if not grp:
+        db.close()
+        return jsonify({'success': False, 'error': 'Group not found.'}), 404
+    cur = db.execute("""
+        INSERT INTO overhead_labor_requests
+            (group_id, work_date, position_id, in_time, out_time, break_start, break_end,
+             requested_name, sort_order, created_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, (
+        gid,
+        grp['work_date'],
+        data.get('position_id') or None,
+        (data.get('in_time') or '').strip(),
+        (data.get('out_time') or '').strip(),
+        (data.get('break_start') or '').strip(),
+        (data.get('break_end') or '').strip(),
+        (data.get('requested_name') or '').strip(),
+        _max_sort_order(db, 'overhead_labor_requests', 'group_id=?', (gid,)),
+        session.get('user_id'),
+    ))
+    rid = cur.lastrowid
+    log_audit(db, 'OVERHEAD_REQUEST_ADD', 'overhead_labor_request', rid,
+              detail=f"group={gid}")
+    db.commit()
+    row = _fetch_overhead_request(db, rid)
+    db.close()
+    out = _annotate_request_metrics(_normalize_row_dates(dict(row))) if row else {'id': rid}
+    _overhead_log('OVERHEAD_REQUEST_ADD', id=rid, group_id=gid)
+    return jsonify({'success': True, 'request': out})
+
+
+@app.route('/api/overhead-crew/requests/<int:rid>', methods=['PUT'])
+@login_required
+def api_overhead_request_update(rid):
+    """Update fields on a labor request line. Any of position_id, in/out/break times,
+    requested_name, is_scheduled, scheduled_crew_member_id."""
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    row = db.execute('SELECT * FROM overhead_labor_requests WHERE id=?', (rid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+
+    updates, params, detail_parts = [], [], []
+    if 'position_id' in data:
+        pid = data.get('position_id')
+        pid = int(pid) if pid else None
+        updates.append('position_id=?'); params.append(pid)
+        detail_parts.append(f'pos={pid}')
+    for f in ('in_time', 'out_time', 'break_start', 'break_end', 'requested_name',
+              'actual_in_time', 'actual_out_time', 'actual_break_start', 'actual_break_end',
+              'notes'):
+        if f in data:
+            updates.append(f'{f}=?'); params.append((data.get(f) or '').strip())
+    if 'is_scheduled' in data:
+        updates.append('is_scheduled=?'); params.append(1 if data.get('is_scheduled') else 0)
+        detail_parts.append(f"sched={1 if data.get('is_scheduled') else 0}")
+    if 'scheduled_crew_member_id' in data:
+        cmid = data.get('scheduled_crew_member_id')
+        cmid = int(cmid) if cmid else None
+        updates.append('scheduled_crew_member_id=?'); params.append(cmid)
+        updates.append('scheduled_by=?'); params.append(session['user_id'])
+        updates.append('scheduled_at=CURRENT_TIMESTAMP')
+        detail_parts.append(f'crew={cmid}')
+
+        # Snapshot the crew member's current rate level so future rate edits
+        # don't rewrite the cost history. Cleared when the scheduling is removed.
+        if cmid:
+            level = db.execute("""
+                SELECT prl.id, prl.hourly_rate
+                FROM crew_members cm
+                LEFT JOIN pay_rate_levels prl ON prl.id = cm.rate_level_id
+                WHERE cm.id=?
+            """, (cmid,)).fetchone()
+            if level:
+                updates.append('pay_rate_snapshot=?');           params.append(level['hourly_rate'])
+                updates.append('pay_rate_level_id_snapshot=?');  params.append(level['id'])
+        else:
+            updates.append('pay_rate_snapshot=?');          params.append(None)
+            updates.append('pay_rate_level_id_snapshot=?'); params.append(None)
+
+    if not updates:
+        db.close()
+        return jsonify({'success': False, 'error': 'No changes.'}), 400
+
+    params.append(rid)
+    db.execute(f"UPDATE overhead_labor_requests SET {', '.join(updates)} WHERE id=?", params)
+    log_audit(db, 'OVERHEAD_REQUEST_EDIT', 'overhead_labor_request', rid,
+              detail='; '.join(detail_parts))
+    db.commit()
+    refreshed = _fetch_overhead_request(db, rid)
+    db.close()
+    out = _annotate_request_metrics(_normalize_row_dates(dict(refreshed))) if refreshed else None
+    _overhead_log('OVERHEAD_REQUEST_EDIT', id=rid)
+    return jsonify({'success': True, 'request': out})
+
+
+@app.route('/api/overhead-crew/requests/<int:rid>', methods=['DELETE'])
+@login_required
+def api_overhead_request_delete(rid):
+    """Delete a single labor line."""
+    block = _overhead_write_check()
+    if block: return block
+    db = get_db()
+    row = db.execute('SELECT id FROM overhead_labor_requests WHERE id=?', (rid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    db.execute('DELETE FROM overhead_labor_requests WHERE id=?', (rid,))
+    log_audit(db, 'OVERHEAD_REQUEST_DELETE', 'overhead_labor_request', rid)
+    db.commit()
+    db.close()
+    _overhead_log('OVERHEAD_REQUEST_DELETE', id=rid)
+    return jsonify({'success': True})
+
+
+# ── Recurring templates ──────────────────────────────────────────────────────
+
+_OVERHEAD_TEMPLATE_JOIN_SELECT = """
+    SELECT t.*, jp.name AS position_name
+    FROM overhead_labor_templates t
+    LEFT JOIN job_positions jp ON jp.id = t.position_id
+"""
+
+
+def _template_row_to_dict(r):
+    d = _normalize_row_dates(dict(r))
+    d['days_of_week'] = sorted(_parse_dow_csv(d.get('days_of_week')))
+    return d
+
+
+@app.route('/api/overhead-crew/templates', methods=['GET'])
+@login_required
+def api_overhead_templates_list():
+    db = get_db()
+    rows = db.execute(
+        _OVERHEAD_TEMPLATE_JOIN_SELECT + ' ORDER BY t.is_active DESC, t.sort_order, t.id'
+    ).fetchall()
+    db.close()
+    return jsonify([_template_row_to_dict(r) for r in rows])
+
+
+def _template_payload_from_request(data):
+    """Normalize an inbound payload into the column tuple/values we INSERT/UPDATE.
+    Returns (col_assignments_dict)."""
+    days = data.get('days_of_week')
+    if isinstance(days, list):
+        # Same validation as _parse_dow_csv: keep only 0..6
+        days_csv = ','.join(str(n) for n in sorted(_parse_dow_csv(','.join(str(d) for d in days))))
+    else:
+        days_csv = ','.join(str(n) for n in sorted(_parse_dow_csv(data.get('days_of_week') or '')))
+    return {
+        'name':                   (data.get('name') or '').strip(),
+        'position_id':            (int(data['position_id']) if data.get('position_id') else None),
+        'quantity':               max(1, int(data.get('quantity') or 1)),
+        'days_of_week':           days_csv,
+        'start_date':             (_parse_iso_date(data.get('start_date')).isoformat() if data.get('start_date') else None),
+        'end_date':               (_parse_iso_date(data.get('end_date')).isoformat() if data.get('end_date') else None),
+        'in_time':                (data.get('in_time') or '').strip(),
+        'out_time':               (data.get('out_time') or '').strip(),
+        'break_start':            (data.get('break_start') or '').strip(),
+        'break_end':              (data.get('break_end') or '').strip(),
+        'default_group_name':     (data.get('default_group_name') or 'Overhead').strip() or 'Overhead',
+        'default_contact_name':   (data.get('default_contact_name') or '').strip(),
+        'default_contact_email':  (data.get('default_contact_email') or '').strip(),
+        'default_contact_phone':  (data.get('default_contact_phone') or '').strip(),
+        'default_project_notes':  data.get('default_project_notes') or '',
+        'is_active':              1 if data.get('is_active', True) else 0,
+    }
+
+
+@app.route('/api/overhead-crew/templates', methods=['POST'])
+@login_required
+def api_overhead_templates_add():
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    payload = _template_payload_from_request(data)
+    if not payload['name']:
+        return jsonify({'success': False, 'error': 'Template name is required.'}), 400
+    db = get_db()
+    cols = list(payload.keys()) + ['sort_order']
+    vals = list(payload.values()) + [_max_sort_order(db, 'overhead_labor_templates')]
+    placeholders = ','.join(['?'] * len(cols))
+    cur = db.execute(
+        f"INSERT INTO overhead_labor_templates ({','.join(cols)}) VALUES ({placeholders})",
+        vals,
+    )
+    tid = cur.lastrowid
+    log_audit(db, 'OVERHEAD_TEMPLATE_ADD', 'overhead_labor_template', tid,
+              detail=payload['name'])
+    db.commit()
+    row = db.execute(_OVERHEAD_TEMPLATE_JOIN_SELECT + ' WHERE t.id=?', (tid,)).fetchone()
+    db.close()
+    _overhead_log('OVERHEAD_TEMPLATE_ADD', id=tid, name=payload['name'])
+    return jsonify({'success': True, 'template': _template_row_to_dict(row) if row else {'id': tid}})
+
+
+@app.route('/api/overhead-crew/templates/<int:tid>', methods=['PUT'])
+@login_required
+def api_overhead_templates_update(tid):
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    payload = _template_payload_from_request(data)
+    if not payload['name']:
+        return jsonify({'success': False, 'error': 'Template name is required.'}), 400
+    db = get_db()
+    row = db.execute('SELECT id FROM overhead_labor_templates WHERE id=?', (tid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    set_clause = ', '.join(f'{k}=?' for k in payload.keys())
+    db.execute(
+        f'UPDATE overhead_labor_templates SET {set_clause} WHERE id=?',
+        list(payload.values()) + [tid],
+    )
+    log_audit(db, 'OVERHEAD_TEMPLATE_EDIT', 'overhead_labor_template', tid,
+              detail=payload['name'])
+    db.commit()
+    refreshed = db.execute(_OVERHEAD_TEMPLATE_JOIN_SELECT + ' WHERE t.id=?', (tid,)).fetchone()
+    db.close()
+    _overhead_log('OVERHEAD_TEMPLATE_EDIT', id=tid, name=payload['name'])
+    return jsonify({'success': True, 'template': _template_row_to_dict(refreshed) if refreshed else None})
+
+
+@app.route('/api/overhead-crew/templates/<int:tid>', methods=['DELETE'])
+@login_required
+def api_overhead_templates_delete(tid):
+    block = _overhead_write_check()
+    if block: return block
+    db = get_db()
+    row = db.execute('SELECT * FROM overhead_labor_templates WHERE id=?', (tid,)).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    db.execute('DELETE FROM overhead_labor_templates WHERE id=?', (tid,))
+    log_audit(db, 'OVERHEAD_TEMPLATE_DELETE', 'overhead_labor_template', tid,
+              detail=row['name'])
+    db.commit()
+    db.close()
+    _overhead_log('OVERHEAD_TEMPLATE_DELETE', id=tid, name=row['name'])
+    return jsonify({'success': True})
+
+
+@app.route('/api/overhead-crew/templates/generate', methods=['POST'])
+@login_required
+def api_overhead_templates_generate():
+    """Generate labor requests from active templates for every date in [from, to]
+    that matches a template's days_of_week. Idempotent: skips creating duplicate
+    request lines that already exist for the same (date, group, position, in_time, out_time).
+
+    Body: {from: 'YYYY-MM-DD', to: 'YYYY-MM-DD', template_id?: int}
+    If template_id is omitted, all active templates are applied.
+    """
+    block = _overhead_write_check()
+    if block: return block
+    data = request.get_json(force=True) or {}
+    df = _parse_iso_date(data.get('from'))
+    dt = _parse_iso_date(data.get('to'))
+    if not df or not dt:
+        return jsonify({'success': False, 'error': 'Valid from + to dates required.'}), 400
+    if dt < df:
+        return jsonify({'success': False, 'error': 'to must be on or after from.'}), 400
+
+    only_id = data.get('template_id')
+    db = get_db()
+    sql = "SELECT * FROM overhead_labor_templates WHERE is_active=1"
+    params = []
+    if only_id:
+        sql += " AND id=?"
+        params.append(int(only_id))
+    templates = db.execute(sql, params).fetchall()
+
+    requests_created = 0
+    groups_created   = 0
+    skipped          = 0
+
+    # Cache project upserts per (run, template) so multiple matching dates re-use
+    # the same project_id without a DB round-trip per day.
+    project_id_cache = {}
+
+    for t in templates:
+        wanted = _parse_dow_csv(t['days_of_week'])
+        if not wanted:
+            continue
+
+        t_start = _parse_iso_date(t['start_date']) if t['start_date'] else None
+        t_end   = _parse_iso_date(t['end_date'])   if t['end_date']   else None
+
+        # Auto-link the template's default group name to a project (creates one
+        # on first generate so lifetime stats roll up correctly).
+        gname = t['default_group_name'] or 'Overhead'
+        if gname not in project_id_cache:
+            project_id_cache[gname] = _find_or_create_project(
+                db, gname,
+                defaults={
+                    'contact_name':  t['default_contact_name'],
+                    'contact_email': t['default_contact_email'],
+                    'contact_phone': t['default_contact_phone'],
+                    'project_notes': t['default_project_notes'],
+                },
+            )
+        project_id = project_id_cache[gname]
+
+        # Build an equality predicate for position_id that works on both engines
+        # (PostgreSQL rejects `col IS ?` when ? binds to NULL).
+        pos_id = t['position_id']
+        if pos_id is None:
+            pos_pred  = 'position_id IS NULL'
+            pos_param = []
+        else:
+            pos_pred  = 'position_id = ?'
+            pos_param = [pos_id]
+
+        cur_date = df
+        last_generated = _parse_iso_date(t['last_generated_through']) if t['last_generated_through'] else None
+        while cur_date <= dt:
+            # Python weekday: Mon=0..Sun=6 → JS getDay: Sun=0..Sat=6
+            js_w = (cur_date.weekday() + 1) % 7
+            in_range = (
+                (t_start is None or cur_date >= t_start) and
+                (t_end   is None or cur_date <= t_end)
+            )
+            if js_w in wanted and in_range:
+                iso = cur_date.isoformat()
+
+                # Find or create the target group (same date + group name).
+                grp = db.execute(
+                    "SELECT id FROM overhead_labor_groups WHERE work_date=? AND name=? LIMIT 1",
+                    (iso, gname),
+                ).fetchone()
+                if not grp:
+                    cur_g = db.execute("""
+                        INSERT INTO overhead_labor_groups
+                            (work_date, project_id, name, contact_name, contact_email,
+                             contact_phone, project_notes, sort_order, created_by)
+                        VALUES (?,?,?,?,?,?,?,?,?)
+                    """, (
+                        iso, project_id, gname,
+                        t['default_contact_name'] or '',
+                        t['default_contact_email'] or '',
+                        t['default_contact_phone'] or '',
+                        t['default_project_notes'] or '',
+                        _max_sort_order(db, 'overhead_labor_groups', 'work_date=?', (iso,)),
+                        session.get('user_id'),
+                    ))
+                    gid = cur_g.lastrowid
+                    groups_created += 1
+                else:
+                    gid = grp['id']
+
+                # Idempotency: count matching lines once, only insert (qty - existing)
+                # additional ones. Matching = same position + in/out within this group.
+                existing = db.execute(
+                    f"""SELECT COUNT(*) FROM overhead_labor_requests
+                        WHERE group_id=? AND {pos_pred} AND in_time=? AND out_time=?""",
+                    [gid] + pos_param + [t['in_time'] or '', t['out_time'] or ''],
+                ).fetchone()[0] or 0
+                qty = max(1, int(t['quantity'] or 1))
+                to_insert = max(0, qty - existing)
+                if to_insert == 0:
+                    skipped += 1
+                else:
+                    next_sort = _max_sort_order(db, 'overhead_labor_requests', 'group_id=?', (gid,))
+                    for i in range(to_insert):
+                        db.execute("""
+                            INSERT INTO overhead_labor_requests
+                                (group_id, work_date, position_id, in_time, out_time,
+                                 break_start, break_end, requested_name, sort_order, created_by)
+                            VALUES (?,?,?,?,?,?,?,?,?,?)
+                        """, (
+                            gid, iso, t['position_id'],
+                            t['in_time'] or '', t['out_time'] or '',
+                            t['break_start'] or '', t['break_end'] or '',
+                            '', next_sort + (i * 10),
+                            session.get('user_id'),
+                        ))
+                        requests_created += 1
+            cur_date = cur_date + timedelta(days=1)
+
+        # Bump last_generated_through if we extended coverage
+        if last_generated is None or dt > last_generated:
+            db.execute(
+                'UPDATE overhead_labor_templates SET last_generated_through=? WHERE id=?',
+                (dt.isoformat(), t['id'])
+            )
+
+    log_audit(db, 'OVERHEAD_TEMPLATE_GENERATE', 'overhead_labor_template',
+              detail=f"{df.isoformat()}→{dt.isoformat()} created={requests_created} groups={groups_created}")
+    db.commit()
+    db.close()
+    _overhead_log('OVERHEAD_GENERATE',
+                  range_from=df.isoformat(), range_to=dt.isoformat(),
+                  template_id=only_id,
+                  requests_created=requests_created,
+                  groups_created=groups_created,
+                  skipped=skipped)
+    return jsonify({
+        'success': True,
+        'requests_created': requests_created,
+        'groups_created':   groups_created,
+        'skipped':          skipped,
+    })
 
 
 # ─── Crew Members ────────────────────────────────────────────────────────────
