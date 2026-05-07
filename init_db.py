@@ -319,6 +319,99 @@ CREATE TABLE IF NOT EXISTS crew_qualifications (
     PRIMARY KEY (crew_member_id, position_id)
 );
 
+-- Overhead & Project Crew (labor not tied to any show)
+--
+-- Projects are the equivalent of "arts groups" for overhead/project crew —
+-- a global pickable list of recurring projects. A sub-group (per-day) ties a
+-- project to a date and may carry per-instance contact / notes overrides.
+--
+-- Schema is intentionally rich (rate snapshots, actuals, billing fields)
+-- so reports built later can pull cost / labor / project history without
+-- needing further migrations.
+CREATE TABLE IF NOT EXISTS overhead_projects (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    name          TEXT UNIQUE NOT NULL,
+    description   TEXT DEFAULT '',
+    client_name   TEXT DEFAULT '',
+    billing_code  TEXT DEFAULT '',
+    contact_name  TEXT DEFAULT '',
+    contact_email TEXT DEFAULT '',
+    contact_phone TEXT DEFAULT '',
+    project_notes TEXT DEFAULT '',
+    color         TEXT DEFAULT '',
+    archived      INTEGER DEFAULT 0,
+    sort_order    INTEGER DEFAULT 0,
+    created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS overhead_labor_groups (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_date     DATE NOT NULL,
+    project_id    INTEGER REFERENCES overhead_projects(id) ON DELETE SET NULL,
+    name          TEXT NOT NULL DEFAULT 'General',
+    contact_name  TEXT DEFAULT '',
+    contact_email TEXT DEFAULT '',
+    contact_phone TEXT DEFAULT '',
+    project_notes TEXT DEFAULT '',
+    sort_order    INTEGER DEFAULT 0,
+    created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS overhead_labor_requests (
+    id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+    group_id                    INTEGER NOT NULL REFERENCES overhead_labor_groups(id) ON DELETE CASCADE,
+    work_date                   DATE NOT NULL,
+    position_id                 INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+    in_time                     TEXT DEFAULT '',
+    out_time                    TEXT DEFAULT '',
+    break_start                 TEXT DEFAULT '',
+    break_end                   TEXT DEFAULT '',
+    requested_name              TEXT DEFAULT '',
+    is_scheduled                INTEGER DEFAULT 0,
+    scheduled_crew_member_id    INTEGER,
+    scheduled_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    scheduled_at                TIMESTAMP,
+    -- Rate captured at scheduling time so future rate changes don't rewrite history
+    pay_rate_snapshot           REAL DEFAULT NULL,
+    pay_rate_level_id_snapshot  INTEGER DEFAULT NULL,
+    -- Actual times worked (vs planned in/out/break) — for post-shift reconciliation
+    actual_in_time              TEXT DEFAULT '',
+    actual_out_time             TEXT DEFAULT '',
+    actual_break_start          TEXT DEFAULT '',
+    actual_break_end            TEXT DEFAULT '',
+    notes                       TEXT DEFAULT '',
+    sort_order                  INTEGER DEFAULT 0,
+    created_by                  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Recurring templates — auto-generates labor requests on selected weekdays.
+-- days_of_week is a CSV of 0..6 where 0 = Sunday, 1 = Monday, …, 6 = Saturday.
+CREATE TABLE IF NOT EXISTS overhead_labor_templates (
+    id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                   TEXT NOT NULL,
+    position_id            INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+    quantity               INTEGER DEFAULT 1,
+    days_of_week           TEXT DEFAULT '',
+    start_date             DATE,
+    end_date               DATE,
+    in_time                TEXT DEFAULT '',
+    out_time               TEXT DEFAULT '',
+    break_start            TEXT DEFAULT '',
+    break_end              TEXT DEFAULT '',
+    default_group_name     TEXT DEFAULT 'Overhead',
+    default_contact_name   TEXT DEFAULT '',
+    default_contact_email  TEXT DEFAULT '',
+    default_contact_phone  TEXT DEFAULT '',
+    default_project_notes  TEXT DEFAULT '',
+    is_active              INTEGER DEFAULT 1,
+    last_generated_through DATE,
+    sort_order             INTEGER DEFAULT 0,
+    created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE IF NOT EXISTS audit_log (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     timestamp   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1142,6 +1235,7 @@ def migrate_db():
         'ALTER TABLE audit_log ADD COLUMN undone_at TIMESTAMP',
         'ALTER TABLE audit_log ADD COLUMN undone_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
         'ALTER TABLE audit_log ADD COLUMN undone_by_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL',
+        'ALTER TABLE overhead_labor_groups ADD COLUMN project_id INTEGER REFERENCES overhead_projects(id) ON DELETE SET NULL',
     ]:
         try:
             conn.execute(alter_sql)
@@ -1204,6 +1298,90 @@ def migrate_db():
             position_id    INTEGER NOT NULL REFERENCES job_positions(id) ON DELETE CASCADE,
             PRIMARY KEY (crew_member_id, position_id)
         );
+
+        CREATE TABLE IF NOT EXISTS overhead_projects (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            name          TEXT UNIQUE NOT NULL,
+            description   TEXT DEFAULT '',
+            client_name   TEXT DEFAULT '',
+            billing_code  TEXT DEFAULT '',
+            contact_name  TEXT DEFAULT '',
+            contact_email TEXT DEFAULT '',
+            contact_phone TEXT DEFAULT '',
+            project_notes TEXT DEFAULT '',
+            color         TEXT DEFAULT '',
+            archived      INTEGER DEFAULT 0,
+            sort_order    INTEGER DEFAULT 0,
+            created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS overhead_labor_groups (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            work_date     DATE NOT NULL,
+            project_id    INTEGER REFERENCES overhead_projects(id) ON DELETE SET NULL,
+            name          TEXT NOT NULL DEFAULT 'General',
+            contact_name  TEXT DEFAULT '',
+            contact_email TEXT DEFAULT '',
+            contact_phone TEXT DEFAULT '',
+            project_notes TEXT DEFAULT '',
+            sort_order    INTEGER DEFAULT 0,
+            created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS overhead_labor_requests (
+            id                          INTEGER PRIMARY KEY AUTOINCREMENT,
+            group_id                    INTEGER NOT NULL REFERENCES overhead_labor_groups(id) ON DELETE CASCADE,
+            work_date                   DATE NOT NULL,
+            position_id                 INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+            in_time                     TEXT DEFAULT '',
+            out_time                    TEXT DEFAULT '',
+            break_start                 TEXT DEFAULT '',
+            break_end                   TEXT DEFAULT '',
+            requested_name              TEXT DEFAULT '',
+            is_scheduled                INTEGER DEFAULT 0,
+            scheduled_crew_member_id    INTEGER,
+            scheduled_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            scheduled_at                TIMESTAMP,
+            pay_rate_snapshot           REAL DEFAULT NULL,
+            pay_rate_level_id_snapshot  INTEGER DEFAULT NULL,
+            actual_in_time              TEXT DEFAULT '',
+            actual_out_time             TEXT DEFAULT '',
+            actual_break_start          TEXT DEFAULT '',
+            actual_break_end            TEXT DEFAULT '',
+            notes                       TEXT DEFAULT '',
+            sort_order                  INTEGER DEFAULT 0,
+            created_by                  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS overhead_labor_templates (
+            id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                   TEXT NOT NULL,
+            position_id            INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+            quantity               INTEGER DEFAULT 1,
+            days_of_week           TEXT DEFAULT '',
+            start_date             DATE,
+            end_date               DATE,
+            in_time                TEXT DEFAULT '',
+            out_time               TEXT DEFAULT '',
+            break_start            TEXT DEFAULT '',
+            break_end              TEXT DEFAULT '',
+            default_group_name     TEXT DEFAULT 'Overhead',
+            default_contact_name   TEXT DEFAULT '',
+            default_contact_email  TEXT DEFAULT '',
+            default_contact_phone  TEXT DEFAULT '',
+            default_project_notes  TEXT DEFAULT '',
+            is_active              INTEGER DEFAULT 1,
+            last_generated_through DATE,
+            sort_order             INTEGER DEFAULT 0,
+            created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_oh_groups_date ON overhead_labor_groups(work_date);
+        CREATE INDEX IF NOT EXISTS idx_oh_requests_date ON overhead_labor_requests(work_date);
+        CREATE INDEX IF NOT EXISTS idx_oh_requests_group ON overhead_labor_requests(group_id);
     """)
 
     # Audit trail and comment versioning tables (safe to rerun)
@@ -1936,6 +2114,90 @@ CREATE TABLE IF NOT EXISTS crew_qualifications (
     PRIMARY KEY (crew_member_id, position_id)
 );
 
+CREATE TABLE IF NOT EXISTS overhead_projects (
+    id            SERIAL PRIMARY KEY,
+    name          TEXT UNIQUE NOT NULL,
+    description   TEXT DEFAULT '',
+    client_name   TEXT DEFAULT '',
+    billing_code  TEXT DEFAULT '',
+    contact_name  TEXT DEFAULT '',
+    contact_email TEXT DEFAULT '',
+    contact_phone TEXT DEFAULT '',
+    project_notes TEXT DEFAULT '',
+    color         TEXT DEFAULT '',
+    archived      INTEGER DEFAULT 0,
+    sort_order    INTEGER DEFAULT 0,
+    created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS overhead_labor_groups (
+    id            SERIAL PRIMARY KEY,
+    work_date     DATE NOT NULL,
+    project_id    INTEGER REFERENCES overhead_projects(id) ON DELETE SET NULL,
+    name          TEXT NOT NULL DEFAULT 'General',
+    contact_name  TEXT DEFAULT '',
+    contact_email TEXT DEFAULT '',
+    contact_phone TEXT DEFAULT '',
+    project_notes TEXT DEFAULT '',
+    sort_order    INTEGER DEFAULT 0,
+    created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS overhead_labor_requests (
+    id                          SERIAL PRIMARY KEY,
+    group_id                    INTEGER NOT NULL REFERENCES overhead_labor_groups(id) ON DELETE CASCADE,
+    work_date                   DATE NOT NULL,
+    position_id                 INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+    in_time                     TEXT DEFAULT '',
+    out_time                    TEXT DEFAULT '',
+    break_start                 TEXT DEFAULT '',
+    break_end                   TEXT DEFAULT '',
+    requested_name              TEXT DEFAULT '',
+    is_scheduled                INTEGER DEFAULT 0,
+    scheduled_crew_member_id    INTEGER,
+    scheduled_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    scheduled_at                TIMESTAMP,
+    pay_rate_snapshot           REAL DEFAULT NULL,
+    pay_rate_level_id_snapshot  INTEGER DEFAULT NULL,
+    actual_in_time              TEXT DEFAULT '',
+    actual_out_time             TEXT DEFAULT '',
+    actual_break_start          TEXT DEFAULT '',
+    actual_break_end            TEXT DEFAULT '',
+    notes                       TEXT DEFAULT '',
+    sort_order                  INTEGER DEFAULT 0,
+    created_by                  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at                  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS overhead_labor_templates (
+    id                     SERIAL PRIMARY KEY,
+    name                   TEXT NOT NULL,
+    position_id            INTEGER REFERENCES job_positions(id) ON DELETE SET NULL,
+    quantity               INTEGER DEFAULT 1,
+    days_of_week           TEXT DEFAULT '',
+    start_date             DATE,
+    end_date               DATE,
+    in_time                TEXT DEFAULT '',
+    out_time               TEXT DEFAULT '',
+    break_start            TEXT DEFAULT '',
+    break_end              TEXT DEFAULT '',
+    default_group_name     TEXT DEFAULT 'Overhead',
+    default_contact_name   TEXT DEFAULT '',
+    default_contact_email  TEXT DEFAULT '',
+    default_contact_phone  TEXT DEFAULT '',
+    default_project_notes  TEXT DEFAULT '',
+    is_active              INTEGER DEFAULT 1,
+    last_generated_through DATE,
+    sort_order             INTEGER DEFAULT 0,
+    created_at             TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_oh_groups_date ON overhead_labor_groups(work_date);
+CREATE INDEX IF NOT EXISTS idx_oh_requests_date ON overhead_labor_requests(work_date);
+CREATE INDEX IF NOT EXISTS idx_oh_requests_group ON overhead_labor_requests(group_id);
+
 -- ── Audit & Versioning ────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -2467,6 +2729,23 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".audit_log ADD COLUMN IF NOT EXISTS undone_at TIMESTAMP',
             f'ALTER TABLE "{app_schema}".audit_log ADD COLUMN IF NOT EXISTS undone_by INTEGER',
             f'ALTER TABLE "{app_schema}".audit_log ADD COLUMN IF NOT EXISTS undone_by_log_id INTEGER',
+            # ── Overhead & Project Crew ──────────────────────────────────────
+            f'ALTER TABLE "{app_schema}".overhead_labor_groups ADD COLUMN IF NOT EXISTS project_id INTEGER',
+            f'ALTER TABLE "{app_schema}".overhead_labor_groups ADD COLUMN IF NOT EXISTS created_by INTEGER',
+            f'ALTER TABLE "{app_schema}".overhead_labor_requests ADD COLUMN IF NOT EXISTS pay_rate_snapshot REAL DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".overhead_labor_requests ADD COLUMN IF NOT EXISTS pay_rate_level_id_snapshot INTEGER DEFAULT NULL',
+            f"ALTER TABLE \"{app_schema}\".overhead_labor_requests ADD COLUMN IF NOT EXISTS actual_in_time TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".overhead_labor_requests ADD COLUMN IF NOT EXISTS actual_out_time TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".overhead_labor_requests ADD COLUMN IF NOT EXISTS actual_break_start TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".overhead_labor_requests ADD COLUMN IF NOT EXISTS actual_break_end TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".overhead_labor_requests ADD COLUMN IF NOT EXISTS notes TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".overhead_labor_requests ADD COLUMN IF NOT EXISTS created_by INTEGER',
+            f"ALTER TABLE \"{app_schema}\".overhead_projects ADD COLUMN IF NOT EXISTS description TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".overhead_projects ADD COLUMN IF NOT EXISTS client_name TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".overhead_projects ADD COLUMN IF NOT EXISTS billing_code TEXT DEFAULT ''",
+            f"ALTER TABLE \"{app_schema}\".overhead_projects ADD COLUMN IF NOT EXISTS color TEXT DEFAULT ''",
+            f'ALTER TABLE "{app_schema}".overhead_projects ADD COLUMN IF NOT EXISTS archived INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".overhead_projects ADD COLUMN IF NOT EXISTS created_by INTEGER',
         ]
 
         shared_alters = [
@@ -2546,6 +2825,9 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
         # ── Depend on asset_items / show_comments / crew_members ──────────────
         'asset_logs', 'asset_maintenance', 'show_assets', 'show_external_rentals',
         'comment_versions', 'crew_qualifications', 'audit_log',
+        # ── Overhead & Project Crew (parents first) ─────────────────────────
+        'overhead_projects',
+        'overhead_labor_groups', 'overhead_labor_requests', 'overhead_labor_templates',
     ]
 
     src = sqlite3.connect(sqlite_path)
@@ -2698,6 +2980,9 @@ def migrate_sqlite_to_postgres(sqlite_path, pg_settings, progress_callback=None)
         'ai_sessions',
         # Added in v2.3.0+
         'asset_logs',
+        # Overhead & Project Crew
+        'overhead_projects',
+        'overhead_labor_groups', 'overhead_labor_requests', 'overhead_labor_templates',
     ]
     for table in serial_tables:
         try:

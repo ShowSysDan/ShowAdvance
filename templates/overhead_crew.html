@@ -1,0 +1,1538 @@
+{% extends "base.html" %}
+{% block title %}Overhead &amp; Project Crew — 3·2·1→Theater{% endblock %}
+
+{% block head %}
+<style>
+  /* ── Filters / page chrome ─────────────────────────────────────── */
+  .oh-filter {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: flex-end;
+    margin-bottom: 16px;
+  }
+  .oh-filter .field-group { display: flex; flex-direction: column; gap: 4px; }
+  .oh-filter label {
+    font-size: 11px;
+    letter-spacing: .04em;
+    color: var(--text-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .oh-filter input[type=date] { min-width: 160px; }
+  .oh-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-dim);
+    font-size: 13px;
+  }
+
+  /* ── Day cards ─────────────────────────────────────────────────── */
+  .oh-day {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    margin-bottom: 18px;
+    overflow: hidden;
+  }
+  .oh-day-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-surface);
+    border-bottom: 1px solid var(--border);
+  }
+  .oh-day-label {
+    font-weight: 700; letter-spacing: .04em;
+    font-size: 13px; color: var(--text); text-transform: uppercase;
+  }
+  .oh-day-date-pill {
+    font-size: 11px; font-family: var(--font-mono, monospace);
+    color: var(--text-dim);
+    background: var(--bg-input, var(--bg-surface));
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 2px 8px;
+  }
+  .oh-day-totals {
+    display: flex; gap: 14px; align-items: center;
+    font-size: 11px; color: var(--text-dim);
+  }
+  .oh-day-totals strong { color: var(--text); font-family: var(--font-mono, monospace); }
+  .oh-day-actions { display: flex; gap: 6px; margin-left: auto; }
+
+  /* ── Sub-groups inside a day ───────────────────────────────────── */
+  .oh-group { border-top: 1px solid var(--border); padding: 12px 14px; }
+  .oh-group:first-of-type { border-top: none; }
+  .oh-group-title-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;
+  }
+  .oh-group-name-display {
+    font-weight: 700; font-size: 14px; color: var(--text);
+    display: inline-flex; align-items: center; gap: 6px;
+  }
+  .oh-group-name-display .client-tag {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-weight: 400;
+  }
+  .oh-group-color-swatch {
+    display: inline-block; width: 10px; height: 10px;
+    border-radius: 3px; background: var(--accent);
+  }
+  .oh-group-totals {
+    margin-left: auto;
+    font-size: 11px; color: var(--text-dim);
+    display: flex; gap: 14px; align-items: center;
+  }
+  .oh-group-totals strong { color: var(--text); font-family: var(--font-mono, monospace); }
+
+  .oh-group-meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 8px; margin-bottom: 10px;
+  }
+  .oh-group-meta .field-group { display: flex; flex-direction: column; gap: 2px; }
+  .oh-group-meta label {
+    font-size: 10px; letter-spacing: .04em;
+    color: var(--text-dim); font-weight: 600; text-transform: uppercase;
+  }
+  .oh-group-meta input[readonly],
+  .oh-group-notes textarea[readonly] {
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    cursor: default;
+  }
+  .oh-group-notes textarea {
+    width: 100%; min-height: 48px; resize: vertical;
+    font-family: inherit; font-size: 12px;
+    background: var(--bg-input, var(--bg-surface));
+    border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); padding: 6px 8px;
+  }
+  .oh-inherited-hint {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-style: italic;
+  }
+
+  /* ── Labor request table ───────────────────────────────────────── */
+  .oh-time-input {
+    width: 74px; padding: 3px 5px;
+    font-size: 12px; font-family: var(--font-mono, monospace);
+    text-align: center;
+    background: var(--bg-input, var(--bg-surface));
+    border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text);
+  }
+  .oh-time-input:focus { outline: none; border-color: var(--accent); }
+  .oh-scheduled-row { background: rgba(72, 187, 120, 0.08); }
+
+  /* ── Project summary section ───────────────────────────────────── */
+  .oh-summary { margin-bottom: 16px; }
+  .oh-summary-toggle {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    font-size: 11px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: .04em;
+    background: none; border: none; padding: 0;
+  }
+  .oh-summary-toggle:hover { color: var(--text); }
+  .oh-summary-table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+  .oh-summary-table th,
+  .oh-summary-table td {
+    padding: 6px 10px; border-bottom: 1px solid var(--border);
+    font-size: 12px; text-align: left;
+  }
+  .oh-summary-table th {
+    color: var(--text-dim); font-weight: 600;
+    text-transform: uppercase; letter-spacing: .04em; font-size: 10px;
+    background: var(--bg-surface);
+  }
+  .oh-summary-table td.num,
+  .oh-summary-table th.num { text-align: right; font-family: var(--font-mono, monospace); }
+  .oh-summary-table tfoot td { font-weight: 700; border-top: 2px solid var(--border); background: var(--bg-surface); }
+  .oh-summary-table tr.archived td { color: var(--text-muted); }
+
+  /* ── Modals (reuse existing .modal-overlay / .modal-card) ──────── */
+  .oh-modal-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-lg);
+    width: 760px; max-width: 92vw; max-height: 90vh; overflow: auto;
+  }
+
+  /* ── Recurring template form ───────────────────────────────────── */
+  .oh-tpl-list { display: flex; flex-direction: column; gap: 8px; }
+  .oh-tpl-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: center;
+    padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--bg-surface);
+  }
+  .oh-tpl-row.disabled { opacity: 0.55; }
+  .oh-tpl-row .tpl-name { font-weight: 600; font-size: 13px; }
+  .oh-tpl-row .tpl-sub  { font-size: 11px; color: var(--text-dim); }
+  .oh-tpl-form,
+  .oh-proj-form {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 10px; margin-top: 14px; padding-top: 14px;
+    border-top: 1px dashed var(--border);
+  }
+  .oh-tpl-form .field-group,
+  .oh-proj-form .field-group { display: flex; flex-direction: column; gap: 3px; }
+  .oh-tpl-form label,
+  .oh-proj-form label {
+    font-size: 10px; letter-spacing: .04em;
+    color: var(--text-dim); font-weight: 600; text-transform: uppercase;
+  }
+  .oh-dow { display: flex; gap: 4px; flex-wrap: wrap; }
+  .oh-dow label {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 8px; border: 1px solid var(--border); border-radius: 4px;
+    background: var(--bg-input, var(--bg-surface));
+    cursor: pointer; font-size: 11px;
+    text-transform: none; letter-spacing: 0; color: var(--text);
+  }
+  .oh-dow label.checked { background: rgba(245,127,32,.18); border-color: var(--accent); color: var(--accent); }
+  .oh-dow input { display: none; }
+
+  /* Hide write-only controls when read-only */
+  body.oh-readonly .oh-write-only { display: none !important; }
+
+  .oh-help { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+  .oh-pill {
+    display: inline-block; font-size: 10px;
+    padding: 1px 6px; border-radius: 999px;
+    background: rgba(245,127,32,.18); color: var(--accent);
+    margin-left: 6px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+{% set CAN_EDIT = can_edit %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Overhead &amp; Project Crew</h1>
+    <p class="page-sub">Running list of labor requests not tied to a show. Closest dates on top.</p>
+  </div>
+  <div class="header-actions">
+    {% if CAN_EDIT %}
+    <button class="btn btn-ghost" onclick="window.__overhead.openProjectMgr()">Projects</button>
+    <button class="btn btn-ghost" onclick="window.__overhead.openTemplateMgr()">Recurring Templates</button>
+    <button class="btn btn-ghost" onclick="window.__overhead.promptGenerate()">Generate from Templates</button>
+    <button class="btn btn-primary" onclick="window.__overhead.addDayPrompt()">+ Add Day</button>
+    {% endif %}
+  </div>
+</div>
+
+<div class="form-section">
+  <div class="form-section-body">
+    <div class="oh-filter">
+      <div class="field-group">
+        <label for="oh-from">From</label>
+        <input type="date" id="oh-from" class="field-input">
+      </div>
+      <div class="field-group">
+        <label for="oh-to">To</label>
+        <input type="date" id="oh-to" class="field-input">
+      </div>
+      <button type="button" class="btn btn-primary" onclick="window.__overhead.load()">Load</button>
+      <span id="oh-status" class="text-dim" style="font-size:12px"></span>
+    </div>
+  </div>
+</div>
+
+{# ── Project hour summary (collapsible) ── #}
+<div class="form-section oh-summary" id="oh-summary-section">
+  <div class="form-section-header" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span class="section-icon">◈</span>
+    <button class="oh-summary-toggle" onclick="window.__overhead.toggleSummary()">
+      Project Hour Totals <span id="oh-summary-arrow" style="margin-left:4px">▼</span>
+    </button>
+    <span class="text-dim" style="font-size:11px;margin-left:auto">
+      Range numbers cover the From / To filter. Lifetime numbers cover every day ever logged.
+    </span>
+  </div>
+  <div class="form-section-body" id="oh-summary-body" style="display:none">
+    <div id="oh-summary-table-wrap"></div>
+  </div>
+</div>
+
+<div id="oh-results"></div>
+
+{# ───── Project Manager modal ───── #}
+<div id="oh-proj-modal" class="modal-overlay" style="display:none"
+     onclick="if(event.target===this)window.__overhead.closeProjectMgr()">
+  <div class="oh-modal-card">
+    <div class="modal-header">
+      Projects
+      <button class="modal-close" onclick="window.__overhead.closeProjectMgr()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="oh-help">
+        Projects are the catalog used by sub-groups. Edit a project here once and
+        every sub-group on every day inherits the new contact / notes (unless the
+        sub-group has its own override).
+      </div>
+      <div id="oh-proj-list" class="oh-tpl-list" style="margin-top:14px"></div>
+      {% if CAN_EDIT %}
+      <button class="btn btn-ghost btn-sm" style="align-self:flex-start;margin-top:8px"
+              onclick="window.__overhead.startNewProject()">+ New Project</button>
+      {% endif %}
+
+      <div id="oh-proj-form-wrap" style="display:none">
+        <div class="oh-proj-form">
+          <div class="field-group" style="grid-column:1/-1">
+            <label>Project Name *</label>
+            <input type="text" id="oh-proj-name" class="field-input" placeholder="e.g. Capital Project — Mainstage">
+          </div>
+          <div class="field-group">
+            <label>Client / Department</label>
+            <input type="text" id="oh-proj-client" class="field-input">
+          </div>
+          <div class="field-group">
+            <label>Billing Code</label>
+            <input type="text" id="oh-proj-billing" class="field-input">
+          </div>
+          <div class="field-group">
+            <label>Color (optional)</label>
+            <input type="text" id="oh-proj-color" class="field-input" placeholder="#f57f20">
+          </div>
+          <div class="field-group">
+            <label>Active</label>
+            <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px">
+              <input type="checkbox" id="oh-proj-active" checked> Show in pickers
+            </label>
+          </div>
+          <div class="field-group" style="grid-column:1/-1">
+            <label>Description</label>
+            <textarea id="oh-proj-desc" class="field-input" rows="2"></textarea>
+          </div>
+          <div class="field-group" style="grid-column:1/-1">
+            <label>Default Contact (Name / Email / Phone)</label>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+              <input type="text"  id="oh-proj-cname"  class="field-input" placeholder="Name">
+              <input type="email" id="oh-proj-cemail" class="field-input" placeholder="email@example.com">
+              <input type="text"  id="oh-proj-cphone" class="field-input" placeholder="(xxx) xxx-xxxx">
+            </div>
+          </div>
+          <div class="field-group" style="grid-column:1/-1">
+            <label>Project Notes</label>
+            <textarea id="oh-proj-notes" class="field-input" rows="3"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer" style="margin-top:14px">
+          <button class="btn btn-ghost"   onclick="window.__overhead.cancelProjectForm()">Cancel</button>
+          <button class="btn btn-primary" onclick="window.__overhead.saveProject()">Save Project</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ───── Recurring Template Manager modal ───── #}
+<div id="oh-tpl-modal" class="modal-overlay" style="display:none"
+     onclick="if(event.target===this)window.__overhead.closeTemplateMgr()">
+  <div class="oh-modal-card">
+    <div class="modal-header">
+      Recurring Labor Templates
+      <button class="modal-close" onclick="window.__overhead.closeTemplateMgr()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="oh-help">
+        Templates auto-generate labor requests on selected weekdays.
+        Example: <em>2× Overhead Tech, Mon–Fri, 8:00–17:00</em> creates two requests
+        on every weekday in the date range you generate against. Edit a template
+        below or click <strong>+ New Template</strong> to add one.
+      </div>
+      <div id="oh-tpl-list" class="oh-tpl-list" style="margin-top:14px"></div>
+      {% if CAN_EDIT %}
+      <button class="btn btn-ghost btn-sm" style="align-self:flex-start;margin-top:8px"
+              onclick="window.__overhead.startNewTemplate()">+ New Template</button>
+      {% endif %}
+
+      <div id="oh-tpl-form-wrap" style="display:none">
+        <div class="oh-tpl-form">
+          <div class="field-group" style="grid-column:1/-1">
+            <label>Template Name *</label>
+            <input type="text" id="oh-tpl-name" class="field-input" placeholder="e.g. Mon-Fri Overhead Techs">
+          </div>
+          <div class="field-group">
+            <label>Project (sub-group)</label>
+            <select id="oh-tpl-project" class="field-input"></select>
+          </div>
+          <div class="field-group">
+            <label>Position</label>
+            <select id="oh-tpl-position" class="field-input"></select>
+          </div>
+          <div class="field-group">
+            <label>Quantity</label>
+            <input type="number" id="oh-tpl-qty" class="field-input" min="1" value="1">
+          </div>
+          <div class="field-group">
+            <label>In Time</label>
+            <input type="text" id="oh-tpl-in" class="field-input oh-time-input" placeholder="HH:MM" maxlength="5">
+          </div>
+          <div class="field-group">
+            <label>Out Time</label>
+            <input type="text" id="oh-tpl-out" class="field-input oh-time-input" placeholder="HH:MM" maxlength="5">
+          </div>
+          <div class="field-group">
+            <label>Lunch Start</label>
+            <input type="text" id="oh-tpl-bs" class="field-input oh-time-input" placeholder="HH:MM" maxlength="5">
+          </div>
+          <div class="field-group">
+            <label>Lunch End</label>
+            <input type="text" id="oh-tpl-be" class="field-input oh-time-input" placeholder="HH:MM" maxlength="5">
+          </div>
+          <div class="field-group" style="grid-column:1/-1">
+            <label>Days of Week</label>
+            <div class="oh-dow" id="oh-tpl-dow">
+              <label data-dow="0"><input type="checkbox" value="0">Sun</label>
+              <label data-dow="1"><input type="checkbox" value="1">Mon</label>
+              <label data-dow="2"><input type="checkbox" value="2">Tue</label>
+              <label data-dow="3"><input type="checkbox" value="3">Wed</label>
+              <label data-dow="4"><input type="checkbox" value="4">Thu</label>
+              <label data-dow="5"><input type="checkbox" value="5">Fri</label>
+              <label data-dow="6"><input type="checkbox" value="6">Sat</label>
+            </div>
+          </div>
+          <div class="field-group">
+            <label>Start Date (optional)</label>
+            <input type="date" id="oh-tpl-start" class="field-input">
+          </div>
+          <div class="field-group">
+            <label>End Date (optional)</label>
+            <input type="date" id="oh-tpl-end" class="field-input">
+          </div>
+          <div class="field-group">
+            <label>Active</label>
+            <label style="display:flex;align-items:center;gap:6px;text-transform:none;letter-spacing:0;font-size:13px">
+              <input type="checkbox" id="oh-tpl-active" checked> Generate this template
+            </label>
+          </div>
+        </div>
+        <div class="modal-footer" style="margin-top:14px">
+          <button class="btn btn-ghost"   onclick="window.__overhead.cancelTemplateForm()">Cancel</button>
+          <button class="btn btn-primary" onclick="window.__overhead.saveTemplate()">Save Template</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# ───── Add-sub-group modal (project picker) ───── #}
+<div id="oh-addgrp-modal" class="modal-overlay" style="display:none"
+     onclick="if(event.target===this)window.__overhead.closeAddGroup()">
+  <div class="oh-modal-card" style="width:520px">
+    <div class="modal-header">
+      Add Sub-group
+      <button class="modal-close" onclick="window.__overhead.closeAddGroup()">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="field-group">
+        <label>Date</label>
+        <input type="date" id="oh-addgrp-date" class="field-input" disabled>
+      </div>
+      <div class="field-group">
+        <label>Project</label>
+        <select id="oh-addgrp-project" class="field-input"
+                onchange="window.__overhead.onAddGroupProjectChange()"></select>
+      </div>
+      <div id="oh-addgrp-newproj-wrap" style="display:none">
+        <div class="field-group">
+          <label>New Project Name *</label>
+          <input type="text" id="oh-addgrp-newname" class="field-input" placeholder="e.g. Capital Project — Mainstage">
+        </div>
+        <p class="oh-help">A new project will be created and used. Edit details later via <strong>Projects</strong>.</p>
+      </div>
+      <div class="modal-footer" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border)">
+        <button class="btn btn-ghost"   onclick="window.__overhead.closeAddGroup()">Cancel</button>
+        <button class="btn btn-primary" onclick="window.__overhead.confirmAddGroup()">Add Sub-group</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  const CAN_EDIT = {{ 'true' if CAN_EDIT else 'false' }};
+  if (!CAN_EDIT) document.body.classList.add('oh-readonly');
+
+  let _crewMembers = null;
+  let _positions   = null;
+  let _projects    = null;   // active project list cached
+  let _editingTemplateId = null;
+  let _editingProjectId  = null;
+  let _addingGroupForDate = null;
+
+  /* ── helpers ──────────────────────────────────────────────────── */
+
+  function escapeHtml(s) {
+    if (s == null) return '';
+    return String(s).replace(/[&<>"']/g, c => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+  function fmtDate(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+  function dayLabel(iso) {
+    if (!iso) return '';
+    try {
+      const [y,m,d] = iso.split('-').map(Number);
+      const dt = new Date(y, m-1, d);
+      return dt.toLocaleDateString(undefined, {weekday:'long', month:'short', day:'numeric', year:'numeric'});
+    } catch(e) { return iso; }
+  }
+  function setDefaultRange() {
+    const today = new Date();
+    const future = new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000);
+    document.getElementById('oh-from').value = fmtDate(today);
+    document.getElementById('oh-to').value = fmtDate(future);
+  }
+  function fmtHours(n) {
+    if (!n) return '0.00h';
+    return (Math.round(parseFloat(n) * 100) / 100).toFixed(2) + 'h';
+  }
+  function fmtCost(n) {
+    if (!n) return '$0.00';
+    return '$' + (Math.round(parseFloat(n) * 100) / 100).toFixed(2);
+  }
+
+  async function loadCrew() {
+    if (_crewMembers) return _crewMembers;
+    const r = await fetch('/api/crew-members');
+    _crewMembers = await r.json();
+    return _crewMembers;
+  }
+  async function loadPositions() {
+    if (_positions) return _positions;
+    const r = await fetch('/api/job-positions');
+    const d = await r.json();
+    _positions = Array.isArray(d) ? d : (d.positions || []);
+    return _positions;
+  }
+  async function loadProjects(force) {
+    if (_projects && !force) return _projects;
+    const r = await fetch('/api/overhead-crew/projects');
+    _projects = await r.json();
+    return _projects;
+  }
+
+  function buildPositionSelect(selectEl, selectedId) {
+    selectEl.innerHTML = '<option value="">— Position —</option>';
+    if (!_positions) return;
+    const byCat = {};
+    _positions.forEach(p => {
+      const c = p.category_name || 'Other';
+      if (!byCat[c]) byCat[c] = [];
+      byCat[c].push(p);
+    });
+    for (const [cat, positions] of Object.entries(byCat)) {
+      const og = document.createElement('optgroup');
+      og.label = cat;
+      positions.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id; opt.textContent = p.name;
+        if (String(p.id) === String(selectedId)) opt.selected = true;
+        og.appendChild(opt);
+      });
+      selectEl.appendChild(og);
+    }
+  }
+  function buildTechnicianSelect(selectEl, positionId, selectedId) {
+    selectEl.innerHTML = '';
+    const anyOpt = document.createElement('option');
+    anyOpt.value = ''; anyOpt.textContent = '— Unassigned —';
+    selectEl.appendChild(anyOpt);
+    if (!_crewMembers || !_crewMembers.length) return;
+    const addGroup = (label, list) => {
+      if (!list.length) return;
+      const og = document.createElement('optgroup'); og.label = label;
+      list.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id; opt.textContent = m.name;
+        if (String(m.id) === String(selectedId)) opt.selected = true;
+        og.appendChild(opt);
+      });
+      selectEl.appendChild(og);
+    };
+    if (positionId) {
+      const qualified = _crewMembers.filter(m => (m.qualifications || []).includes(positionId));
+      const others    = _crewMembers.filter(m => !(m.qualifications || []).includes(positionId));
+      addGroup('Qualified', qualified);
+      addGroup('Others',    others);
+    } else {
+      _crewMembers.forEach(m => {
+        const opt = document.createElement('option');
+        opt.value = m.id; opt.textContent = m.name;
+        if (String(m.id) === String(selectedId)) opt.selected = true;
+        selectEl.appendChild(opt);
+      });
+    }
+  }
+  function buildProjectSelect(selectEl, selectedId, opts) {
+    opts = opts || {};
+    selectEl.innerHTML = '';
+    const optAny = document.createElement('option');
+    optAny.value = ''; optAny.textContent = opts.allowNone ? '— No project —' : '— Select Project —';
+    selectEl.appendChild(optAny);
+    if (_projects) {
+      _projects.filter(p => !p.archived).forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id; opt.textContent = p.name + (p.client_name ? ` · ${p.client_name}` : '');
+        if (String(p.id) === String(selectedId)) opt.selected = true;
+        selectEl.appendChild(opt);
+      });
+    }
+    if (CAN_EDIT) {
+      const optNew = document.createElement('option');
+      optNew.value = '__new__'; optNew.textContent = '+ Add new project…';
+      selectEl.appendChild(optNew);
+    }
+  }
+
+  /* ── Render: a request row ────────────────────────────────────── */
+
+  function renderRequestRow(req) {
+    const tr = document.createElement('tr');
+    tr.dataset.rid = req.id;
+    if (req.is_scheduled) tr.classList.add('oh-scheduled-row');
+    tr.innerHTML = `
+      <td style="text-align:center">
+        <input type="checkbox" class="oh-check" ${req.is_scheduled ? 'checked' : ''}
+               ${CAN_EDIT ? '' : 'disabled'} title="Scheduled by labor scheduler">
+      </td>
+      <td>
+        <select class="field-input field-input-sm oh-pos" style="min-width:150px"
+                ${CAN_EDIT ? '' : 'disabled'}></select>
+      </td>
+      <td><input type="text" class="oh-time-input oh-in"     value="${escapeHtml(req.in_time||'')}"     placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
+      <td><input type="text" class="oh-time-input oh-bstart" value="${escapeHtml(req.break_start||'')}" placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
+      <td><input type="text" class="oh-time-input oh-bend"   value="${escapeHtml(req.break_end||'')}"   placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
+      <td><input type="text" class="oh-time-input oh-out"    value="${escapeHtml(req.out_time||'')}"    placeholder="HH:MM" maxlength="5" ${CAN_EDIT ? '' : 'disabled'}></td>
+      <td class="oh-hours-cell" style="text-align:right;font-family:var(--font-mono,monospace);font-size:11px;color:var(--text-dim)">
+        ${fmtHours(req.hours_planned || 0)}
+      </td>
+      <td><input type="text" class="field-input field-input-sm oh-req-name" value="${escapeHtml(req.requested_name||'')}"
+                 placeholder="Requested name (optional)" ${CAN_EDIT ? '' : 'disabled'}></td>
+      <td>
+        <select class="field-input field-input-sm oh-tech" ${CAN_EDIT ? '' : 'disabled'}></select>
+      </td>
+      ${CAN_EDIT ? `
+      <td style="text-align:center">
+        <button class="btn btn-xs btn-danger-ghost" title="Remove line"
+                onclick="window.__overhead.removeRequest(this)">×</button>
+      </td>` : ''}
+    `;
+    const posSel  = tr.querySelector('.oh-pos');
+    const techSel = tr.querySelector('.oh-tech');
+    buildPositionSelect(posSel, req.position_id);
+    buildTechnicianSelect(techSel, req.position_id, req.scheduled_crew_member_id);
+    tr._req = req;
+
+    if (CAN_EDIT) {
+      const recompute = () => {
+        const inV  = tr.querySelector('.oh-in').value.trim();
+        const outV = tr.querySelector('.oh-out').value.trim();
+        const bsV  = tr.querySelector('.oh-bstart').value.trim();
+        const beV  = tr.querySelector('.oh-bend').value.trim();
+        const h = computeHours(inV, outV, bsV, beV);
+        tr._req.hours_planned = h;
+        tr.querySelector('.oh-hours-cell').textContent = fmtHours(h);
+        recomputeGroupTotals(tr.closest('.oh-group'));
+        recomputeDayTotals(tr.closest('.oh-day'));
+      };
+      posSel.addEventListener('change', () => {
+        const pid = parseInt(posSel.value) || null;
+        buildTechnicianSelect(techSel, pid, techSel.value);
+        saveRequest(tr, { position_id: pid });
+      });
+      ['in', 'out', 'bstart', 'bend'].forEach(suffix => {
+        const el = tr.querySelector('.oh-' + suffix);
+        el.addEventListener('change', () => {
+          recompute();
+          saveRequest(tr, {
+            in_time:     tr.querySelector('.oh-in').value.trim(),
+            out_time:    tr.querySelector('.oh-out').value.trim(),
+            break_start: tr.querySelector('.oh-bstart').value.trim(),
+            break_end:   tr.querySelector('.oh-bend').value.trim(),
+          });
+        });
+      });
+      tr.querySelector('.oh-req-name').addEventListener('change', e => {
+        saveRequest(tr, { requested_name: e.target.value.trim() });
+      });
+      tr.querySelector('.oh-check').addEventListener('change', e => {
+        const v = e.target.checked;
+        tr.classList.toggle('oh-scheduled-row', v);
+        saveRequest(tr, { is_scheduled: v });
+      });
+      techSel.addEventListener('change', () => {
+        saveRequest(tr, { scheduled_crew_member_id: techSel.value || null });
+      });
+    }
+    return tr;
+  }
+
+  /* Mirror the server's _calc_hours() for live totals */
+  function computeHours(inT, outT, bs, be) {
+    if (!inT || !outT) return 0;
+    const parse = t => {
+      const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})$/);
+      if (!m) return null;
+      return parseInt(m[1]) * 60 + parseInt(m[2]);
+    };
+    let i = parse(inT), o = parse(outT);
+    if (i == null || o == null) return 0;
+    if (o <= i) o += 24 * 60;
+    let mins = o - i;
+    const bsM = parse(bs), beM = parse(be);
+    if (bsM != null && beM != null && beM > bsM) {
+      mins -= (beM - bsM);
+    }
+    return Math.max(0, mins / 60);
+  }
+
+  /* ── Render: a sub-group ─────────────────────────────────────── */
+
+  function renderGroup(group) {
+    const wrap = document.createElement('div');
+    wrap.className = 'oh-group';
+    wrap.dataset.groupId = group.id;
+    wrap.dataset.projectId = group.project_id || '';
+
+    const projectName = group.project_name || group.name || 'General';
+    const overrideName = (group.name && group.name !== group.project_name && group.name !== 'General') ? group.name : '';
+    const hasProject = !!group.project_id;
+    const colorSwatch = group.color
+      ? `<span class="oh-group-color-swatch" style="background:${escapeHtml(group.color)}"></span>`
+      : '';
+
+    wrap.innerHTML = `
+      <div class="oh-group-title-row">
+        <div class="oh-group-name-display">
+          ${colorSwatch}
+          <span class="oh-group-name-text">${escapeHtml(projectName)}</span>
+          ${group.client_name ? `<span class="client-tag">· ${escapeHtml(group.client_name)}</span>` : ''}
+          ${hasProject ? '' : '<span class="oh-pill" title="This sub-group is not linked to a project">no project</span>'}
+        </div>
+        ${CAN_EDIT ? `
+        <button class="btn btn-xs btn-ghost"
+                onclick="window.__overhead.changeGroupProject(this)" title="Change project link">↺ Project</button>
+        ` : ''}
+        <div class="oh-group-totals">
+          <span>Hours: <strong class="oh-group-hours">0.00</strong></span>
+          <span>Cost: <strong class="oh-group-cost">$0.00</strong></span>
+          <span>Lines: <strong class="oh-group-lines">0</strong></span>
+        </div>
+        ${CAN_EDIT ? `
+        <button class="btn btn-xs btn-ghost" onclick="window.__overhead.addRequest(this)">+ Add Labor Line</button>
+        <button class="btn btn-xs btn-danger-ghost"
+                onclick="window.__overhead.deleteGroup(this)" title="Delete this sub-group">×</button>
+        ` : ''}
+      </div>
+
+      <div class="oh-group-meta">
+        <div class="field-group">
+          <label>Sub-group Override Name (optional)</label>
+          <input type="text" class="field-input field-input-sm oh-name-override"
+                 value="${escapeHtml(overrideName)}"
+                 placeholder="${hasProject ? 'Inherits project name' : 'Sub-group name'}"
+                 ${CAN_EDIT ? '' : 'disabled'}>
+        </div>
+        <div class="field-group">
+          <label>Contact Name${hasProject ? ' <span class="oh-inherited-hint">(override)</span>' : ''}</label>
+          <input type="text" class="field-input field-input-sm oh-cn"
+                 value="${escapeHtml(group.contact_name || '')}"
+                 placeholder="${hasProject ? (group.project_contact_name || 'inherits from project') : ''}"
+                 ${CAN_EDIT ? '' : 'disabled'}>
+        </div>
+        <div class="field-group">
+          <label>Contact Email${hasProject ? ' <span class="oh-inherited-hint">(override)</span>' : ''}</label>
+          <input type="email" class="field-input field-input-sm oh-ce"
+                 value="${escapeHtml(group.contact_email || '')}"
+                 placeholder="${hasProject ? (group.project_contact_email || 'inherits from project') : ''}"
+                 ${CAN_EDIT ? '' : 'disabled'}>
+        </div>
+        <div class="field-group">
+          <label>Contact Phone${hasProject ? ' <span class="oh-inherited-hint">(override)</span>' : ''}</label>
+          <input type="text" class="field-input field-input-sm oh-cp"
+                 value="${escapeHtml(group.contact_phone || '')}"
+                 placeholder="${hasProject ? (group.project_contact_phone || 'inherits from project') : ''}"
+                 ${CAN_EDIT ? '' : 'disabled'}>
+        </div>
+      </div>
+      <div class="oh-group-notes field-group">
+        <label style="font-size:10px;letter-spacing:.04em;color:var(--text-dim);font-weight:600;text-transform:uppercase">
+          Project Notes${hasProject ? ' <span class="oh-inherited-hint">(override; blank = inherit from project)</span>' : ''}
+        </label>
+        <textarea class="oh-pn"
+                  placeholder="${hasProject ? (group.project_default_notes || 'inherits from project notes') : 'Notes about this sub-group'}"
+                  ${CAN_EDIT ? '' : 'disabled'}>${escapeHtml(group.project_notes || '')}</textarea>
+      </div>
+
+      <div class="form-section-body no-pad" style="padding:0;margin-top:8px">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th style="width:48px;text-align:center">SCHED ✓</th>
+              <th style="min-width:160px">POSITION</th>
+              <th style="width:80px">IN</th>
+              <th style="width:80px">LUNCH START</th>
+              <th style="width:80px">LUNCH END</th>
+              <th style="width:80px">OUT</th>
+              <th style="width:60px;text-align:right">HOURS</th>
+              <th style="min-width:160px">REQUESTED NAME</th>
+              <th style="min-width:160px">SCHEDULED TECH</th>
+              ${CAN_EDIT ? '<th style="width:40px"></th>' : ''}
+            </tr>
+          </thead>
+          <tbody class="oh-req-tbody"></tbody>
+        </table>
+      </div>
+    `;
+
+    const tbody = wrap.querySelector('.oh-req-tbody');
+    (group.requests || []).forEach(req => tbody.appendChild(renderRequestRow(req)));
+
+    if (CAN_EDIT) {
+      const persist = () => {
+        saveGroup(wrap, {
+          name:          wrap.querySelector('.oh-name-override').value.trim(),
+          contact_name:  wrap.querySelector('.oh-cn').value.trim(),
+          contact_email: wrap.querySelector('.oh-ce').value.trim(),
+          contact_phone: wrap.querySelector('.oh-cp').value.trim(),
+          project_notes: wrap.querySelector('.oh-pn').value,
+        });
+      };
+      ['oh-name-override','oh-cn','oh-ce','oh-cp','oh-pn'].forEach(cls => {
+        const el = wrap.querySelector('.' + cls);
+        if (el) el.addEventListener('change', persist);
+      });
+    }
+
+    return wrap;
+  }
+
+  /* ── Render: a day card ──────────────────────────────────────── */
+
+  function renderDay(day) {
+    const wrap = document.createElement('div');
+    wrap.className = 'oh-day';
+    wrap.dataset.workDate = day.work_date;
+
+    const header = document.createElement('div');
+    header.className = 'oh-day-header';
+    header.innerHTML = `
+      <span class="oh-day-label">${escapeHtml(dayLabel(day.work_date))}</span>
+      <span class="oh-day-date-pill">${escapeHtml(day.work_date)}</span>
+      <div class="oh-day-totals">
+        <span>Sub-groups: <strong class="oh-day-groups">0</strong></span>
+        <span>Lines: <strong class="oh-day-lines">0</strong></span>
+        <span>Hours: <strong class="oh-day-hours">0.00</strong></span>
+        <span>Cost: <strong class="oh-day-cost">$0.00</strong></span>
+      </div>
+      ${CAN_EDIT ? `
+      <div class="oh-day-actions">
+        <button class="btn btn-sm btn-ghost"
+                onclick="window.__overhead.openAddGroup('${day.work_date}')">+ Sub-group</button>
+        <button class="btn btn-sm btn-danger-ghost"
+                onclick="window.__overhead.deleteDay(this, '${day.work_date}')"
+                title="Delete every sub-group on this date">Delete Day</button>
+      </div>
+      ` : ''}
+    `;
+    wrap.appendChild(header);
+
+    (day.groups || []).forEach(g => wrap.appendChild(renderGroup(g)));
+    return wrap;
+  }
+
+  /* ── Recompute totals after edits ────────────────────────────── */
+
+  function recomputeGroupTotals(groupEl) {
+    if (!groupEl) return;
+    const rows = groupEl.querySelectorAll('tbody tr[data-rid]');
+    let hours = 0, cost = 0;
+    rows.forEach(tr => {
+      const req = tr._req || {};
+      const h = (typeof req.hours_planned === 'number') ? req.hours_planned : 0;
+      const r = (typeof req.effective_rate === 'number') ? req.effective_rate : 0;
+      hours += h;
+      cost  += h * r;
+    });
+    groupEl.querySelector('.oh-group-hours').textContent = (Math.round(hours*100)/100).toFixed(2);
+    groupEl.querySelector('.oh-group-cost').textContent  = fmtCost(cost);
+    groupEl.querySelector('.oh-group-lines').textContent = String(rows.length);
+  }
+  function recomputeDayTotals(dayEl) {
+    if (!dayEl) return;
+    const groups = dayEl.querySelectorAll('.oh-group');
+    let totalHours = 0, totalCost = 0, totalLines = 0;
+    groups.forEach(g => {
+      totalHours += parseFloat(g.querySelector('.oh-group-hours').textContent) || 0;
+      const c = g.querySelector('.oh-group-cost').textContent.replace(/[$,]/g,'');
+      totalCost  += parseFloat(c) || 0;
+      totalLines += parseInt(g.querySelector('.oh-group-lines').textContent) || 0;
+    });
+    dayEl.querySelector('.oh-day-groups').textContent = String(groups.length);
+    dayEl.querySelector('.oh-day-lines').textContent  = String(totalLines);
+    dayEl.querySelector('.oh-day-hours').textContent  = (Math.round(totalHours*100)/100).toFixed(2);
+    dayEl.querySelector('.oh-day-cost').textContent   = fmtCost(totalCost);
+  }
+  function recomputeAllTotals() {
+    document.querySelectorAll('.oh-group').forEach(recomputeGroupTotals);
+    document.querySelectorAll('.oh-day').forEach(recomputeDayTotals);
+  }
+
+  /* ── Load / refresh ─────────────────────────────────────────── */
+
+  async function load() {
+    const from = document.getElementById('oh-from').value;
+    const to   = document.getElementById('oh-to').value;
+    const status = document.getElementById('oh-status');
+    if (!from || !to) { status.textContent = 'Pick both dates.'; return; }
+    status.textContent = 'Loading…';
+    try {
+      await Promise.all([loadCrew(), loadPositions(), loadProjects(true)]);
+      const r = await fetch(`/api/overhead-crew/list?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      if (!r.ok) { status.textContent = 'Failed to load.'; return; }
+      const data = await r.json();
+      render(data.days || []);
+      recomputeAllTotals();
+      const totalReq = (data.days || []).reduce((n, d) =>
+        n + (d.groups || []).reduce((m, g) => m + (g.requests || []).length, 0), 0);
+      const totalGrp = (data.days || []).reduce((n, d) => n + (d.groups || []).length, 0);
+      status.textContent =
+        `${(data.days||[]).length} day${(data.days||[]).length===1?'':'s'} · ` +
+        `${totalGrp} sub-group${totalGrp===1?'':'s'} · ` +
+        `${totalReq} labor line${totalReq===1?'':'s'}`;
+      // Refresh project summary numbers (range + lifetime)
+      loadProjectSummary();
+    } catch (e) {
+      status.textContent = 'Error loading data.';
+      console.error(e);
+    }
+  }
+
+  function render(days) {
+    const container = document.getElementById('oh-results');
+    container.innerHTML = '';
+    if (!days.length) {
+      container.innerHTML = `
+        <div class="form-section">
+          <div class="form-section-body">
+            <div class="oh-empty">
+              No labor requests in this date range.
+              ${CAN_EDIT ? 'Click <strong>+ Add Day</strong> to start.' : ''}
+            </div>
+          </div>
+        </div>`;
+      return;
+    }
+    days.forEach(d => container.appendChild(renderDay(d)));
+  }
+
+  /* ── Project summary panel ───────────────────────────────────── */
+
+  function toggleSummary() {
+    const body = document.getElementById('oh-summary-body');
+    const arrow = document.getElementById('oh-summary-arrow');
+    const open = body.style.display !== 'none';
+    body.style.display = open ? 'none' : '';
+    arrow.textContent = open ? '▼' : '▲';
+    if (!open) loadProjectSummary();
+  }
+  async function loadProjectSummary() {
+    const wrap = document.getElementById('oh-summary-table-wrap');
+    const from = document.getElementById('oh-from').value;
+    const to   = document.getElementById('oh-to').value;
+    wrap.innerHTML = '<div class="text-dim" style="font-size:12px;padding:6px">Loading…</div>';
+    const r = await fetch(`/api/overhead-crew/project-stats?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+    if (!r.ok) { wrap.innerHTML = '<div class="text-dim">Failed to load.</div>'; return; }
+    const data = await r.json();
+    const rows = data.projects || [];
+    if (!rows.length) {
+      wrap.innerHTML = '<div class="oh-empty">No projects yet.</div>';
+      return;
+    }
+    let totals = { rh:0, rc:0, lh:0, lc:0, rl:0, ll:0 };
+    const tbody = rows.map(p => {
+      totals.rh += parseFloat(p.range_hours_planned || 0);
+      totals.rc += parseFloat(p.range_cost_planned  || 0);
+      totals.lh += parseFloat(p.lifetime_hours_planned || 0);
+      totals.lc += parseFloat(p.lifetime_cost_planned  || 0);
+      totals.rl += parseInt(p.range_lines || 0);
+      totals.ll += parseInt(p.lifetime_lines || 0);
+      return `
+        <tr class="${p.archived ? 'archived' : ''}">
+          <td>
+            ${escapeHtml(p.name)}
+            ${p.client_name ? `<span class="client-tag" style="font-size:10px;color:var(--text-dim)">· ${escapeHtml(p.client_name)}</span>` : ''}
+            ${p.archived ? ' <span class="oh-pill">archived</span>' : ''}
+          </td>
+          <td class="num">${escapeHtml(p.lifetime_first_date || '—')}</td>
+          <td class="num">${escapeHtml(p.lifetime_last_date  || '—')}</td>
+          <td class="num">${(p.range_lines||0)} / ${(p.lifetime_lines||0)}</td>
+          <td class="num">${fmtHours(p.range_hours_planned)} / ${fmtHours(p.lifetime_hours_planned)}</td>
+          <td class="num">${fmtHours(p.range_hours_actual)} / ${fmtHours(p.lifetime_hours_actual)}</td>
+          <td class="num">${fmtCost(p.range_cost_planned)} / ${fmtCost(p.lifetime_cost_planned)}</td>
+        </tr>
+      `;
+    }).join('');
+    wrap.innerHTML = `
+      <table class="oh-summary-table">
+        <thead>
+          <tr>
+            <th>Project</th>
+            <th class="num">First Date</th>
+            <th class="num">Last Date</th>
+            <th class="num">Lines (range / lifetime)</th>
+            <th class="num">Planned Hours (range / lifetime)</th>
+            <th class="num">Actual Hours (range / lifetime)</th>
+            <th class="num">Planned Cost (range / lifetime)</th>
+          </tr>
+        </thead>
+        <tbody>${tbody}</tbody>
+        <tfoot>
+          <tr>
+            <td>All projects</td>
+            <td class="num">—</td>
+            <td class="num">—</td>
+            <td class="num">${totals.rl} / ${totals.ll}</td>
+            <td class="num">${fmtHours(totals.rh)} / ${fmtHours(totals.lh)}</td>
+            <td class="num">—</td>
+            <td class="num">${fmtCost(totals.rc)} / ${fmtCost(totals.lc)}</td>
+          </tr>
+        </tfoot>
+      </table>
+    `;
+  }
+
+  /* ── API helpers ─────────────────────────────────────────────── */
+
+  async function postJSON(url, payload) {
+    const r = await fetch(url, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+    return await r.json();
+  }
+  async function putJSON(url, payload) {
+    const r = await fetch(url, {
+      method: 'PUT', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload || {}),
+    });
+    return await r.json();
+  }
+  async function delJSON(url) {
+    const r = await fetch(url, { method: 'DELETE' });
+    return await r.json();
+  }
+
+  async function saveGroup(groupEl, payload) {
+    const gid = groupEl.dataset.groupId;
+    const res = await putJSON(`/api/overhead-crew/groups/${gid}`, payload);
+    if (res && res.success) showSaveToast('✓ Saved');
+    else showSaveToast('✗ Save failed', 'error');
+  }
+  async function saveRequest(tr, payload) {
+    const rid = tr.dataset.rid;
+    const res = await putJSON(`/api/overhead-crew/requests/${rid}`, payload);
+    if (res && res.success) {
+      Object.assign(tr._req || {}, res.request || {});
+      // The server may have updated rate snapshot when scheduled flips; re-cost.
+      if (res.request) {
+        tr._req.effective_rate = (res.request.pay_rate_snapshot != null)
+          ? res.request.pay_rate_snapshot
+          : (res.request.scheduled_level_rate || 0);
+      }
+      recomputeGroupTotals(tr.closest('.oh-group'));
+      recomputeDayTotals(tr.closest('.oh-day'));
+      showSaveToast('✓ Saved');
+    } else {
+      showSaveToast('✗ Save failed', 'error');
+    }
+  }
+
+  /* ── Day / Sub-group / Request mutations ─────────────────────── */
+
+  function addDayPrompt() {
+    const today = new Date().toISOString().slice(0,10);
+    const date = prompt('Work date for the new day (YYYY-MM-DD):', today);
+    if (!date) return;
+    openAddGroup(date.trim());
+  }
+
+  function openAddGroup(workDate) {
+    _addingGroupForDate = workDate;
+    document.getElementById('oh-addgrp-date').value = workDate;
+    const sel = document.getElementById('oh-addgrp-project');
+    buildProjectSelect(sel, '', { allowNone: true });
+    document.getElementById('oh-addgrp-newproj-wrap').style.display = 'none';
+    document.getElementById('oh-addgrp-newname').value = '';
+    document.getElementById('oh-addgrp-modal').style.display = 'flex';
+  }
+  function closeAddGroup() {
+    document.getElementById('oh-addgrp-modal').style.display = 'none';
+    _addingGroupForDate = null;
+  }
+  function onAddGroupProjectChange() {
+    const sel = document.getElementById('oh-addgrp-project');
+    const wrap = document.getElementById('oh-addgrp-newproj-wrap');
+    wrap.style.display = (sel.value === '__new__') ? '' : 'none';
+  }
+  async function confirmAddGroup() {
+    const sel = document.getElementById('oh-addgrp-project');
+    const date = _addingGroupForDate;
+    if (!date) { closeAddGroup(); return; }
+    const payload = { work_date: date };
+    if (sel.value === '__new__') {
+      const nm = document.getElementById('oh-addgrp-newname').value.trim();
+      if (!nm) { alert('Enter a project name.'); return; }
+      payload.project_name = nm;
+    } else if (sel.value) {
+      payload.project_id = parseInt(sel.value);
+    }
+    const res = await postJSON('/api/overhead-crew/groups', payload);
+    if (!res || !res.success) {
+      alert('Failed to add sub-group: ' + ((res && res.error) || 'unknown'));
+      return;
+    }
+    // Make sure the visible range covers the new date
+    const fromEl = document.getElementById('oh-from');
+    const toEl   = document.getElementById('oh-to');
+    if (fromEl.value && date < fromEl.value) fromEl.value = date;
+    if (toEl.value   && date > toEl.value)   toEl.value   = date;
+    closeAddGroup();
+    await loadProjects(true);
+    await load();
+  }
+
+  async function changeGroupProject(btn) {
+    const groupEl = btn.closest('.oh-group');
+    const gid = groupEl.dataset.groupId;
+    await loadProjects(true);
+    const opts = ['(none)'].concat(_projects.filter(p => !p.archived).map(p => p.name)).concat(['(create new project…)']);
+    const choice = prompt(
+      'Change project for this sub-group. Type one of:\n\n' +
+      opts.map((o,i) => `${i}: ${o}`).join('\n') + '\n\nEnter the number:',
+      ''
+    );
+    if (choice === null) return;
+    const idx = parseInt(choice);
+    if (isNaN(idx) || idx < 0 || idx >= opts.length) return;
+    if (idx === 0) {
+      await putJSON(`/api/overhead-crew/groups/${gid}`, { project_id: null });
+    } else if (idx === opts.length - 1) {
+      const newName = prompt('New project name:', '');
+      if (!newName || !newName.trim()) return;
+      await putJSON(`/api/overhead-crew/groups/${gid}`, { project_name: newName.trim() });
+    } else {
+      const proj = _projects.filter(p => !p.archived)[idx - 1];
+      await putJSON(`/api/overhead-crew/groups/${gid}`, { project_id: proj.id });
+    }
+    await loadProjects(true);
+    await load();
+  }
+
+  async function deleteGroup(btn) {
+    const groupEl = btn.closest('.oh-group');
+    const gid = groupEl.dataset.groupId;
+    const reqCount = groupEl.querySelectorAll('tr[data-rid]').length;
+    if (!confirm(`Delete this sub-group and its ${reqCount} labor line${reqCount===1?'':'s'}?`)) return;
+    const res = await delJSON(`/api/overhead-crew/groups/${gid}`);
+    if (!res || !res.success) {
+      alert('Delete failed: ' + ((res && res.error) || 'unknown'));
+      return;
+    }
+    await load();
+  }
+
+  async function deleteDay(btn, workDate) {
+    const dayEl  = btn.closest('.oh-day');
+    const groups = Array.from(dayEl.querySelectorAll('.oh-group'));
+    if (!groups.length) { dayEl.remove(); return; }
+    const reqCount = dayEl.querySelectorAll('tr[data-rid]').length;
+    if (!confirm(
+      `Delete ${dayLabel(workDate)} — ${groups.length} sub-group${groups.length===1?'':'s'} and ${reqCount} labor line${reqCount===1?'':'s'}?`
+    )) return;
+    for (const g of groups) {
+      const gid = g.dataset.groupId;
+      await delJSON(`/api/overhead-crew/groups/${gid}`);
+    }
+    await load();
+  }
+
+  async function addRequest(btn) {
+    const groupEl = btn.closest('.oh-group');
+    const gid = groupEl.dataset.groupId;
+    const res = await postJSON('/api/overhead-crew/requests', { group_id: parseInt(gid) });
+    if (!res || !res.success) {
+      alert('Failed to add labor line: ' + ((res && res.error) || 'unknown'));
+      return;
+    }
+    const tbody = groupEl.querySelector('.oh-req-tbody');
+    res.request.hours_planned = 0;
+    res.request.effective_rate = 0;
+    tbody.appendChild(renderRequestRow(res.request));
+    recomputeGroupTotals(groupEl);
+    recomputeDayTotals(groupEl.closest('.oh-day'));
+    showSaveToast('✓ Line added');
+  }
+  async function removeRequest(btn) {
+    const tr  = btn.closest('tr');
+    const rid = tr.dataset.rid;
+    if (!confirm('Remove this labor line?')) return;
+    const res = await delJSON(`/api/overhead-crew/requests/${rid}`);
+    if (!res || !res.success) {
+      alert('Delete failed: ' + ((res && res.error) || 'unknown'));
+      return;
+    }
+    const groupEl = tr.closest('.oh-group');
+    const dayEl = tr.closest('.oh-day');
+    tr.remove();
+    recomputeGroupTotals(groupEl);
+    recomputeDayTotals(dayEl);
+    showSaveToast('✓ Removed');
+  }
+
+  /* ── Project Manager ─────────────────────────────────────────── */
+
+  function openProjectMgr() {
+    document.getElementById('oh-proj-modal').style.display = 'flex';
+    document.getElementById('oh-proj-form-wrap').style.display = 'none';
+    _editingProjectId = null;
+    loadProjectsToList();
+  }
+  function closeProjectMgr() {
+    document.getElementById('oh-proj-modal').style.display = 'none';
+  }
+  async function loadProjectsToList() {
+    const list = document.getElementById('oh-proj-list');
+    list.innerHTML = '<div class="text-dim" style="font-size:12px">Loading…</div>';
+    const r = await fetch('/api/overhead-crew/projects?include_archived=1');
+    const projs = await r.json();
+    if (!projs.length) {
+      list.innerHTML = '<div class="oh-empty">No projects yet. Click <strong>+ New Project</strong>.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    projs.forEach(p => {
+      const row = document.createElement('div');
+      row.className = 'oh-tpl-row' + (p.archived ? ' disabled' : '');
+      const linesNum = p.lifetime_lines || 0;
+      const dateRange = (p.first_date || p.last_date)
+        ? `${p.first_date || ''} → ${p.last_date || ''}` : '—';
+      row.innerHTML = `
+        <div>
+          <div class="tpl-name">${escapeHtml(p.name)}${p.client_name ? ` · ${escapeHtml(p.client_name)}` : ''}${p.archived ? ' <span class="oh-pill">archived</span>' : ''}</div>
+          <div class="tpl-sub">${p.group_count || 0} sub-group${p.group_count===1?'':'s'} · ${dateRange}</div>
+        </div>
+        <div class="oh-write-only" style="display:flex;gap:6px">
+          <button class="btn btn-xs btn-ghost"        onclick="window.__overhead.editProject(${p.id})">Edit</button>
+          <button class="btn btn-xs btn-danger-ghost" onclick="window.__overhead.archiveProject(${p.id})">${p.archived ? 'Restore' : 'Archive'}</button>
+        </div>
+      `;
+      row._project = p;
+      list.appendChild(row);
+    });
+  }
+  function startNewProject() {
+    _editingProjectId = null;
+    populateProjectForm({});
+    document.getElementById('oh-proj-form-wrap').style.display = '';
+  }
+  function editProject(pid) {
+    const list = document.getElementById('oh-proj-list');
+    const row  = Array.from(list.children).find(r => r._project && r._project.id === pid);
+    if (!row) return;
+    _editingProjectId = pid;
+    populateProjectForm(row._project);
+    document.getElementById('oh-proj-form-wrap').style.display = '';
+    document.getElementById('oh-proj-form-wrap').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  function populateProjectForm(p) {
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v == null ? '' : v; };
+    set('oh-proj-name',    p.name);
+    set('oh-proj-client',  p.client_name);
+    set('oh-proj-billing', p.billing_code);
+    set('oh-proj-color',   p.color);
+    set('oh-proj-desc',    p.description);
+    set('oh-proj-cname',   p.contact_name);
+    set('oh-proj-cemail',  p.contact_email);
+    set('oh-proj-cphone',  p.contact_phone);
+    set('oh-proj-notes',   p.project_notes);
+    document.getElementById('oh-proj-active').checked = !p.archived;
+  }
+  function cancelProjectForm() {
+    document.getElementById('oh-proj-form-wrap').style.display = 'none';
+    _editingProjectId = null;
+  }
+  async function saveProject() {
+    const payload = {
+      name:          document.getElementById('oh-proj-name').value.trim(),
+      client_name:   document.getElementById('oh-proj-client').value.trim(),
+      billing_code:  document.getElementById('oh-proj-billing').value.trim(),
+      color:         document.getElementById('oh-proj-color').value.trim(),
+      description:   document.getElementById('oh-proj-desc').value,
+      contact_name:  document.getElementById('oh-proj-cname').value.trim(),
+      contact_email: document.getElementById('oh-proj-cemail').value.trim(),
+      contact_phone: document.getElementById('oh-proj-cphone').value.trim(),
+      project_notes: document.getElementById('oh-proj-notes').value,
+      archived:      !document.getElementById('oh-proj-active').checked,
+    };
+    if (!payload.name) { alert('Project name is required.'); return; }
+    const url = _editingProjectId
+      ? `/api/overhead-crew/projects/${_editingProjectId}`
+      : '/api/overhead-crew/projects';
+    const fn = _editingProjectId ? putJSON : postJSON;
+    const res = await fn(url, payload);
+    if (!res || !res.success) {
+      alert('Save failed: ' + ((res && res.error) || 'unknown'));
+      return;
+    }
+    cancelProjectForm();
+    showSaveToast('✓ Project saved');
+    await loadProjects(true);
+    await loadProjectsToList();
+  }
+  async function archiveProject(pid) {
+    if (!confirm('Archive this project? Existing sub-groups keep their data.')) return;
+    const res = await delJSON(`/api/overhead-crew/projects/${pid}`);
+    if (!res || !res.success) { alert('Archive failed.'); return; }
+    await loadProjects(true);
+    await loadProjectsToList();
+  }
+
+  /* ── Recurring Templates ─────────────────────────────────────── */
+
+  function openTemplateMgr() {
+    document.getElementById('oh-tpl-modal').style.display = 'flex';
+    document.getElementById('oh-tpl-form-wrap').style.display = 'none';
+    _editingTemplateId = null;
+    loadTemplates();
+  }
+  function closeTemplateMgr() { document.getElementById('oh-tpl-modal').style.display = 'none'; }
+
+  async function loadTemplates() {
+    const list = document.getElementById('oh-tpl-list');
+    list.innerHTML = '<div class="text-dim" style="font-size:12px">Loading…</div>';
+    const r = await fetch('/api/overhead-crew/templates');
+    const tpls = await r.json();
+    if (!tpls.length) {
+      list.innerHTML = '<div class="oh-empty">No templates yet. Click <strong>+ New Template</strong>.</div>';
+      return;
+    }
+    list.innerHTML = '';
+    const dowName = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    tpls.forEach(t => {
+      const row = document.createElement('div');
+      row.className = 'oh-tpl-row' + (t.is_active ? '' : ' disabled');
+      const days = (t.days_of_week || []).map(n => dowName[n]).join(', ') || 'No days';
+      const time = (t.in_time || t.out_time) ? `${t.in_time || '--'}–${t.out_time || '--'}` : '';
+      const pos  = t.position_name ? escapeHtml(t.position_name) : '<em>any position</em>';
+      row.innerHTML = `
+        <div>
+          <div class="tpl-name">${escapeHtml(t.name)} · ${t.quantity}× ${pos}</div>
+          <div class="tpl-sub">${days}${time ? ' · ' + escapeHtml(time) : ''}${t.is_active ? '' : ' · INACTIVE'}</div>
+        </div>
+        <div class="oh-write-only" style="display:flex;gap:6px">
+          <button class="btn btn-xs btn-ghost"        onclick="window.__overhead.runTemplate(${t.id})">Run Now</button>
+          <button class="btn btn-xs btn-ghost"        onclick="window.__overhead.editTemplate(${t.id})">Edit</button>
+          <button class="btn btn-xs btn-danger-ghost" onclick="window.__overhead.deleteTemplate(${t.id})">×</button>
+        </div>
+      `;
+      row._template = t;
+      list.appendChild(row);
+    });
+  }
+  function buildTemplatePositionSelect() {
+    const sel = document.getElementById('oh-tpl-position');
+    sel.innerHTML = '<option value="">— Any position —</option>';
+    if (!_positions) return;
+    const byCat = {};
+    _positions.forEach(p => {
+      const c = p.category_name || 'Other';
+      if (!byCat[c]) byCat[c] = [];
+      byCat[c].push(p);
+    });
+    for (const [cat, positions] of Object.entries(byCat)) {
+      const og = document.createElement('optgroup'); og.label = cat;
+      positions.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.id; opt.textContent = p.name;
+        og.appendChild(opt);
+      });
+      sel.appendChild(og);
+    }
+  }
+  function buildTemplateProjectSelect(selectedId) {
+    const sel = document.getElementById('oh-tpl-project');
+    sel.innerHTML = '<option value="">— Default sub-group name (Overhead) —</option>';
+    if (!_projects) return;
+    _projects.filter(p => !p.archived).forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.name;
+      opt.textContent = p.name;
+      if (p.name === selectedId) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  }
+
+  function startNewTemplate() {
+    _editingTemplateId = null;
+    populateTemplateForm({});
+    document.getElementById('oh-tpl-form-wrap').style.display = '';
+  }
+  function editTemplate(tid) {
+    const list = document.getElementById('oh-tpl-list');
+    const row  = Array.from(list.children).find(r => r._template && r._template.id === tid);
+    if (!row) return;
+    _editingTemplateId = tid;
+    populateTemplateForm(row._template);
+    document.getElementById('oh-tpl-form-wrap').style.display = '';
+    document.getElementById('oh-tpl-form-wrap').scrollIntoView({behavior:'smooth', block:'start'});
+  }
+  function populateTemplateForm(t) {
+    buildTemplatePositionSelect();
+    buildTemplateProjectSelect(t.default_group_name || '');
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v == null ? '' : v; };
+    set('oh-tpl-name',     t.name);
+    set('oh-tpl-position', t.position_id);
+    set('oh-tpl-qty',      t.quantity || 1);
+    set('oh-tpl-in',       t.in_time);
+    set('oh-tpl-out',      t.out_time);
+    set('oh-tpl-bs',       t.break_start);
+    set('oh-tpl-be',       t.break_end);
+    set('oh-tpl-start',    t.start_date);
+    set('oh-tpl-end',      t.end_date);
+    document.getElementById('oh-tpl-active').checked = (t.is_active === undefined ? true : !!t.is_active);
+    const daysSet = new Set((t.days_of_week || []).map(n => parseInt(n)));
+    document.querySelectorAll('#oh-tpl-dow label').forEach(lbl => {
+      const cb = lbl.querySelector('input');
+      cb.checked = daysSet.has(parseInt(cb.value));
+      lbl.classList.toggle('checked', cb.checked);
+    });
+  }
+  function cancelTemplateForm() {
+    document.getElementById('oh-tpl-form-wrap').style.display = 'none';
+    _editingTemplateId = null;
+  }
+  async function saveTemplate() {
+    const days = Array.from(document.querySelectorAll('#oh-tpl-dow input:checked')).map(cb => parseInt(cb.value));
+    const payload = {
+      name:                   document.getElementById('oh-tpl-name').value.trim(),
+      position_id:            document.getElementById('oh-tpl-position').value || null,
+      quantity:               parseInt(document.getElementById('oh-tpl-qty').value) || 1,
+      days_of_week:           days,
+      start_date:             document.getElementById('oh-tpl-start').value || null,
+      end_date:               document.getElementById('oh-tpl-end').value || null,
+      in_time:                document.getElementById('oh-tpl-in').value.trim(),
+      out_time:               document.getElementById('oh-tpl-out').value.trim(),
+      break_start:            document.getElementById('oh-tpl-bs').value.trim(),
+      break_end:              document.getElementById('oh-tpl-be').value.trim(),
+      default_group_name:     document.getElementById('oh-tpl-project').value.trim() || 'Overhead',
+      is_active:              document.getElementById('oh-tpl-active').checked,
+    };
+    if (!payload.name) { alert('Template name is required.'); return; }
+    const url = _editingTemplateId
+      ? `/api/overhead-crew/templates/${_editingTemplateId}`
+      : '/api/overhead-crew/templates';
+    const fn = _editingTemplateId ? putJSON : postJSON;
+    const res = await fn(url, payload);
+    if (!res || !res.success) { alert('Save failed: ' + ((res && res.error) || 'unknown')); return; }
+    cancelTemplateForm();
+    showSaveToast('✓ Template saved');
+    await loadTemplates();
+  }
+  async function deleteTemplate(tid) {
+    if (!confirm('Delete this recurring template? Already-generated requests stay.')) return;
+    const res = await delJSON(`/api/overhead-crew/templates/${tid}`);
+    if (!res || !res.success) { alert('Delete failed.'); return; }
+    await loadTemplates();
+  }
+  async function runTemplate(tid) {
+    const fromVal = document.getElementById('oh-from').value;
+    const toVal   = document.getElementById('oh-to').value;
+    if (!fromVal || !toVal) { alert('Set the From / To filter first.'); return; }
+    if (!confirm(`Generate this template's labor lines for matching weekdays between ${fromVal} and ${toVal}?`)) return;
+    const res = await postJSON('/api/overhead-crew/templates/generate', {
+      template_id: tid, from: fromVal, to: toVal,
+    });
+    if (!res || !res.success) { alert('Generate failed.'); return; }
+    alert(`Generated ${res.requests_created} labor line(s)` +
+          (res.groups_created ? ` and ${res.groups_created} new sub-group(s)` : '') +
+          (res.skipped ? ` (skipped ${res.skipped} duplicate(s))` : ''));
+    closeTemplateMgr();
+    await load();
+  }
+  async function promptGenerate() {
+    const fromVal = document.getElementById('oh-from').value;
+    const toVal   = document.getElementById('oh-to').value;
+    if (!fromVal || !toVal) { alert('Set the From / To filter first.'); return; }
+    if (!confirm(
+      `Generate labor lines from every active recurring template ` +
+      `for matching weekdays between ${fromVal} and ${toVal}?\n\n` +
+      `Existing matching lines (same date / position / times) will be left alone.`
+    )) return;
+    const res = await postJSON('/api/overhead-crew/templates/generate', { from: fromVal, to: toVal });
+    if (!res || !res.success) { alert('Generate failed.'); return; }
+    alert(`Generated ${res.requests_created} labor line(s)` +
+          (res.groups_created ? ` and ${res.groups_created} new sub-group(s)` : '') +
+          (res.skipped ? ` (skipped ${res.skipped} duplicate(s))` : ''));
+    await load();
+  }
+
+  /* Day-of-week pill toggles */
+  document.addEventListener('change', e => {
+    if (e.target && e.target.matches('#oh-tpl-dow input')) {
+      e.target.closest('label').classList.toggle('checked', e.target.checked);
+    }
+  });
+
+  /* ── Wire up ─────────────────────────────────────────────────── */
+
+  window.__overhead = {
+    load,
+    addDayPrompt,
+    openAddGroup,
+    closeAddGroup,
+    onAddGroupProjectChange,
+    confirmAddGroup,
+    changeGroupProject,
+    deleteGroup,
+    deleteDay,
+    addRequest,
+    removeRequest,
+    toggleSummary,
+    openProjectMgr,
+    closeProjectMgr,
+    startNewProject,
+    editProject,
+    cancelProjectForm,
+    saveProject,
+    archiveProject,
+    openTemplateMgr,
+    closeTemplateMgr,
+    startNewTemplate,
+    editTemplate,
+    cancelTemplateForm,
+    saveTemplate,
+    deleteTemplate,
+    runTemplate,
+    promptGenerate,
+  };
+
+  document.addEventListener('DOMContentLoaded', () => {
+    setDefaultRange();
+    load();
+  });
+})();
+</script>
+{% endblock %}
