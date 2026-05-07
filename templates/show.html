@@ -682,9 +682,24 @@ const SHOW_VENUE = {{ show.venue | tojson }};
     <div class="form-section-header"><span class="section-icon">◈</span> SHOW CONTACTS</div>
     <div class="form-section-body">
       <h3 class="sub-section-label">ARTIST / TOUR CONTACTS</h3>
-      <div class="field-group">
-        <textarea class="field-input field-textarea sched-meta" data-key="artist_contacts" rows="4"
-                  placeholder="Name · Role · Phone / Email (one per line)" {% if restricted %}disabled{% endif %}>{{ meta('artist_contacts') }}</textarea>
+      <div class="form-row cols-2">
+        {% for f in _smf_contacts %}
+        <div class="field-group" {% if f.width_hint == 'full' %}style="grid-column:1 / -1"{% endif %}>
+          <label class="field-label">{{ f.label }}</label>
+          {% if f.advance_field_key %}
+            <div class="field-input sched-adv-mirror" data-adv-key="{{ f.advance_field_key }}" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
+              {{ adv(f.advance_field_key) | multi or '—' }}
+            </div>
+            <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
+          {% elif f.field_type == 'textarea' %}
+            <textarea class="field-input field-textarea sched-meta" data-key="{{ f.field_key }}" rows="3" {% if restricted %}disabled{% endif %}>{{ meta(f.field_key) }}</textarea>
+          {% else %}
+            <input type="text" class="field-input sched-meta" data-key="{{ f.field_key }}" value="{{ meta(f.field_key) }}" {% if restricted %}disabled{% endif %}>
+          {% endif %}
+        </div>
+        {% else %}
+        <p class="text-dim" style="font-size:12px;grid-column:1/-1;padding:4px 0">No artist/tour contact fields configured. Add fields in Settings &rarr; Form Fields &rarr; Schedule Template and tick "Render in the Show Contacts section."</p>
+        {% endfor %}
       </div>
 
       <h3 class="sub-section-label mt-md"><span style="text-transform:none">dpc</span> CONTACTS</h3>
@@ -705,22 +720,6 @@ const SHOW_VENUE = {{ show.venue | tojson }};
             {{ adv(key) or '—' }}
           </div>
           <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-        </div>
-        {% endfor %}
-        {# Admin-assigned advance fields routed into the contacts section #}
-        {% for f in _smf_contacts %}
-        <div class="field-group" {% if f.width_hint == 'full' %}style="grid-column:1 / -1"{% endif %}>
-          <label class="field-label">{{ f.label }}</label>
-          {% if f.advance_field_key %}
-            <div class="field-input sched-adv-mirror" data-adv-key="{{ f.advance_field_key }}" style="background:var(--bg-hover);color:var(--text-muted);cursor:default">
-              {{ adv(f.advance_field_key) | multi or '—' }}
-            </div>
-            <p class="field-hint" style="font-size:10px;color:var(--text-muted);margin-top:3px">From Advance Sheet</p>
-          {% elif f.field_type == 'textarea' %}
-            <textarea class="field-input field-textarea sched-meta" data-key="{{ f.field_key }}" rows="3" {% if restricted %}disabled{% endif %}>{{ meta(f.field_key) }}</textarea>
-          {% else %}
-            <input type="text" class="field-input sched-meta" data-key="{{ f.field_key }}" value="{{ meta(f.field_key) }}" {% if restricted %}disabled{% endif %}>
-          {% endif %}
         </div>
         {% endfor %}
         <div class="field-group">
