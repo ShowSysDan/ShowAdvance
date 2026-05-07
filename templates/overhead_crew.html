@@ -87,21 +87,23 @@
   }
   .oh-group-totals strong { color: var(--text); font-family: var(--font-mono, monospace); }
 
-  .oh-group-meta {
+  /* Compact contact + notes form (replaces the old multi-field grid) */
+  .oh-group-meta-compact {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 8px; margin-bottom: 10px;
+    grid-template-columns: minmax(280px, 1.4fr) minmax(220px, 1fr);
+    gap: 10px;
+    margin-bottom: 10px;
+    align-items: start;
   }
-  .oh-group-meta .field-group { display: flex; flex-direction: column; gap: 2px; }
-  .oh-group-meta label {
+  .oh-group-meta-compact .field-group { display: flex; flex-direction: column; gap: 4px; }
+  .oh-group-meta-compact label {
     font-size: 10px; letter-spacing: .04em;
     color: var(--text-dim); font-weight: 600; text-transform: uppercase;
   }
-  .oh-group-meta input[readonly],
-  .oh-group-notes textarea[readonly] {
-    background: var(--bg-hover);
-    color: var(--text-muted);
-    cursor: default;
+  .oh-contact-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px;
   }
   .oh-group-notes textarea {
     width: 100%; min-height: 48px; resize: vertical;
@@ -114,7 +116,32 @@
     font-size: 10px;
     color: var(--text-muted);
     font-style: italic;
+    text-transform: none;
+    letter-spacing: 0;
   }
+
+  /* Quick Fill bar — same idea as the show-page labor quickfill */
+  .oh-quickfill {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: flex-end;
+    padding: 8px 10px;
+    margin: 8px 0;
+    border: 1px dashed var(--border);
+    border-radius: 4px;
+    background: var(--bg-surface);
+  }
+  .oh-quickfill .oh-qf-label {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em;
+    text-transform: uppercase; color: var(--text-dim);
+  }
+  .oh-quickfill .oh-qf-field {
+    display: flex; flex-direction: column; gap: 2px;
+    font-size: 10px; color: var(--text-dim);
+    text-transform: uppercase; letter-spacing: .03em;
+  }
+  .oh-quickfill .oh-qf-field span { font-weight: 600; }
 
   /* ── Labor request table ───────────────────────────────────────── */
   .oh-time-input {
@@ -459,7 +486,6 @@
   const CAN_EDIT = {{ 'true' if CAN_EDIT else 'false' }};
   if (!CAN_EDIT) document.body.classList.add('oh-readonly');
 
-  let _crewMembers = null;
   let _positions   = null;
   let _projects    = null;   // active project list cached
   let _editingTemplateId = null;
@@ -503,12 +529,6 @@
     return '$' + (Math.round(parseFloat(n) * 100) / 100).toFixed(2);
   }
 
-  async function loadCrew() {
-    if (_crewMembers) return _crewMembers;
-    const r = await fetch('/api/crew-members');
-    _crewMembers = await r.json();
-    return _crewMembers;
-  }
   async function loadPositions() {
     if (_positions) return _positions;
     const r = await fetch('/api/job-positions');
@@ -544,37 +564,6 @@
       selectEl.appendChild(og);
     }
   }
-  function buildTechnicianSelect(selectEl, positionId, selectedId) {
-    selectEl.innerHTML = '';
-    const anyOpt = document.createElement('option');
-    anyOpt.value = ''; anyOpt.textContent = '— Unassigned —';
-    selectEl.appendChild(anyOpt);
-    if (!_crewMembers || !_crewMembers.length) return;
-    const addGroup = (label, list) => {
-      if (!list.length) return;
-      const og = document.createElement('optgroup'); og.label = label;
-      list.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.id; opt.textContent = m.name;
-        if (String(m.id) === String(selectedId)) opt.selected = true;
-        og.appendChild(opt);
-      });
-      selectEl.appendChild(og);
-    };
-    if (positionId) {
-      const qualified = _crewMembers.filter(m => (m.qualifications || []).includes(positionId));
-      const others    = _crewMembers.filter(m => !(m.qualifications || []).includes(positionId));
-      addGroup('Qualified', qualified);
-      addGroup('Others',    others);
-    } else {
-      _crewMembers.forEach(m => {
-        const opt = document.createElement('option');
-        opt.value = m.id; opt.textContent = m.name;
-        if (String(m.id) === String(selectedId)) opt.selected = true;
-        selectEl.appendChild(opt);
-      });
-    }
-  }
   function buildProjectSelect(selectEl, selectedId, opts) {
     opts = opts || {};
     selectEl.innerHTML = '';
@@ -602,10 +591,15 @@
     const tr = document.createElement('tr');
     tr.dataset.rid = req.id;
     if (req.is_scheduled) tr.classList.add('oh-scheduled-row');
+    // SCHED checkbox + Scheduled Tech are *display only* on this page —
+    // those fields are owned by the labor scheduler workflow.
     tr.innerHTML = `
-      <td style="text-align:center">
-        <input type="checkbox" class="oh-check" ${req.is_scheduled ? 'checked' : ''}
-               ${CAN_EDIT ? '' : 'disabled'} title="Scheduled by labor scheduler">
+      <td style="text-align:center" title="Set by the labor scheduler">
+        <input type="checkbox" class="oh-row-select" ${CAN_EDIT ? '' : 'disabled'}
+               title="Select this row for Quick Fill">
+      </td>
+      <td style="text-align:center" title="Set by the labor scheduler">
+        <input type="checkbox" class="oh-check" ${req.is_scheduled ? 'checked' : ''} disabled>
       </td>
       <td>
         <select class="field-input field-input-sm oh-pos" style="min-width:150px"
@@ -620,9 +614,8 @@
       </td>
       <td><input type="text" class="field-input field-input-sm oh-req-name" value="${escapeHtml(req.requested_name||'')}"
                  placeholder="Requested name (optional)" ${CAN_EDIT ? '' : 'disabled'}></td>
-      <td>
-        <select class="field-input field-input-sm oh-tech" ${CAN_EDIT ? '' : 'disabled'}></select>
-      </td>
+      <td class="oh-scheduled-tech" style="font-size:12px;color:var(--text-dim)"
+          title="Set by the labor scheduler">${escapeHtml(req.scheduled_crew_name || '—')}</td>
       ${CAN_EDIT ? `
       <td style="text-align:center">
         <button class="btn btn-xs btn-danger-ghost" title="Remove line"
@@ -630,9 +623,7 @@
       </td>` : ''}
     `;
     const posSel  = tr.querySelector('.oh-pos');
-    const techSel = tr.querySelector('.oh-tech');
     buildPositionSelect(posSel, req.position_id);
-    buildTechnicianSelect(techSel, req.position_id, req.scheduled_crew_member_id);
     tr._req = req;
 
     if (CAN_EDIT) {
@@ -649,7 +640,6 @@
       };
       posSel.addEventListener('change', () => {
         const pid = parseInt(posSel.value) || null;
-        buildTechnicianSelect(techSel, pid, techSel.value);
         saveRequest(tr, { position_id: pid });
       });
       ['in', 'out', 'bstart', 'bend'].forEach(suffix => {
@@ -666,14 +656,6 @@
       });
       tr.querySelector('.oh-req-name').addEventListener('change', e => {
         saveRequest(tr, { requested_name: e.target.value.trim() });
-      });
-      tr.querySelector('.oh-check').addEventListener('change', e => {
-        const v = e.target.checked;
-        tr.classList.toggle('oh-scheduled-row', v);
-        saveRequest(tr, { is_scheduled: v });
-      });
-      techSel.addEventListener('change', () => {
-        saveRequest(tr, { scheduled_crew_member_id: techSel.value || null });
       });
     }
     return tr;
@@ -707,11 +689,17 @@
     wrap.dataset.projectId = group.project_id || '';
 
     const projectName = group.project_name || group.name || 'General';
-    const overrideName = (group.name && group.name !== group.project_name && group.name !== 'General') ? group.name : '';
     const hasProject = !!group.project_id;
     const colorSwatch = group.color
       ? `<span class="oh-group-color-swatch" style="background:${escapeHtml(group.color)}"></span>`
       : '';
+
+    // Combined Contact line. Per-instance values override the project's defaults
+    // (blank = inherit from the linked project).
+    const contactComposed = (group.contact_name || group.project_contact_name || '');
+    const contactPlaceholder = hasProject
+      ? (group.project_contact_name || group.project_contact_email || 'inherits from project')
+      : 'Contact (name / email / phone)';
 
     wrap.innerHTML = `
       <div class="oh-group-title-row">
@@ -737,50 +725,59 @@
         ` : ''}
       </div>
 
-      <div class="oh-group-meta">
-        <div class="field-group">
-          <label>Sub-group Override Name (optional)</label>
-          <input type="text" class="field-input field-input-sm oh-name-override"
-                 value="${escapeHtml(overrideName)}"
-                 placeholder="${hasProject ? 'Inherits project name' : 'Sub-group name'}"
-                 ${CAN_EDIT ? '' : 'disabled'}>
+      <div class="oh-group-meta-compact">
+        <div class="field-group oh-contact-trio">
+          <label>Contact${hasProject ? ' <span class="oh-inherited-hint">(blank = inherit from project)</span>' : ''}</label>
+          <div class="oh-contact-row">
+            <input type="text"  class="field-input field-input-sm oh-cn"
+                   value="${escapeHtml(group.contact_name  || '')}"
+                   placeholder="${escapeHtml(group.project_contact_name  || 'Name')}"
+                   ${CAN_EDIT ? '' : 'disabled'}>
+            <input type="email" class="field-input field-input-sm oh-ce"
+                   value="${escapeHtml(group.contact_email || '')}"
+                   placeholder="${escapeHtml(group.project_contact_email || 'email@example.com')}"
+                   ${CAN_EDIT ? '' : 'disabled'}>
+            <input type="text"  class="field-input field-input-sm oh-cp"
+                   value="${escapeHtml(group.contact_phone || '')}"
+                   placeholder="${escapeHtml(group.project_contact_phone || '(xxx) xxx-xxxx')}"
+                   ${CAN_EDIT ? '' : 'disabled'}>
+          </div>
         </div>
-        <div class="field-group">
-          <label>Contact Name${hasProject ? ' <span class="oh-inherited-hint">(override)</span>' : ''}</label>
-          <input type="text" class="field-input field-input-sm oh-cn"
-                 value="${escapeHtml(group.contact_name || '')}"
-                 placeholder="${hasProject ? (group.project_contact_name || 'inherits from project') : ''}"
-                 ${CAN_EDIT ? '' : 'disabled'}>
-        </div>
-        <div class="field-group">
-          <label>Contact Email${hasProject ? ' <span class="oh-inherited-hint">(override)</span>' : ''}</label>
-          <input type="email" class="field-input field-input-sm oh-ce"
-                 value="${escapeHtml(group.contact_email || '')}"
-                 placeholder="${hasProject ? (group.project_contact_email || 'inherits from project') : ''}"
-                 ${CAN_EDIT ? '' : 'disabled'}>
-        </div>
-        <div class="field-group">
-          <label>Contact Phone${hasProject ? ' <span class="oh-inherited-hint">(override)</span>' : ''}</label>
-          <input type="text" class="field-input field-input-sm oh-cp"
-                 value="${escapeHtml(group.contact_phone || '')}"
-                 placeholder="${hasProject ? (group.project_contact_phone || 'inherits from project') : ''}"
-                 ${CAN_EDIT ? '' : 'disabled'}>
+        <div class="field-group oh-group-notes">
+          <label>Notes${hasProject ? ' <span class="oh-inherited-hint">(blank = inherit from project)</span>' : ''}</label>
+          <textarea class="oh-pn"
+                    placeholder="${escapeHtml(group.project_default_notes || 'Notes about this sub-group')}"
+                    ${CAN_EDIT ? '' : 'disabled'}>${escapeHtml(group.project_notes || '')}</textarea>
         </div>
       </div>
-      <div class="oh-group-notes field-group">
-        <label style="font-size:10px;letter-spacing:.04em;color:var(--text-dim);font-weight:600;text-transform:uppercase">
-          Project Notes${hasProject ? ' <span class="oh-inherited-hint">(override; blank = inherit from project)</span>' : ''}
-        </label>
-        <textarea class="oh-pn"
-                  placeholder="${hasProject ? (group.project_default_notes || 'inherits from project notes') : 'Notes about this sub-group'}"
-                  ${CAN_EDIT ? '' : 'disabled'}>${escapeHtml(group.project_notes || '')}</textarea>
+
+      ${CAN_EDIT ? `
+      <div class="oh-quickfill" data-group-id="${group.id}">
+        <span class="oh-qf-label">Quick Fill</span>
+        <label class="oh-qf-field"><span>In</span>
+          <input type="text" class="oh-time-input oh-qf-in"     placeholder="HH:MM" maxlength="5"></label>
+        <label class="oh-qf-field"><span>Lunch Start</span>
+          <input type="text" class="oh-time-input oh-qf-bstart" placeholder="HH:MM" maxlength="5"></label>
+        <label class="oh-qf-field"><span>Lunch End</span>
+          <input type="text" class="oh-time-input oh-qf-bend"   placeholder="HH:MM" maxlength="5"></label>
+        <label class="oh-qf-field"><span>Out</span>
+          <input type="text" class="oh-time-input oh-qf-out"    placeholder="HH:MM" maxlength="5"></label>
+        <button type="button" class="btn btn-xs btn-ghost"
+                onclick="window.__overhead.applyQuickFill(this, false)">Apply to Selected</button>
+        <button type="button" class="btn btn-xs btn-primary"
+                onclick="window.__overhead.applyQuickFill(this, true)">Apply to All</button>
       </div>
+      ` : ''}
 
       <div class="form-section-body no-pad" style="padding:0;margin-top:8px">
         <table class="data-table">
           <thead>
             <tr>
-              <th style="width:48px;text-align:center">SCHED ✓</th>
+              <th style="width:32px;text-align:center" title="Select for Quick Fill">
+                <input type="checkbox" class="oh-select-all" ${CAN_EDIT ? '' : 'disabled'}
+                       title="Select / deselect all in this sub-group"
+                       onchange="window.__overhead.toggleSelectAll(this)"></th>
+              <th style="width:48px;text-align:center" title="Set by the labor scheduler">SCHED</th>
               <th style="min-width:160px">POSITION</th>
               <th style="width:80px">IN</th>
               <th style="width:80px">LUNCH START</th>
@@ -803,14 +800,13 @@
     if (CAN_EDIT) {
       const persist = () => {
         saveGroup(wrap, {
-          name:          wrap.querySelector('.oh-name-override').value.trim(),
           contact_name:  wrap.querySelector('.oh-cn').value.trim(),
           contact_email: wrap.querySelector('.oh-ce').value.trim(),
           contact_phone: wrap.querySelector('.oh-cp').value.trim(),
           project_notes: wrap.querySelector('.oh-pn').value,
         });
       };
-      ['oh-name-override','oh-cn','oh-ce','oh-cp','oh-pn'].forEach(cls => {
+      ['oh-cn','oh-ce','oh-cp','oh-pn'].forEach(cls => {
         const el = wrap.querySelector('.' + cls);
         if (el) el.addEventListener('change', persist);
       });
@@ -899,7 +895,7 @@
     if (!from || !to) { status.textContent = 'Pick both dates.'; return; }
     status.textContent = 'Loading…';
     try {
-      await Promise.all([loadCrew(), loadPositions(), loadProjects(true)]);
+      await Promise.all([loadPositions(), loadProjects(true)]);
       const r = await fetch(`/api/overhead-crew/list?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
       if (!r.ok) { status.textContent = 'Failed to load.'; return; }
       const data = await r.json();
@@ -1202,6 +1198,66 @@
     showSaveToast('✓ Removed');
   }
 
+  /* Toggle every row's select-checkbox in the sub-group when the header
+     master checkbox flips. */
+  function toggleSelectAll(masterCb) {
+    const groupEl = masterCb.closest('.oh-group');
+    if (!groupEl) return;
+    groupEl.querySelectorAll('tbody tr[data-rid] .oh-row-select').forEach(cb => {
+      cb.checked = masterCb.checked;
+    });
+  }
+
+  /* Apply the per-sub-group Quick Fill in/lunch/out times to either
+     the rows whose select-box is checked, or every row in the sub-group. */
+  async function applyQuickFill(btn, toAll) {
+    const groupEl = btn.closest('.oh-group');
+    if (!groupEl) return;
+    const qfBox = groupEl.querySelector('.oh-quickfill');
+    const inV  = qfBox.querySelector('.oh-qf-in').value.trim();
+    const outV = qfBox.querySelector('.oh-qf-out').value.trim();
+    const bsV  = qfBox.querySelector('.oh-qf-bstart').value.trim();
+    const beV  = qfBox.querySelector('.oh-qf-bend').value.trim();
+    if (!inV && !outV && !bsV && !beV) {
+      alert('Enter at least one time in Quick Fill before applying.');
+      return;
+    }
+    const allRows = Array.from(groupEl.querySelectorAll('tbody tr[data-rid]'));
+    const targets = toAll ? allRows : allRows.filter(tr => tr.querySelector('.oh-row-select')?.checked);
+    if (!targets.length) {
+      alert(toAll ? 'No rows in this sub-group.' : 'Select rows first, or click "Apply to All".');
+      return;
+    }
+    let ok = 0, fail = 0;
+    for (const tr of targets) {
+      // Update visible inputs first so the user sees the change immediately
+      if (inV) tr.querySelector('.oh-in').value = inV;
+      if (outV) tr.querySelector('.oh-out').value = outV;
+      if (bsV) tr.querySelector('.oh-bstart').value = bsV;
+      if (beV) tr.querySelector('.oh-bend').value = beV;
+      const payload = {};
+      if (inV)  payload.in_time     = inV;
+      if (outV) payload.out_time    = outV;
+      if (bsV)  payload.break_start = bsV;
+      if (beV)  payload.break_end   = beV;
+      const res = await putJSON(`/api/overhead-crew/requests/${tr.dataset.rid}`, payload);
+      if (res && res.success) {
+        ok++;
+        // Refresh the request's metric fields and the row's hours cell.
+        if (res.request) {
+          Object.assign(tr._req || {}, res.request);
+          tr.querySelector('.oh-hours-cell').textContent = fmtHours(res.request.hours_planned || 0);
+        }
+      } else {
+        fail++;
+      }
+    }
+    recomputeGroupTotals(groupEl);
+    recomputeDayTotals(groupEl.closest('.oh-day'));
+    if (fail) showSaveToast(`✗ ${fail} failed, ${ok} updated`, 'error');
+    else      showSaveToast(`✓ Applied to ${ok} row${ok===1?'':'s'}`);
+  }
+
   /* ── Project Manager ─────────────────────────────────────────── */
 
   function openProjectMgr() {
@@ -1494,6 +1550,8 @@
     deleteDay,
     addRequest,
     removeRequest,
+    toggleSelectAll,
+    applyQuickFill,
     toggleSummary,
     openProjectMgr,
     closeProjectMgr,
