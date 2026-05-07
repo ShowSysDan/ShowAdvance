@@ -7166,10 +7166,10 @@ def add_labor_request(show_id):
     """, (show_id,
           data.get('position_id') or None,
           data.get('work_date') or None,
-          data.get('in_time', ''),
-          data.get('out_time', ''),
-          data.get('break_start', ''),
-          data.get('break_end', ''),
+          _normalize_perf_time(data.get('in_time', '')),
+          _normalize_perf_time(data.get('out_time', '')),
+          _normalize_perf_time(data.get('break_start', '')),
+          _normalize_perf_time(data.get('break_end', '')),
           data.get('requested_name', ''),
           max_order + 10))
     rid = cur.lastrowid
@@ -7196,10 +7196,10 @@ def update_labor_request(show_id, rid):
         WHERE id=? AND show_id=?
     """, (data.get('position_id') or None,
           data.get('work_date') or None,
-          data.get('in_time', ''),
-          data.get('out_time', ''),
-          data.get('break_start', ''),
-          data.get('break_end', ''),
+          _normalize_perf_time(data.get('in_time', '')),
+          _normalize_perf_time(data.get('out_time', '')),
+          _normalize_perf_time(data.get('break_start', '')),
+          _normalize_perf_time(data.get('break_end', '')),
           data.get('requested_name', ''),
           rid, show_id))
     log_audit(db, 'LABOR_REQUEST_EDIT', 'labor_request', rid, show_id=show_id)
@@ -7287,7 +7287,13 @@ def _calc_labor_cost_for_show(db, show_id):
 
 
 def _calc_hours(in_time, out_time, break_start=None, break_end=None):
-    """Calculate hours between in/out times, minus break duration."""
+    """Calculate hours between in/out times, minus break duration.
+
+    Accepts HH:MM or HHMM format on every field — values are normalised
+    via _normalize_perf_time before parsing.
+    """
+    in_time  = _normalize_perf_time(in_time)
+    out_time = _normalize_perf_time(out_time)
     if not in_time or not out_time:
         return 0.0
     try:
@@ -7298,9 +7304,11 @@ def _calc_hours(in_time, out_time, break_start=None, break_end=None):
         if t_out <= t_in:
             t_out = t_out.replace(day=t_out.day + 1)
         hours = (t_out - t_in).total_seconds() / 3600
-        if break_start and break_end:
-            t_bs = _dt.strptime(break_start[:5], fmt)
-            t_be = _dt.strptime(break_end[:5],   fmt)
+        bs = _normalize_perf_time(break_start)
+        be = _normalize_perf_time(break_end)
+        if bs and be:
+            t_bs = _dt.strptime(bs[:5], fmt)
+            t_be = _dt.strptime(be[:5], fmt)
             if t_be > t_bs:
                 hours -= (t_be - t_bs).total_seconds() / 3600
         return max(0.0, hours)
@@ -8251,10 +8259,10 @@ def api_overhead_request_add():
         gid,
         grp['work_date'],
         data.get('position_id') or None,
-        (data.get('in_time') or '').strip(),
-        (data.get('out_time') or '').strip(),
-        (data.get('break_start') or '').strip(),
-        (data.get('break_end') or '').strip(),
+        _normalize_perf_time((data.get('in_time') or '').strip()),
+        _normalize_perf_time((data.get('out_time') or '').strip()),
+        _normalize_perf_time((data.get('break_start') or '').strip()),
+        _normalize_perf_time((data.get('break_end') or '').strip()),
         (data.get('requested_name') or '').strip(),
         _max_sort_order(db, 'overhead_labor_requests', 'group_id=?', (gid,)),
         session.get('user_id'),
@@ -8304,7 +8312,10 @@ def api_overhead_request_update(rid):
               'actual_in_time', 'actual_out_time', 'actual_break_start', 'actual_break_end',
               'notes'):
         if f in data:
-            updates.append(f'{f}=?'); params.append((data.get(f) or '').strip())
+            val = (data.get(f) or '').strip()
+            if f.endswith('_time') or f.startswith('break_') or f.startswith('actual_break_'):
+                val = _normalize_perf_time(val)
+            updates.append(f'{f}=?'); params.append(val)
     if 'is_scheduled' in data:
         updates.append('is_scheduled=?'); params.append(1 if data.get('is_scheduled') else 0)
         detail_parts.append(f"sched={1 if data.get('is_scheduled') else 0}")

@@ -327,6 +327,7 @@
           </span>
           <a href="/overhead-crew" class="show-link" target="_blank" rel="noopener">Open overhead crew →</a>
         </div>
+        <button class="btn btn-ghost btn-sm ml-auto" onclick="window.__scheduler.addOverheadRow(this, ${g.group_id})">+ Add Line</button>
       `;
       section.appendChild(header);
 
@@ -480,6 +481,22 @@
     showSaveToast('✓ Row added');
   }
 
+  async function addOverheadRow(btn, groupId) {
+    const r = await fetch('/api/overhead-crew/requests', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ group_id: groupId }),
+    });
+    if (!r.ok) { showSaveToast('✗ Add failed', 'error'); return; }
+    const data = await r.json();
+    if (!data.success) { showSaveToast('✗ ' + (data.error || 'Add failed'), 'error'); return; }
+    const section = btn.closest('.form-section');
+    const tbody = section.querySelector('tbody');
+    const newRow = buildRow(data.request, '/api/overhead-crew/requests');
+    tbody.appendChild(newRow);
+    showSaveToast('✓ Row added');
+  }
+
   async function removeRow(btn) {
     const tr = btn.closest('tr');
     const rid = tr.dataset.rid;
@@ -516,7 +533,37 @@
     else showSaveToast(`✓ All ${ok} rows saved`);
   }
 
-  window.__scheduler = { onScheduledToggle, onCrewChange, onPositionChange, onTimeChange, addRow, removeRow, saveAll };
+  /* Normalise "1300" / "13:00" / "7" / "" to canonical "HH:MM" or '' */
+  function normalizeTime(raw) {
+    const s = String(raw || '').trim();
+    if (!s) return '';
+    let h, m;
+    if (s.includes(':')) {
+      const parts = s.split(':', 2);
+      h = parseInt(parts[0], 10);
+      m = parseInt(parts[1], 10);
+    } else if (/^\d{3,4}$/.test(s)) {
+      h = parseInt(s.slice(0, -2), 10);
+      m = parseInt(s.slice(-2), 10);
+    } else if (/^\d{1,2}$/.test(s)) {
+      h = parseInt(s, 10);
+      m = 0;
+    } else {
+      return s;
+    }
+    if (Number.isNaN(h) || Number.isNaN(m) || h < 0 || h > 23 || m < 0 || m > 59) return s;
+    return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+  }
+
+  /* Auto-format any .sched-time-input on blur: "1300" -> "13:00" */
+  document.addEventListener('blur', e => {
+    if (e.target && e.target.classList && e.target.classList.contains('sched-time-input')) {
+      const formatted = normalizeTime(e.target.value);
+      if (formatted !== e.target.value) e.target.value = formatted;
+    }
+  }, true);
+
+  window.__scheduler = { onScheduledToggle, onCrewChange, onPositionChange, onTimeChange, addRow, addOverheadRow, removeRow, saveAll };
   window.loadScheduler = loadScheduler;
 
   document.addEventListener('DOMContentLoaded', () => {
