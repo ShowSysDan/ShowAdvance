@@ -809,7 +809,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     <div class="ml-auto" style="display:flex;gap:6px;align-items:center">
       <span id="assets-total-cost" style="font-size:12px;color:var(--text-dim);margin-right:8px"></span>
       <a href="/shows/{{ show.id }}/assets/invoice.pdf" target="_blank" class="btn btn-sm btn-ghost" title="Download PDF invoice">Invoice PDF</a>
-      {% if is_content_admin_user and not restricted %}
+      {% if can_edit_advance %}
       <button class="btn btn-sm btn-primary" onclick="openAssetSearch()">+ Add Asset</button>
       <button class="btn btn-sm btn-ghost" onclick="openExternalRentalModal()">+ External Rental</button>
       {% endif %}
@@ -829,7 +829,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
             <th>Unit Price</th>
             <th>Line Total</th>
             <th>Notes</th>
-            {% if is_content_admin_user %}<th style="width:80px"></th>{% endif %}
+            {% if can_edit_advance %}<th style="width:80px"></th>{% endif %}
           </tr>
         </thead>
         <tbody id="assets-tbody"></tbody>
@@ -850,7 +850,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
             <th>Description</th>
             <th>Cost</th>
             <th>PDF</th>
-            {% if is_content_admin_user %}<th style="width:60px"></th>{% endif %}
+            {% if can_edit_advance %}<th style="width:60px"></th>{% endif %}
           </tr>
         </thead>
         <tbody id="ext-rentals-tbody"></tbody>
@@ -961,7 +961,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
 // ── Assets Tab JS ─────────────────────────────────────────────────────────────
 (function() {
   const SHOW_ID = {{ show.id }};
-  const IS_ADMIN = {{ 'true' if is_content_admin_user else 'false' }};
+  const IS_ADMIN = {{ 'true' if can_edit_advance else 'false' }};
   let _allAssetTypes = null;
   let _currentAssetTypeId = null;
   let _currentAvailData = null;

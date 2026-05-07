@@ -793,6 +793,33 @@ def asset_manager_required(f):
     return decorated
 
 
+def show_advance_editor_required(f):
+    """Allow any user with access to the show to edit its advance section
+    (add / edit / remove show_assets and external rentals).
+
+    Blocks anonymous, read-only, restricted users, and users without show
+    access. Admins and content admins continue to qualify since they always
+    pass can_access_show.
+    """
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login'))
+        show_id = kwargs.get('show_id')
+        if show_id is None:
+            abort(403)
+        if session.get('is_readonly') or session.get('is_restricted'):
+            if request.is_json:
+                return jsonify({'error': 'Read-only access'}), 403
+            abort(403)
+        if not can_access_show(session['user_id'], show_id):
+            if request.is_json:
+                return jsonify({'error': 'Access denied'}), 403
+            abort(403)
+        return f(*args, **kwargs)
+    return decorated
+
+
 @app.before_request
 def _refresh_session_roles():
     """Re-check user role/permissions from DB every 5 minutes to catch demotions."""
@@ -2356,6 +2383,11 @@ def show_page(show_id):
 
     form_sections = get_form_fields_for_template()
     restricted = session.get('is_restricted', False)
+    can_edit_advance = (
+        not session.get('is_readonly')
+        and not restricted
+        and can_access_show(session['user_id'], show_id)
+    )
 
     # Global WiFi for schedule display (no longer a per-show editable field)
     global_wifi_network  = get_app_setting('wifi_network', '')
@@ -2409,6 +2441,7 @@ def show_page(show_id):
                            labor_requests_data=labor_requests_data,
                            asset_categories=asset_categories_for_tab,
                            is_content_admin_user=session.get('is_content_admin', False),
+                           can_edit_advance=can_edit_advance,
                            ollama_enabled=get_app_setting('ollama_enabled', '0') == '1',
                            user=get_current_user())
 
@@ -9956,7 +9989,7 @@ def show_assets_list(show_id):
 
 
 @app.route('/shows/<int:show_id>/assets', methods=['POST'])
-@content_admin_required
+@show_advance_editor_required
 def show_asset_add(show_id):
     data = request.get_json() or {}
     asset_type_id = data.get('asset_type_id')
@@ -10038,7 +10071,7 @@ def show_asset_add(show_id):
 
 
 @app.route('/shows/<int:show_id>/assets/<int:sa_id>', methods=['PUT'])
-@content_admin_required
+@show_advance_editor_required
 def show_asset_edit(show_id, sa_id):
     data = request.get_json() or {}
     db = get_db()
@@ -10063,7 +10096,7 @@ def show_asset_edit(show_id, sa_id):
 
 
 @app.route('/shows/<int:show_id>/assets/<int:sa_id>', methods=['DELETE'])
-@content_admin_required
+@show_advance_editor_required
 def show_asset_remove(show_id, sa_id):
     db = get_db()
     row = db.execute('SELECT * FROM show_assets WHERE id=? AND show_id=?', (sa_id, show_id)).fetchone()
@@ -10082,7 +10115,7 @@ def show_asset_remove(show_id, sa_id):
 
 
 @app.route('/shows/<int:show_id>/assets/<int:sa_id>/toggle-hidden', methods=['POST'])
-@content_admin_required
+@show_advance_editor_required
 def show_asset_toggle_hidden(show_id, sa_id):
     db = get_db()
     row = db.execute('SELECT is_hidden FROM show_assets WHERE id=? AND show_id=?', (sa_id, show_id)).fetchone()
@@ -10103,7 +10136,7 @@ def show_asset_toggle_hidden(show_id, sa_id):
 # ─── Asset Manager — External Rentals ─────────────────────────────────────────
 
 @app.route('/shows/<int:show_id>/external-rentals', methods=['POST'])
-@content_admin_required
+@show_advance_editor_required
 def external_rental_add(show_id):
     db = get_db()
     description = (request.form.get('description') or '').strip()
@@ -10151,7 +10184,7 @@ def external_rental_add(show_id):
 
 
 @app.route('/shows/<int:show_id>/external-rentals/<int:er_id>', methods=['DELETE'])
-@content_admin_required
+@show_advance_editor_required
 def external_rental_delete(show_id, er_id):
     db = get_db()
     row = db.execute('SELECT s3_key FROM show_external_rentals WHERE id=? AND show_id=?',
