@@ -75,107 +75,144 @@
 {% set d = advance_data %}
 {% macro v(key, default='') %}{{ d.get(key, default)|string|trim }}{% endmacro %}
 
-{# ── Document Header ──────────────────────────────────────────── #}
-<div class="doc-header">
-  <div style="display:flex;align-items:center;gap:12px">
-    {% if logo_data %}
-    <img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">
-    {% endif %}
-    <div>
-      <div class="doc-title">DPC <span>ADVANCE</span> SHEET</div>
-      <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
-    </div>
-  </div>
-  <div class="doc-meta">
-    <div class="version">v{{ version }}</div>
-    <div>{{ export_date }}</div>
-    <div style="margin-top:3px; font-size:8pt; color:#222">
-      <strong>{{ show.name }}</strong> &nbsp;·&nbsp; {{ show.show_date or '—' }}
-    </div>
-  </div>
-</div>
+{# ── Layout-driven rendering ───────────────────────────────────
+   Section order and visibility come from `layout` (PdfLayout). The
+   synthetic 'header' section is always required; each form_section
+   has key=section_key. Field labels can be overridden per layout. #}
+{% set _form_section_keys = (form_sections or []) | map(attribute='section_key') | list %}
+{% set _section_by_key = {} %}
+{% for _s in (form_sections or []) %}{% set _ = _section_by_key.update({_s.section_key: _s}) %}{% endfor %}
+{% set _all_keys = ['header'] + _form_section_keys %}
 
-{# ── Dynamic Sections ─────────────────────────────────────────── #}
 {% if form_sections %}
   {% set abs_map = assets_by_section if assets_by_section is defined else {} %}
-  {% for section in form_sections %}
-    {# Collect all non-empty values for this section #}
-    {% set ns = namespace(has_content=false, notes_fields=[], regular_rows=[]) %}
-    {% for field in section.fields %}
-      {% set val = d.get(field.field_key, '')|string|trim %}
-      {% if val and val not in ['-','—','None','none','false',''] %}
-        {% set ns.has_content = true %}
-      {% endif %}
-      {% if field.is_notes_field %}
-        {% set _ = ns.notes_fields.append(field) %}
-      {% else %}
-        {% set _ = ns.regular_rows.append(field) %}
-      {% endif %}
-    {% endfor %}
+  {% for skey in layout.iter_sections(_all_keys) if layout.visible(skey) %}
+    {% if layout.page_break_before(skey) %}<div style="page-break-before: always"></div>{% endif %}
 
-    {% set section_rentals = abs_map.get(section.id, []) %}
-    {% if ns.has_content or section_rentals %}
-    <div class="section">
-      <div class="section-head">{{ section.label }}</div>
-      {% if ns.regular_rows and ns.has_content %}
-      <table class="two-col-table">
-        {% for field in ns.regular_rows %}
-          {# Gracefully handle any field type — unknown types render as plain text #}
-          {% set val = d.get(field.field_key, '')|string|trim %}
-          {% if field.field_type == 'checkbox' %}
-            {% if val == 'true' %}
-            <tr>
-              <td class="lbl"></td>
-              <td class="val"><span class="cb checked"></span> {{ field.label }}</td>
-            </tr>
+    {% if skey == 'header' %}
+      {# ── Document Header ────────────────────────────────────── #}
+      <div class="doc-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          {% if logo_data %}
+          <img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">
+          {% endif %}
+          <div>
+            <div class="doc-title">DPC <span>{{ layout.label('header', 'ADVANCE') }}</span> SHEET</div>
+            <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+          </div>
+        </div>
+        <div class="doc-meta">
+          <div class="version">v{{ version }}</div>
+          <div>{{ export_date }}</div>
+          <div style="margin-top:3px; font-size:8pt; color:#222">
+            <strong>{{ show.name }}</strong> &nbsp;·&nbsp; {{ show.show_date or '—' }}
+          </div>
+        </div>
+      </div>
+
+    {% else %}
+      {# ── Dynamic form_section ────────────────────────────────── #}
+      {% set section = _section_by_key.get(skey) %}
+      {% if section %}
+        {% set ns = namespace(has_content=false, notes_fields=[], regular_rows=[]) %}
+        {% for field in section.fields %}
+          {% if layout.field_visible(skey, field.field_key) %}
+            {% set val = d.get(field.field_key, '')|string|trim %}
+            {% if val and val not in ['-','—','None','none','false',''] %}
+              {% set ns.has_content = true %}
             {% endif %}
-          {% elif field.field_type == 'yes_no' %}
-            {% if val and val not in ['','-','—','None','none'] %}
-            <tr>
-              <td class="lbl">{{ field.label }}</td>
-              <td class="val">{{ val }}</td>
-            </tr>
+            {% if field.is_notes_field %}
+              {% set _ = ns.notes_fields.append(field) %}
+            {% else %}
+              {% set _ = ns.regular_rows.append(field) %}
             {% endif %}
-          {% elif val and val not in ['-','—','None','none','false',''] %}
-          {# Handles: text, textarea, date, time, number, select, contact_dropdown, and any future types #}
-          <tr>
-            <td class="lbl">{{ field.label }}</td>
-            <td class="val">{{ val | multi }}</td>
-          </tr>
           {% endif %}
         {% endfor %}
-      </table>
-      {% endif %}
-      {% for field in ns.notes_fields %}
-        {% set val = d.get(field.field_key, '')|string|trim %}
-        {% if val and val not in ['None','none'] %}
-        <div class="notes-lbl">{{ field.label }}</div>
-        <div class="notes-val">{{ val }}</div>
+
+        {% set section_rentals = abs_map.get(section.id, []) %}
+        {% if ns.has_content or section_rentals %}
+        <div class="section" style="font-size: {{ layout.font_size(skey, '8.5pt') }}">
+          <div class="section-head">{{ layout.label(skey, section.label) }}</div>
+          {% if ns.regular_rows and ns.has_content %}
+          <table class="two-col-table">
+            {% for field in ns.regular_rows %}
+              {% set val = d.get(field.field_key, '')|string|trim %}
+              {% set _flbl = layout.field_label(skey, field.field_key, field.label) %}
+              {% if field.field_type == 'checkbox' %}
+                {% if val == 'true' %}
+                <tr>
+                  <td class="lbl"></td>
+                  <td class="val"><span class="cb checked"></span> {{ _flbl }}</td>
+                </tr>
+                {% endif %}
+              {% elif field.field_type == 'yes_no' %}
+                {% if val and val not in ['','-','—','None','none'] %}
+                <tr>
+                  <td class="lbl">{{ _flbl }}</td>
+                  <td class="val">{{ val }}</td>
+                </tr>
+                {% endif %}
+              {% elif val and val not in ['-','—','None','none','false',''] %}
+              <tr>
+                <td class="lbl">{{ _flbl }}</td>
+                <td class="val">{{ val | multi }}</td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+          </table>
+          {% endif %}
+          {% for field in ns.notes_fields %}
+            {% set val = d.get(field.field_key, '')|string|trim %}
+            {% if val and val not in ['None','none'] %}
+            <div class="notes-lbl">{{ layout.field_label(skey, field.field_key, field.label) }}</div>
+            <div class="notes-val">{{ val }}</div>
+            {% endif %}
+          {% endfor %}
+          {% if section_rentals %}
+          <div class="rentals-lbl">Rented Assets</div>
+          <table class="rentals-table">
+            {% for r in section_rentals %}
+            <tr>
+              <td class="qty">{{ r.quantity }}×</td>
+              <td>
+                {{ r.type_name }}
+                {% set meta_bits = [] %}
+                {% if r.manufacturer %}{% set _ = meta_bits.append(r.manufacturer) %}{% endif %}
+                {% if r.model %}{% set _ = meta_bits.append(r.model) %}{% endif %}
+                {% if meta_bits %}<span class="meta"> · {{ meta_bits|join(' · ') }}</span>{% endif %}
+                {% if r.notes %}<span class="meta"> — {{ r.notes }}</span>{% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </table>
+          {% endif %}
+        </div>
         {% endif %}
-      {% endfor %}
-      {% if section_rentals %}
-      <div class="rentals-lbl">Rented Assets</div>
-      <table class="rentals-table">
-        {% for r in section_rentals %}
-        <tr>
-          <td class="qty">{{ r.quantity }}×</td>
-          <td>
-            {{ r.type_name }}
-            {% set meta_bits = [] %}
-            {% if r.manufacturer %}{% set _ = meta_bits.append(r.manufacturer) %}{% endif %}
-            {% if r.model %}{% set _ = meta_bits.append(r.model) %}{% endif %}
-            {% if meta_bits %}<span class="meta"> · {{ meta_bits|join(' · ') }}</span>{% endif %}
-            {% if r.notes %}<span class="meta"> — {{ r.notes }}</span>{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </table>
       {% endif %}
-    </div>
     {% endif %}
   {% endfor %}
 
 {% else %}
+  {# Fallback header (form_sections missing — render minimal header so document is identifiable) #}
+  <div class="doc-header">
+    <div style="display:flex;align-items:center;gap:12px">
+      {% if logo_data %}
+      <img src="{{ logo_data }}" alt="Logo" style="max-height:45px;max-width:120px;object-fit:contain">
+      {% endif %}
+      <div>
+        <div class="doc-title">DPC <span>ADVANCE</span> SHEET</div>
+        <div class="doc-org">Dr. Phillips Center for the Performing Arts</div>
+      </div>
+    </div>
+    <div class="doc-meta">
+      <div class="version">v{{ version }}</div>
+      <div>{{ export_date }}</div>
+      <div style="margin-top:3px; font-size:8pt; color:#222">
+        <strong>{{ show.name }}</strong> &nbsp;·&nbsp; {{ show.show_date or '—' }}
+      </div>
+    </div>
+  </div>
+
   {# Fallback: hardcoded rendering if form_sections not passed #}
 
   <!-- Show Info + Contacts side by side -->
