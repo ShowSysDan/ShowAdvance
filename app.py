@@ -7148,6 +7148,26 @@ def get_labor_requests(show_id):
     return jsonify([_normalize_row_dates(dict(r)) for r in rows])
 
 
+@app.route('/shows/<int:show_id>/labor-notes', methods=['PUT'])
+@login_required
+def save_show_labor_notes(show_id):
+    """Save show-level notes that travel with every labor request — used by
+    requesters and schedulers to share split-shift instructions, task lists,
+    and other nuance across the staffing flow."""
+    if not can_access_show(session['user_id'], show_id):
+        return jsonify({'success': False, 'error': 'Access denied.'}), 403
+    if session.get('is_restricted') or session.get('is_readonly'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    data = request.get_json(force=True) or {}
+    notes = (data.get('labor_notes') or '').strip()
+    db = get_db()
+    db.execute('UPDATE shows SET labor_notes=? WHERE id=?', (notes, show_id))
+    log_audit(db, 'SHOW_LABOR_NOTES_EDIT', 'show', show_id, show_id=show_id)
+    db.commit()
+    db.close()
+    return jsonify({'success': True})
+
+
 @app.route('/shows/<int:show_id>/labor-requests', methods=['POST'])
 @login_required
 def add_labor_request(show_id):
@@ -7388,7 +7408,7 @@ def labor_overview():
             lr.is_scheduled,
             cm.name AS scheduled_tech,
             lr.requested_name AS requested_tech,
-            lr.notes AS notes,
+            s.labor_notes AS group_notes,
             lr.sort_order AS sort_order,
             ad.field_value AS pm_name
         FROM labor_requests lr
@@ -7417,7 +7437,7 @@ def labor_overview():
             r.is_scheduled,
             cm.name AS scheduled_tech,
             r.requested_name AS requested_tech,
-            r.notes AS notes,
+            COALESCE(NULLIF(g.project_notes, ''), p.project_notes, '') AS group_notes,
             r.sort_order AS sort_order,
             COALESCE(NULLIF(g.contact_name, ''), p.contact_name) AS contact_name
         FROM overhead_labor_requests r
@@ -7444,6 +7464,7 @@ def labor_overview():
             continue
         by_day[d].append({
             'kind': 'show',
+            'group_key': f"show:{r['show_id']}",
             'name': r['show_name'] or '—',
             'venue': r['venue'] or '',
             'position': r['position_name'] or '—',
@@ -7456,7 +7477,7 @@ def labor_overview():
             'tech': r['scheduled_tech'] or (r['requested_tech'] or ''),
             'is_scheduled': bool(r['is_scheduled']),
             'pm': r['pm_name'] or '',
-            'notes': (r['notes'] or '').strip(),
+            'group_notes': (r['group_notes'] or '').strip() if r['group_notes'] else '',
             'color': '',
             'show_id': r['show_id'],
         })
@@ -7467,6 +7488,7 @@ def labor_overview():
             continue
         by_day[d].append({
             'kind': 'overhead',
+            'group_key': f"oh:{r['group_id']}",
             'name': r['project_name'] or 'General',
             'venue': r['client_name'] or '',
             'position': r['position_name'] or '—',
@@ -7479,7 +7501,7 @@ def labor_overview():
             'tech': r['scheduled_tech'] or (r['requested_tech'] or ''),
             'is_scheduled': bool(r['is_scheduled']),
             'pm': r['contact_name'] or '',
-            'notes': (r['notes'] or '').strip(),
+            'group_notes': (r['group_notes'] or '').strip() if r['group_notes'] else '',
             'color': r['project_color'] or '',
             'group_id': r['group_id'],
         })
@@ -7491,8 +7513,13 @@ def labor_overview():
         d = (week_start + timedelta(days=i))
         d_iso = d.isoformat()
         rows = by_day[d_iso]
-        # Within a day, sort by call time then name so the table reads top-down
-        rows.sort(key=lambda r: ((r['in_time'] or '99:99'), r['name'].lower()))
+        # Group rows by show / project so notes render once per group
+        rows.sort(key=lambda r: (r['name'].lower(), (r['in_time'] or '99:99')))
+        seen_groups = set()
+        for row in rows:
+            key = row['group_key']
+            row['is_group_first'] = key not in seen_groups
+            seen_groups.add(key)
         days.append({
             'name': day_names[i],
             'date': d,
@@ -7539,7 +7566,8 @@ def api_labor_scheduler_list():
                s.name as show_name,
                s.venue as show_venue,
                s.show_date as show_date,
-               s.status as show_status
+               s.status as show_status,
+               s.labor_notes as show_labor_notes
         FROM labor_requests lr
         JOIN shows s ON lr.show_id = s.id
         LEFT JOIN job_positions jp ON lr.position_id = jp.id
@@ -7573,6 +7601,7 @@ def api_labor_scheduler_list():
                 'show_venue': rd['show_venue'],
                 'show_date': rd['show_date'],
                 'show_status': rd['show_status'],
+                'show_labor_notes': rd.get('show_labor_notes') or '',
                 'requests': [],
             }
             order.append(sid)
@@ -7592,7 +7621,8 @@ def api_labor_scheduler_list():
                cm.name AS scheduled_crew_name,
                g.name AS group_name,
                COALESCE(p.name, g.name) AS project_name,
-               p.client_name AS project_client
+               p.client_name AS project_client,
+               COALESCE(NULLIF(g.project_notes, ''), p.project_notes, '') AS group_notes
         FROM overhead_labor_requests r
         JOIN overhead_labor_groups g ON g.id = r.group_id
         LEFT JOIN overhead_projects p ON p.id = g.project_id
@@ -7617,6 +7647,7 @@ def api_labor_scheduler_list():
                 'project_name':   rd['project_name'],
                 'project_client': rd['project_client'],
                 'group_name':     rd['group_name'],
+                'group_notes':    rd.get('group_notes') or '',
                 'requests':       [],
             }
             oh_order.append(gid)

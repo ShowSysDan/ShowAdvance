@@ -79,20 +79,16 @@
     text-transform: uppercase; font-weight: 600;
     background: rgba(108,122,137,.15); color: #6c7a89;
   }
-  .lo-notes-badge {
-    display: inline-block; margin-left: 6px;
-    font-size: 11px; cursor: help; opacity: 0.7;
-  }
   .lo-notes-row td {
-    padding: 4px 8px 8px !important;
+    padding: 8px 12px !important;
     border-bottom: 1px solid var(--border) !important;
-    background: rgba(127,127,127,.04);
+    background: rgba(184,132,10,.06);
   }
   .lo-notes-tag {
     display: inline-block;
-    font-size: 9px; font-weight: 700; letter-spacing: .08em;
-    color: var(--text-muted); text-transform: uppercase;
-    margin-right: 8px;
+    font-size: 10px; font-weight: 700; letter-spacing: .04em;
+    color: var(--accent);
+    margin-right: 10px; white-space: nowrap;
   }
   .lo-notes-text {
     color: var(--text); font-size: 12px;
@@ -156,6 +152,14 @@
     </thead>
     <tbody>
       {% for r in day.rows %}
+      {% if r.is_group_first and r.group_notes %}
+      <tr class="lo-notes-row lo-row-{{ r.kind }}-notes">
+        <td colspan="11">
+          <span class="lo-notes-tag">{{ r.name }} — Notes</span>
+          <span class="lo-notes-text">{{ r.group_notes }}</span>
+        </td>
+      </tr>
+      {% endif %}
       <tr class="lo-row-{{ r.kind }}">
         <td class="lo-name">
           {% if r.color %}<span class="lo-color-dot" style="background: {{ r.color }}"></span>{% endif %}
@@ -177,20 +181,8 @@
         <td class="lo-tech {% if not r.tech %}unscheduled{% endif %}">
           {{ r.tech or 'unassigned' }}
         </td>
-        <td class="lo-pm">
-          {{ r.pm }}
-          {% if r.notes %}<span class="lo-notes-badge" title="{{ r.notes }}">📝</span>{% endif %}
-        </td>
+        <td class="lo-pm">{{ r.pm }}</td>
       </tr>
-      {% if r.notes %}
-      <tr class="lo-notes-row">
-        <td></td>
-        <td colspan="10">
-          <span class="lo-notes-tag">Notes</span>
-          <span class="lo-notes-text">{{ r.notes }}</span>
-        </td>
-      </tr>
-      {% endif %}
       {% endfor %}
     </tbody>
   </table>
