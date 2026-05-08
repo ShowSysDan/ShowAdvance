@@ -774,6 +774,13 @@ const SHOW_VENUE = {{ show.venue | tojson }};
       <button type="button" class="btn btn-sm btn-primary" onclick="applyQuickFill(true)">Apply to All</button>
     </div>
     {% endif %}
+    <div class="show-labor-notes-wrap">
+      <label class="show-labor-notes-label" for="show-labor-notes">Show Labor Notes</label>
+      <textarea id="show-labor-notes" class="field-input show-labor-notes-text"
+                rows="2" placeholder="Split-shift instructions, task lists, scheduler nuance — visible to schedulers and on the Labor Overview."
+                {% if restricted %}disabled{% endif %}
+                onblur="saveShowLaborNotes(this)">{{ show.labor_notes or '' }}</textarea>
+    </div>
     <div class="form-section-body" id="labor-days-container">
       {# Day blocks are rendered by initLaborTab() in JS from window._laborRequestsData #}
       <p class="text-dim labor-empty-hint" id="labor-empty-hint" style="padding:16px;text-align:center;display:none">
@@ -1851,31 +1858,19 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   font-weight: 600 !important;
   color: var(--text) !important;
 }
-/* Notes button + expanding sub-row */
-.labor-notes-btn {
-  background: transparent; border: 1px solid var(--border);
-  border-radius: 4px; padding: 1px 6px; font-size: 13px; cursor: pointer;
-  color: var(--text-muted); margin-right: 2px;
-  line-height: 1.2;
-}
-.labor-notes-btn:hover { background: var(--bg-hover); color: var(--text); }
-.labor-notes-btn.has-notes {
-  background: rgba(245,127,32,.12);
-  border-color: var(--accent);
-  color: var(--accent);
-}
-.labor-notes-row td {
-  padding: 8px 16px !important;
-  background: rgba(127,127,127,.04);
+/* Show-level labor notes box (top of staffing tab) */
+.show-labor-notes-wrap {
+  padding: 10px 14px 8px;
   border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
 }
-.labor-notes-label {
-  display: inline-block;
-  font-size: 9px; font-weight: 700; letter-spacing: .08em;
-  color: var(--text-muted); text-transform: uppercase;
+.show-labor-notes-label {
+  display: block;
+  font-size: 10px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--text-muted);
   margin-bottom: 4px;
 }
-.labor-notes-text {
+.show-labor-notes-text {
   width: 100%; min-height: 38px;
   font-size: 12px; line-height: 1.4;
   resize: vertical;
@@ -2370,33 +2365,10 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       <td><select class="field-input field-input-sm labor-field" data-field="requested_name" ${RESTRICTED ? 'disabled' : ''}></select></td>
       <td style="text-align:center" title="Set by the labor scheduler"><input type="checkbox" class="labor-is-scheduled" disabled ${lr.is_scheduled ? 'checked' : ''}></td>
       <td class="labor-scheduled-tech" title="Set by the labor scheduler"></td>
-      <td class="labor-action-cell" style="text-align:center;white-space:nowrap">
-        <button type="button" class="labor-notes-btn ${(lr.notes || '').trim() ? 'has-notes' : ''}"
-                onclick="toggleLaborNotes(this)" title="Notes">📝</button>
-        ${RESTRICTED ? '' : '<button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button>'}
-      </td>
+      ${RESTRICTED ? '' : '<td style="text-align:center"><button type="button" class="btn btn-xs btn-danger-ghost" onclick="removeLaborRow(this)" title="Remove">×</button></td>'}
     `;
     tr.querySelector('.labor-scheduled-tech').textContent = scheduledTechText;
     tbody.appendChild(tr);
-
-    // Notes sub-row — colspans the entire labor table, hidden until expanded
-    const notesTr = document.createElement('tr');
-    notesTr.className = 'labor-notes-row';
-    notesTr.dataset.notesFor = lr.id;
-    const hasNotes = !!(lr.notes || '').trim();
-    if (!hasNotes) notesTr.hidden = true;
-    notesTr.innerHTML = `
-      <td colspan="${RESTRICTED ? 9 : 10}">
-        <label class="labor-notes-label">Notes</label>
-        <textarea class="field-input labor-notes-text" data-field="notes" rows="2"
-                  placeholder="Split-shift instructions, task list, scheduler notes…"
-                  ${RESTRICTED ? 'disabled' : ''}>${(lr.notes || '').replace(/</g,'&lt;')}</textarea>
-      </td>
-    `;
-    tbody.appendChild(notesTr);
-    if (!RESTRICTED) {
-      notesTr.querySelector('.labor-notes-text').addEventListener('blur', (e) => saveLaborRow(e.target));
-    }
 
     const posSel  = tr.querySelector('select[data-field="position_id"]');
     const techSel = tr.querySelector('select[data-field="requested_name"]');
@@ -2450,7 +2422,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
           <col style="width:170px">
           <col style="width:50px">
           <col>
-          <col style="width:60px">
+          ${RESTRICTED ? '' : '<col style="width:36px">'}
         </colgroup>
         <thead>
           <tr>
@@ -2463,7 +2435,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
             <th style="white-space:nowrap">REQUESTED TECH</th>
             <th style="text-align:center" title="Scheduled by the labor scheduler">SCHED</th>
             <th style="white-space:nowrap">SCHEDULED TECH</th>
-            <th></th>
+            ${RESTRICTED ? '' : '<th></th>'}
           </tr>
         </thead>
         <tbody></tbody>
@@ -2549,6 +2521,20 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     hint.style.display = hasBlocks ? 'none' : '';
   }
 
+  async function saveShowLaborNotes(textarea) {
+    const value = textarea.value.trim();
+    try {
+      const r = await fetch(`/shows/${SHOW_ID}/labor-notes`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ labor_notes: value }),
+      });
+      if (r.ok) showSaveToast('✓ Notes saved');
+      else showSaveToast('✗ Save failed', 'error');
+    } catch(e) { showSaveToast('✗ Network error', 'error'); }
+  }
+  window.saveShowLaborNotes = saveShowLaborNotes;
+
   async function _putLabor(rid, fields) {
     // Send all current field values along with any overrides in `fields`,
     // scoped by finding the row in the DOM.
@@ -2564,38 +2550,16 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const break2_start   = tr.querySelector('[data-field="break2_start"]')?.value || '';
     const break2_end     = tr.querySelector('[data-field="break2_end"]')?.value || '';
     const requested_name = tr.querySelector('[data-field="requested_name"]').value || '';
-    const notesRow = document.querySelector(`tr.labor-notes-row[data-notes-for="${rid}"]`);
-    const notes = notesRow?.querySelector('[data-field="notes"]')?.value || '';
     const resp = await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({position_id, work_date, in_time, out_time,
                             break_start, break_end, break2_start, break2_end,
-                            requested_name, notes}),
+                            requested_name}),
     });
-    if (resp.ok) {
-      showSaveToast('✓ Saved');
-      // Update notes-button visual state to track presence
-      const btn = tr.querySelector('.labor-notes-btn');
-      if (btn) btn.classList.toggle('has-notes', !!notes.trim());
-    } else {
-      showSaveToast('✗ Save failed', 'error');
-    }
+    if (resp.ok) showSaveToast('✓ Saved');
+    else showSaveToast('✗ Save failed', 'error');
   }
-
-  function toggleLaborNotes(btn) {
-    const tr = btn.closest('tr');
-    if (!tr) return;
-    const rid = tr.dataset.rid;
-    const notesRow = document.querySelector(`tr.labor-notes-row[data-notes-for="${rid}"]`);
-    if (!notesRow) return;
-    notesRow.hidden = !notesRow.hidden;
-    if (!notesRow.hidden) {
-      const ta = notesRow.querySelector('textarea');
-      if (ta) ta.focus();
-    }
-  }
-  window.toggleLaborNotes = toggleLaborNotes;
 
   async function saveLaborRow(el) {
     const tr = el.closest('tr');
@@ -2920,8 +2884,6 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const resp = await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {method: 'DELETE'});
     const data = await resp.json();
     if (data.success) {
-      const notesRow = document.querySelector(`tr.labor-notes-row[data-notes-for="${rid}"]`);
-      if (notesRow) notesRow.remove();
       tr.remove();
     } else {
       alert('Error removing row: ' + (data.error || 'Unknown'));
@@ -2945,14 +2907,12 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       const break2_start   = tr.querySelector('[data-field="break2_start"]')?.value || '';
       const break2_end     = tr.querySelector('[data-field="break2_end"]')?.value || '';
       const requested_name = tr.querySelector('[data-field="requested_name"]')?.value || '';
-      const notesRow = document.querySelector(`tr.labor-notes-row[data-notes-for="${rid}"]`);
-      const notes = notesRow?.querySelector('[data-field="notes"]')?.value || '';
       const r = await fetch(`/shows/${SHOW_ID}/labor-requests/${rid}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({position_id, work_date, in_time, out_time,
                               break_start, break_end, break2_start, break2_end,
-                              requested_name, notes}),
+                              requested_name}),
       });
       if (r.ok) ok++; else fail++;
     }

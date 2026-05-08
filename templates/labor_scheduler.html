@@ -73,30 +73,20 @@
     flex: 1; font-size: 13px; font-weight: 600; color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   }
-  /* Notes button + expanding sub-row */
-  .sched-notes-btn {
-    background: transparent; border: 1px solid var(--border);
-    border-radius: 4px; padding: 1px 6px; font-size: 13px; cursor: pointer;
-    color: var(--text-muted); margin-right: 2px; line-height: 1.2;
-  }
-  .sched-notes-btn:hover { background: var(--bg-hover); color: var(--text); }
-  .sched-notes-btn.has-notes {
-    background: rgba(245,127,32,.12);
-    border-color: var(--accent);
-    color: var(--accent);
-  }
-  .sched-notes-row td {
-    padding: 8px 16px !important;
-    background: rgba(127,127,127,.04);
+  /* Show / project notes box at top of each scheduler section */
+  .sched-notes-box {
+    padding: 8px 14px;
     border-bottom: 1px solid var(--border);
+    background: var(--bg-surface);
   }
   .sched-notes-label {
-    display: inline-block;
-    font-size: 9px; font-weight: 700; letter-spacing: .08em;
-    color: var(--text-muted); text-transform: uppercase;
+    display: block;
+    font-size: 10px; font-weight: 700; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--text-muted);
     margin-bottom: 4px;
   }
-  .sched-notes-text {
+  .sched-show-notes,
+  .sched-group-notes {
     width: 100%; min-height: 38px;
     font-size: 12px; line-height: 1.4;
     resize: vertical;
@@ -310,9 +300,7 @@
           </select>
         </div>
       </td>
-      <td style="text-align:center;white-space:nowrap">
-        <button class="sched-notes-btn ${(lr.notes || '').trim() ? 'has-notes' : ''}"
-                onclick="window.__scheduler.toggleNotes(this)" title="Notes">📝</button>
+      <td style="text-align:center">
         <button class="btn btn-xs btn-danger-ghost" onclick="window.__scheduler.removeRow(this)" title="Remove line">×</button>
       </td>
     `;
@@ -328,29 +316,6 @@
     const techSel = tr.querySelector('.sched-tech');
     buildTechnicianSelect(techSel, lr.position_id, lr.scheduled_crew_member_id);
     return tr;
-  }
-
-  /* Build the matching expandable notes sub-row that follows each labor row. */
-  function buildNotesRow(lr) {
-    const notesTr = document.createElement('tr');
-    notesTr.className = 'sched-notes-row';
-    notesTr.dataset.notesFor = lr.id;
-    if (!(lr.notes || '').trim()) notesTr.hidden = true;
-    notesTr.innerHTML = `
-      <td colspan="10">
-        <label class="sched-notes-label">Notes</label>
-        <textarea class="field-input sched-notes-text" data-field="notes" rows="2"
-                  placeholder="Split-shift instructions, task list, scheduler notes…"
-                  onblur="window.__scheduler.saveNotes(this)">${escapeHtml(lr.notes || '')}</textarea>
-      </td>
-    `;
-    return notesTr;
-  }
-
-  /* Append both the main labor row and its hidden-by-default notes row. */
-  function appendLaborRow(tbody, lr, endpointBase) {
-    tbody.appendChild(buildRow(lr, endpointBase));
-    tbody.appendChild(buildNotesRow(lr));
   }
 
   function renderShows(shows) {
@@ -378,6 +343,16 @@
       `;
       section.appendChild(header);
 
+      const notesBox = document.createElement('div');
+      notesBox.className = 'sched-notes-box';
+      notesBox.innerHTML = `
+        <label class="sched-notes-label">Show Labor Notes</label>
+        <textarea class="field-input sched-show-notes" data-show-id="${show.show_id}"
+                  placeholder="Notes from the show — split shifts, task lists, scheduling nuance."
+                  onblur="window.__scheduler.saveShowNotes(this)" rows="2">${escapeHtml(show.show_labor_notes || '')}</textarea>
+      `;
+      section.appendChild(notesBox);
+
       const bodyWrap = document.createElement('div');
       bodyWrap.className = 'form-section-body no-pad';
 
@@ -399,7 +374,7 @@
         </thead>
       `;
       const tbody = document.createElement('tbody');
-      show.requests.forEach(lr => appendLaborRow(tbody, lr, '/api/labor-scheduler'));
+      show.requests.forEach(lr => tbody.appendChild(buildRow(lr, '/api/labor-scheduler')));
       table.appendChild(tbody);
       bodyWrap.appendChild(table);
       section.appendChild(bodyWrap);
@@ -441,6 +416,16 @@
       `;
       section.appendChild(header);
 
+      const ohNotesBox = document.createElement('div');
+      ohNotesBox.className = 'sched-notes-box';
+      ohNotesBox.innerHTML = `
+        <label class="sched-notes-label">Project Notes</label>
+        <textarea class="field-input sched-group-notes" data-group-id="${g.group_id}"
+                  placeholder="Notes from the project — split shifts, task lists, scheduling nuance."
+                  onblur="window.__scheduler.saveGroupNotes(this)" rows="2">${escapeHtml(g.group_notes || '')}</textarea>
+      `;
+      section.appendChild(ohNotesBox);
+
       const bodyWrap = document.createElement('div');
       bodyWrap.className = 'form-section-body no-pad';
       const table = document.createElement('table');
@@ -461,7 +446,7 @@
         </thead>
       `;
       const tbody = document.createElement('tbody');
-      g.requests.forEach(lr => appendLaborRow(tbody, lr, '/api/overhead-crew/requests'));
+      g.requests.forEach(lr => tbody.appendChild(buildRow(lr, '/api/overhead-crew/requests')));
       table.appendChild(tbody);
       bodyWrap.appendChild(table);
       section.appendChild(bodyWrap);
@@ -587,7 +572,8 @@
     if (!data.success) { showSaveToast('✗ ' + (data.error || 'Add failed'), 'error'); return; }
     const section = btn.closest('.form-section');
     const tbody = section.querySelector('tbody');
-    appendLaborRow(tbody, data.row);
+    const newRow = buildRow(data.row);
+    tbody.appendChild(newRow);
     showSaveToast('✓ Row added');
   }
 
@@ -602,7 +588,8 @@
     if (!data.success) { showSaveToast('✗ ' + (data.error || 'Add failed'), 'error'); return; }
     const section = btn.closest('.form-section');
     const tbody = section.querySelector('tbody');
-    appendLaborRow(tbody, data.request, '/api/overhead-crew/requests');
+    const newRow = buildRow(data.request, '/api/overhead-crew/requests');
+    tbody.appendChild(newRow);
     showSaveToast('✓ Row added');
   }
 
@@ -613,47 +600,38 @@
     if (!confirm('Remove this labor line?')) return;
     const r = await fetch(`${_endpointFor(tr)}/${rid}`, { method: 'DELETE' });
     if (!r.ok) { showSaveToast('✗ Delete failed', 'error'); return; }
-    const notesRow = document.querySelector(`tr.sched-notes-row[data-notes-for="${rid}"]`);
-    if (notesRow) notesRow.remove();
     tr.remove();
     showSaveToast('✓ Removed');
   }
 
-  /* Toggle the visibility of the matching notes sub-row. */
-  function toggleNotes(btn) {
-    const tr = btn.closest('tr');
-    if (!tr) return;
-    const rid = tr.dataset.rid;
-    const notesRow = document.querySelector(`tr.sched-notes-row[data-notes-for="${rid}"]`);
-    if (!notesRow) return;
-    notesRow.hidden = !notesRow.hidden;
-    if (!notesRow.hidden) {
-      const ta = notesRow.querySelector('textarea');
-      if (ta) ta.focus();
-    }
+  async function saveShowNotes(textarea) {
+    const showId = textarea.dataset.showId;
+    if (!showId) return;
+    const value = textarea.value.trim();
+    try {
+      const r = await fetch(`/shows/${showId}/labor-notes`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ labor_notes: value }),
+      });
+      if (r.ok) showSaveToast('✓ Notes saved');
+      else showSaveToast('✗ Save failed', 'error');
+    } catch(e) { showSaveToast('✗ Network error', 'error'); }
   }
 
-  /* Save just the notes textarea on blur — uses the same endpoint as the
-     row's other fields (show vs overhead is encoded on the main row). */
-  async function saveNotes(textarea) {
-    const notesRow = textarea.closest('tr.sched-notes-row');
-    if (!notesRow) return;
-    const rid = notesRow.dataset.notesFor;
-    const mainTr = document.querySelector(`tr[data-rid="${rid}"]`);
-    if (!mainTr) return;
+  async function saveGroupNotes(textarea) {
+    const groupId = textarea.dataset.groupId;
+    if (!groupId) return;
     const value = textarea.value.trim();
-    const r = await fetch(`${_endpointFor(mainTr)}/${rid}`, {
-      method: 'PUT',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ notes: value }),
-    });
-    if (r.ok) {
-      const btn = mainTr.querySelector('.sched-notes-btn');
-      if (btn) btn.classList.toggle('has-notes', !!value);
-      showSaveToast('✓ Notes saved');
-    } else {
-      showSaveToast('✗ Save failed', 'error');
-    }
+    try {
+      const r = await fetch(`/api/overhead-crew/groups/${groupId}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ project_notes: value }),
+      });
+      if (r.ok) showSaveToast('✓ Notes saved');
+      else showSaveToast('✗ Save failed', 'error');
+    } catch(e) { showSaveToast('✗ Network error', 'error'); }
   }
 
   async function saveAll() {
@@ -671,15 +649,13 @@
       const break2_start= tr.querySelector('.sched-b2start')?.value.trim() || '';
       const break2_end  = tr.querySelector('.sched-b2end')?.value.trim()   || '';
       const out_time    = tr.querySelector('.sched-out')?.value.trim()     || '';
-      const notesRow = document.querySelector(`tr.sched-notes-row[data-notes-for="${rid}"]`);
-      const notes = notesRow?.querySelector('[data-field="notes"]')?.value || '';
       const r = await fetch(`${_endpointFor(tr)}/${rid}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ is_scheduled: isScheduled, scheduled_crew_member_id: crewId,
                                position_id: positionId, in_time,
                                break_start, break_end, break2_start, break2_end,
-                               out_time, notes }),
+                               out_time }),
       });
       if (r.ok) ok++; else fail++;
     }
@@ -717,7 +693,7 @@
     }
   }, true);
 
-  window.__scheduler = { onScheduledToggle, onCrewChange, onPositionChange, onTimeChange, addRow, addOverheadRow, removeRow, saveAll, toggleNotes, saveNotes };
+  window.__scheduler = { onScheduledToggle, onCrewChange, onPositionChange, onTimeChange, addRow, addOverheadRow, removeRow, saveAll, saveShowNotes, saveGroupNotes };
   window.loadScheduler = loadScheduler;
 
   document.addEventListener('DOMContentLoaded', () => {
