@@ -7161,8 +7161,10 @@ def add_labor_request(show_id):
         'SELECT MAX(sort_order) FROM labor_requests WHERE show_id=?', (show_id,)
     ).fetchone()[0] or 0
     cur = db.execute("""
-        INSERT INTO labor_requests (show_id, position_id, work_date, in_time, out_time, break_start, break_end, break2_start, break2_end, requested_name, sort_order)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO labor_requests (show_id, position_id, work_date, in_time, out_time,
+                                    break_start, break_end, break2_start, break2_end,
+                                    requested_name, notes, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (show_id,
           data.get('position_id') or None,
           data.get('work_date') or None,
@@ -7173,6 +7175,7 @@ def add_labor_request(show_id):
           _normalize_perf_time(data.get('break2_start', '')),
           _normalize_perf_time(data.get('break2_end', '')),
           data.get('requested_name', ''),
+          (data.get('notes') or '').strip(),
           max_order + 10))
     rid = cur.lastrowid
     log_audit(db, 'LABOR_REQUEST_ADD', 'labor_request', rid, show_id=show_id,
@@ -7196,7 +7199,7 @@ def update_labor_request(show_id, rid):
         UPDATE labor_requests
         SET position_id=?, work_date=?, in_time=?, out_time=?,
             break_start=?, break_end=?, break2_start=?, break2_end=?,
-            requested_name=?
+            requested_name=?, notes=?
         WHERE id=? AND show_id=?
     """, (data.get('position_id') or None,
           data.get('work_date') or None,
@@ -7207,6 +7210,7 @@ def update_labor_request(show_id, rid):
           _normalize_perf_time(data.get('break2_start', '')),
           _normalize_perf_time(data.get('break2_end', '')),
           data.get('requested_name', ''),
+          (data.get('notes') or '').strip(),
           rid, show_id))
     log_audit(db, 'LABOR_REQUEST_EDIT', 'labor_request', rid, show_id=show_id)
     db.commit()
@@ -7384,6 +7388,7 @@ def labor_overview():
             lr.is_scheduled,
             cm.name AS scheduled_tech,
             lr.requested_name AS requested_tech,
+            lr.notes AS notes,
             lr.sort_order AS sort_order,
             ad.field_value AS pm_name
         FROM labor_requests lr
@@ -7412,6 +7417,7 @@ def labor_overview():
             r.is_scheduled,
             cm.name AS scheduled_tech,
             r.requested_name AS requested_tech,
+            r.notes AS notes,
             r.sort_order AS sort_order,
             COALESCE(NULLIF(g.contact_name, ''), p.contact_name) AS contact_name
         FROM overhead_labor_requests r
@@ -7450,6 +7456,7 @@ def labor_overview():
             'tech': r['scheduled_tech'] or (r['requested_tech'] or ''),
             'is_scheduled': bool(r['is_scheduled']),
             'pm': r['pm_name'] or '',
+            'notes': (r['notes'] or '').strip(),
             'color': '',
             'show_id': r['show_id'],
         })
@@ -7472,6 +7479,7 @@ def labor_overview():
             'tech': r['scheduled_tech'] or (r['requested_tech'] or ''),
             'is_scheduled': bool(r['is_scheduled']),
             'pm': r['contact_name'] or '',
+            'notes': (r['notes'] or '').strip(),
             'color': r['project_color'] or '',
             'group_id': r['group_id'],
         })
@@ -7522,7 +7530,7 @@ def api_labor_scheduler_list():
         SELECT lr.id, lr.show_id, lr.position_id, lr.work_date,
                lr.in_time, lr.out_time,
                lr.break_start, lr.break_end, lr.break2_start, lr.break2_end,
-               lr.requested_name, lr.is_scheduled,
+               lr.requested_name, lr.notes, lr.is_scheduled,
                lr.scheduled_crew_member_id, lr.sort_order,
                jp.name as position_name,
                pc.name as category_name,
@@ -7576,7 +7584,7 @@ def api_labor_scheduler_list():
         SELECT r.id, r.group_id, r.work_date, r.position_id,
                r.in_time, r.out_time,
                r.break_start, r.break_end, r.break2_start, r.break2_end,
-               r.requested_name, r.is_scheduled,
+               r.requested_name, r.notes, r.is_scheduled,
                r.scheduled_crew_member_id, r.sort_order,
                jp.name AS position_name,
                pc.name AS category_name,
@@ -7658,6 +7666,10 @@ def api_labor_scheduler_update(rid):
             updates.append(f'{field}=?')
             params.append(_normalize_perf_time((data[field] or '').strip()))
             detail_parts.append(f"{field}={data[field]}")
+    if 'notes' in data:
+        updates.append('notes=?')
+        params.append((data['notes'] or '').strip())
+        detail_parts.append('notes=updated')
 
     if not updates:
         db.close()
@@ -7746,7 +7758,7 @@ def api_labor_scheduler_add():
     row = db.execute("""
         SELECT lr.id, lr.show_id, lr.position_id, lr.work_date, lr.in_time, lr.out_time,
                lr.break_start, lr.break_end, lr.break2_start, lr.break2_end,
-               lr.requested_name, lr.is_scheduled,
+               lr.requested_name, lr.notes, lr.is_scheduled,
                lr.scheduled_crew_member_id, lr.sort_order,
                jp.name as position_name, pc.name as category_name,
                cm.name as scheduled_crew_name

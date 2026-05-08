@@ -79,6 +79,25 @@
     text-transform: uppercase; font-weight: 600;
     background: rgba(108,122,137,.15); color: #6c7a89;
   }
+  .lo-notes-badge {
+    display: inline-block; margin-left: 6px;
+    font-size: 11px; cursor: help; opacity: 0.7;
+  }
+  .lo-notes-row td {
+    padding: 4px 8px 8px !important;
+    border-bottom: 1px solid var(--border) !important;
+    background: rgba(127,127,127,.04);
+  }
+  .lo-notes-tag {
+    display: inline-block;
+    font-size: 9px; font-weight: 700; letter-spacing: .08em;
+    color: var(--text-muted); text-transform: uppercase;
+    margin-right: 8px;
+  }
+  .lo-notes-text {
+    color: var(--text); font-size: 12px;
+    white-space: pre-wrap; line-height: 1.4;
+  }
 </style>
 {% endblock %}
 
@@ -158,8 +177,20 @@
         <td class="lo-tech {% if not r.tech %}unscheduled{% endif %}">
           {{ r.tech or 'unassigned' }}
         </td>
-        <td class="lo-pm">{{ r.pm }}</td>
+        <td class="lo-pm">
+          {{ r.pm }}
+          {% if r.notes %}<span class="lo-notes-badge" title="{{ r.notes }}">📝</span>{% endif %}
+        </td>
       </tr>
+      {% if r.notes %}
+      <tr class="lo-notes-row">
+        <td></td>
+        <td colspan="10">
+          <span class="lo-notes-tag">Notes</span>
+          <span class="lo-notes-text">{{ r.notes }}</span>
+        </td>
+      </tr>
+      {% endif %}
       {% endfor %}
     </tbody>
   </table>
