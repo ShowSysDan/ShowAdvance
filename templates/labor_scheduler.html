@@ -3,16 +3,6 @@
 
 {% block head %}
 <style>
-  .scheduler-filter {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 12px;
-    align-items: flex-end;
-    margin-bottom: 16px;
-  }
-  .scheduler-filter .field-group { display: flex; flex-direction: column; gap: 4px; }
-  .scheduler-filter label { font-size: 11px; letter-spacing: .04em; color: var(--text-dim); font-weight: 600; text-transform: uppercase; }
-  .scheduler-filter input[type=date] { min-width: 160px; }
   .scheduler-show-header {
     display: flex;
     align-items: baseline;
@@ -101,34 +91,29 @@
 {% endblock %}
 
 {% block content %}
-<div class="page-header">
-  <div>
-    <h1 class="page-title">Labor Scheduler</h1>
-    <p class="page-sub">Pick a date range to see all labor requests grouped by show. Schedule positions and assign technicians.</p>
-  </div>
-  <div class="header-actions">
-    <button class="btn btn-ghost" onclick="window.__scheduler.openAddShow()" title="Create a barebones show right here so you can start adding labor before the PM advances it">+ Add show</button>
-    <select id="sched-pick-show" class="field-input" style="width:auto;min-width:220px"
-            onchange="window.__scheduler.onPickShow(this)" title="Shows in this range that have no labor lines yet">
-      <option value="">+ Add labor to existing show…</option>
-    </select>
-    <button class="btn btn-primary" onclick="window.__scheduler.saveAll()">Save All</button>
-  </div>
-</div>
-
-<div class="form-section">
+<div class="form-section" style="margin-bottom:20px">
   <div class="form-section-body">
-    <div class="scheduler-filter">
-      <div class="field-group">
-        <label for="sched-from">From</label>
-        <input type="date" id="sched-from" class="field-input">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <h1 style="margin:0;font-size:18px;font-weight:700;letter-spacing:0.02em">Labor Scheduler</h1>
+      <button class="btn btn-primary" onclick="window.__scheduler.saveAll()">Save All</button>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px">
+      <div class="field-group" style="display:flex;flex-direction:column;gap:4px">
+        <label for="sched-from" style="font-size:11px;letter-spacing:.04em;color:var(--text-dim);font-weight:600;text-transform:uppercase">From</label>
+        <input type="date" id="sched-from" class="field-input" style="min-width:150px">
       </div>
-      <div class="field-group">
-        <label for="sched-to">To</label>
-        <input type="date" id="sched-to" class="field-input">
+      <div class="field-group" style="display:flex;flex-direction:column;gap:4px">
+        <label for="sched-to" style="font-size:11px;letter-spacing:.04em;color:var(--text-dim);font-weight:600;text-transform:uppercase">To</label>
+        <input type="date" id="sched-to" class="field-input" style="min-width:150px">
       </div>
       <button type="button" class="btn btn-primary" onclick="loadScheduler()">Load</button>
-      <span id="sched-status" class="text-dim" style="font-size:12px"></span>
+      <span id="sched-status" class="text-dim" style="font-size:12px;align-self:center"></span>
+      <div style="flex:1"></div>
+      <button class="btn btn-ghost" onclick="window.__scheduler.openAddShow()" title="Create a barebones show and start adding labor right away">+ Add show</button>
+      <select id="sched-pick-show" class="field-input" style="width:auto;min-width:220px"
+              onchange="window.__scheduler.onPickShow(this)" title="Shows in this date range that have no labor lines yet">
+        <option value="">+ Add labor to existing show…</option>
+      </select>
     </div>
   </div>
 </div>
