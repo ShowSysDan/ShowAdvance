@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ show.name }} — Documents — 3·2·1→Theater{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <a href="{{ url_for('viewer_home') }}" class="back-link">← All documents</a>
+    <h1 class="page-title">{{ show.name }}</h1>
+    <p class="page-sub">
+      {{ show.venue or '— No venue —' }}
+      {% if show.show_date %} · {{ show.show_date }}{% endif %}
+      {% if show.show_time %} · {{ show.show_time }}{% endif %}
+    </p>
+  </div>
+</div>
+
+<div class="form-section">
+  <div class="form-section-header">
+    <span class="section-icon">◈</span>
+    <strong style="text-transform:none;letter-spacing:normal;font-size:14px">Available documents</strong>
+  </div>
+  <div class="form-section-body">
+    {% if not doc_types %}
+      <div class="scheduler-empty">No documents are available for your account on this show.</div>
+    {% else %}
+    <div style="display:flex;flex-direction:column;gap:8px">
+      {% for key, label in doc_types %}
+      <a href="{{ url_for('viewer_export', show_id=show.id, doc_type=key) }}"
+         target="_blank" rel="noopener"
+         class="btn btn-ghost"
+         style="display:flex;align-items:center;justify-content:space-between;text-align:left;padding:12px 16px;text-decoration:none">
+        <span>
+          <span style="font-weight:500">{{ label }}</span>
+          <span class="text-dim" style="font-size:11px;display:block">PDF</span>
+        </span>
+        <span style="font-size:18px;color:var(--text-dim)">↗</span>
+      </a>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

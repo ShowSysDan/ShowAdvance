@@ -6,7 +6,7 @@
 
 ## Version Numbering
 
-**Current version: `2.9.0`**
+**Current version: `2.11.0`**
 
 This project uses **semantic versioning**: `MAJOR.MINOR.PATCH`
 
@@ -42,6 +42,7 @@ Version history:
 - `2.8.0` — Labor Scheduler: new cross-show scheduler view (`/labor-scheduler`) aggregates labor requests across every show in a chosen date range, grouped by show. Schedulers tick a per-row checkbox as positions are confirmed (TCO'd) and pick the actual technician from the crew roster (qualified-first dropdown) — stored separately from the PM's originally-requested name. Scheduled status and scheduled tech flow back to each show's Labor Requests tab as read-only columns so PMs can see progress. Per-request `work_date` lets multi-day runs track one labor request per day. New `scheduler_group` user-group type so admins can grant scheduler access without giving full staff privileges. Adds `LABOR_SCHEDULED` audit action with syslog coverage.
 - `2.8.1` — Labor Requests UX: reorganised the Labor Requests tab so labor is grouped into **day blocks** instead of a wide table with a date column on every row. Each day block has its own date picker in the header that retimes every row under it, **+ Add Request** to append rows inside the day, **Clone to…** to duplicate a fully-populated day to another date (for multi-day runs), and **Delete Day** to drop the day plus its rows. Quick Fill continues to apply across rows in any day. No schema change — rows still carry `work_date` internally; the UI just groups them.
 - `2.9.0` — Nine feature updates and fixes: (1) Per-contact email-type flags (Advance, Production, System) replacing single Recipient toggle — `_send_pdf_email()` selects recipients by type; (2) Pay Rate Levels admin UI in Settings → Technicians, per-technician level assignment, per-position rate override, estimated labor cost summary on Labor Requests tab, combined post-show invoice PDF (assets + external rentals + labor); (3) Job positions nested by venue — venue list in Settings syncs position categories automatically; (4) Registration bug fix — pending registrations shown regardless of email confirmation status; (5) User management edit — name/email/role/readonly editable inline; (6) Hide from PM moved from show add-asset flow to per-asset-type admin setting in Asset Manager; (7) Dashboard nav renamed to Home; (8) Dashboard availability API auth fix (public dashboards no longer error with "unexpected token"); (9) Asset usage report gains venue, asset category, and asset type filters.
+- `2.11.0` — Six changes: (1) **DB-backed sessions** — Flask sessions moved from signed cookies to a server-side `app_sessions` table in the shared schema; the cookie now carries only a 256-bit random sid. Two apps pointed at the same PostgreSQL database share login state. Set `DISABLE_DB_SESSIONS=1` to revert; set `SESSION_COOKIE_SECURE=1` on HTTPS deployments. Sid is rotated on login (session-fixation defense) and the server never adopts client-supplied sids it doesn't already know. See `SHARED_SESSIONS.md` for the porting guide for the companion app. (2) **Schedule template apply prompt** — picking a template when the day already has timeline entries now asks Replace / Merge / Cancel instead of silently wiping them. (3) **Empty timeline cleanup** — removed the auto-generated "15:00 — 16:00 — Crew Called" placeholder row that used to appear whenever a day had no labor entries. Timeline rows now auto-sort by start time on edit and after a template is applied. (4) **Multi-select auto-check** — new per-field `auto_select_visible` toggle: when conditional filtering narrows a multi-select to ≤ 2 options, those options are pre-checked (won't override choices the user already toggled). (5) **Labor Scheduler — Add Show / Pick Show** — two new entry points in the scheduler header: a modal that creates a barebones show (name, PM, date, time, venue) so labor can be scheduled before the PM advances it, plus a dropdown of active shows in the visible range that have no labor entries yet. The labor-scheduler list API gained an `include_show_ids=` param to pull in such shows as empty sections. (6) **Document Viewer role** — `users.is_document_viewer` is a stricter variant of read-only with two JSON allow-lists (`viewer_venues`, `viewer_doc_types`). A `@before_request` gate redirects viewers to `/viewer` and the sidebar collapses to "Documents" + "Log out". Viewers see only PDFs whose venue and doc-type match both allow-lists. Document access writes a `VIEWER_DOC_ACCESS` syslog entry. Flipping the flag in admin invalidates the user's existing sessions so the new gate takes effect immediately. Adds the `auto_select_visible` and `is_document_viewer` / `viewer_venues` / `viewer_doc_types` columns; schema migrations are idempotent.
 
 ---
 
@@ -197,7 +198,9 @@ Contains all pre-show information: show details, contacts, arrival & parking, se
 
 **Venue & Tech Info** — WiFi network/code, parking/security info. Radio Channel and Mix Position are read-only from the Advance Sheet.
 
-**Timeline** — Time rows with Start, End, Description, Notes. Times are auto-normalised to 24-hour format on blur (e.g. "4pm" → "16:00", "1600" → "16:00").
+**Timeline** — Time rows with Start, End, Description, Notes. Times are auto-normalised to 24-hour format on blur (e.g. "4pm" → "16:00", "1600" → "16:00"). Rows auto-sort by start time after each edit and after a template is applied (so the timeline always reads chronologically). Empty days render with no placeholder row.
+
+**Schedule templates** — Apply a saved template via the dropdown in the timeline header. If the day already has entries, you'll be prompted with **Replace / Merge / Cancel**: *Replace* wipes the existing rows, *Merge* appends the template rows after the existing ones and re-sorts by start time.
 
 **Show Contacts** — All dpc contacts (PM, Hospitality, Programming, Event Manager, Education, Guest Services, Runner) are read-only, pulled from the Advance Sheet. Security Email is editable.
 
@@ -226,6 +229,13 @@ For each row the scheduler can:
 All other fields (position, times, break, requested technician) are read-only on this page — the source of truth for those is the show's Labor Requests tab. The SCHED checkbox and scheduled technician flow back to that tab as read-only columns.
 
 Rows with no `work_date` (legacy data) fall back to the show's primary date for range filtering. Scheduling changes write a `LABOR_SCHEDULED` entry to the audit log and syslog.
+
+**Adding shows from the scheduler:** the page header has two extras for when a show hasn't been advanced yet:
+
+- **+ Add show** — opens a modal asking for name, PM, date, time, and venue. Submitting creates a barebones show (and seeds the matching `advance_data` rows so the PM picks it up half-filled when they advance the show later). The new show appears as an empty section in the scheduler so labor can be added immediately.
+- **+ Add labor to existing show…** — a dropdown of active shows in the visible date range that have zero labor entries. Picking one pulls it into the scheduler as an empty section.
+
+The scheduler endpoint accepts an `include_show_ids=` query param to surface these zero-labor shows, which the front-end appends automatically.
 
 ### Assets Tab
 
@@ -433,9 +443,32 @@ Add, edit, delete dpc contacts. Fields: name, title, department, phone, email. C
 | Role | Access |
 |------|--------|
 | `admin` | Full access: all shows, settings, user management |
+| `staff` | Like user, plus content-admin power (form fields, contacts, technicians) |
 | `user` | Access controlled by group membership |
 
+**Extra permission flags** (toggled per-user in the Edit User modal, independent of role):
+
+| Flag | Effect |
+|------|--------|
+| `is_readonly` | View-only; mutating endpoints respond 403 |
+| `is_scheduler` | Grants access to the Labor Scheduler page |
+| `is_asset_manager` | Grants access to Asset Manager, Approvals, Retired Archive, Reports |
+| `is_document_viewer` | Read-only viewer locked to `/viewer`; sees only allowed venues & doc types |
+
 Add users via Settings → Users. Admins can reset passwords.
+
+#### Document Viewer
+
+A stricter variant of read-only for external stakeholders (touring crew, vendors, FOH supervisors) who only need to see a subset of documents.
+
+- Toggle **Document Viewer** in the Edit User modal. The checkbox forces `is_readonly` on.
+- Pick **Allowed Venues** (multi-select; empty = all venues) and **Allowed Document Types** (Advance, Production Schedule, Post-show Notes; empty = all).
+- On login, viewers land on `/viewer` — a list of accessible shows grouped by venue. Each show page links to PDF downloads for the allowed doc types. The sidebar collapses to just **Documents** + **Log out**; the `@before_request` gate redirects any other endpoint back to `/viewer` (API calls return 403 JSON).
+- Every PDF download is logged to syslog as `VIEWER_DOC_ACCESS` with the show id, doc type, viewer, and source IP.
+- Flipping the doc-viewer flag in admin invalidates that user's active sessions so the change takes effect on their next request (no 5-minute wait).
+- Admins cannot turn the flag on for their **own** account (anti-self-lockout guard).
+
+The viewer's PDF route reuses the existing `export_advance` / `export_schedule` / `export_postnotes` builders — same documents, same content, just gated by both the user's group ACL and the viewer's venue + doc-type allow-lists.
 
 ### View As (Role Preview)
 
@@ -484,6 +517,10 @@ Settings → Form Fields (admin or content_admin).
 Field types: `text`, `textarea`, `date`, `time`, `number`, `yes_no`, `select`, `checkbox`, `contact_dropdown`
 
 Conditional: `field_key=Value` (e.g. `runner_needed=Yes`)
+
+**Multi-select fields** have two extras:
+- **Allow multiple selections** — render as a checkbox popover instead of a single-pick dropdown. Values are stored as a JSON array.
+- **Auto-check visible options when 2 or fewer are shown** — once a conditional filter narrows the list to 1 or 2 visible options, those options are pre-checked. Won't override a selection the user has already touched.
 
 ### Venues & Radio Channels
 
@@ -609,10 +646,10 @@ PostgreSQL mode uses **two schemas** within one database:
 
 | Schema | Default Name | Contents | Purpose |
 |--------|-------------|----------|---------|
-| **Shared** | `shared` | `users`, `user_groups`, `user_group_members`, `app_settings`, `password_reset_tokens`, `user_pending_registration`, `site_messages`, `site_message_dismissals` | User/auth data — designed to be shared across multiple apps |
+| **Shared** | `shared` | `users`, `user_groups`, `user_group_members`, `app_settings`, `password_reset_tokens`, `user_pending_registration`, `site_messages`, `site_message_dismissals`, `app_sessions` | User/auth + session data — designed to be shared across multiple apps |
 | **App** | `theater321` | Shows, schedules, contacts, forms, assets, labor, exports, comments, active_sessions, audit_log, and all other theater-specific tables | App-specific data |
 
-This separation means another app can connect to the same PostgreSQL database and share the user/auth system without touching theater data.
+This separation means another app can connect to the same PostgreSQL database and share the user/auth system without touching theater data. With the shared `app_sessions` table, logging in to either app authenticates the user in both — see **[SHARED_SESSIONS.md](SHARED_SESSIONS.md)** for the porting guide for the companion app.
 
 #### Setup
 

@@ -201,15 +201,26 @@
             <td>{{ u.display_name or u.username }}</td>
             <td class="mono text-sm">{{ u.username }}</td>
             <td>
-              <span class="role-badge role-{{ u.role }}">{% if u.is_readonly %}Read-only{% else %}{{ u.role }}{% endif %}</span>
+              <span class="role-badge role-{{ u.role }}">{% if u.is_document_viewer %}Doc Viewer{% elif u.is_readonly %}Read-only{% else %}{{ u.role }}{% endif %}</span>
               {% if u.is_scheduler %}<span style="font-size:10px;background:rgba(74,158,255,.15);color:#4A9EFF;padding:2px 6px;border-radius:99px;border:1px solid rgba(74,158,255,.3);margin-left:4px">Scheduler</span>{% endif %}
               {% if u.is_asset_manager %}<span style="font-size:10px;background:rgba(72,187,120,.15);color:#68D391;padding:2px 6px;border-radius:99px;border:1px solid rgba(72,187,120,.3);margin-left:4px">Asset Mgr</span>{% endif %}
+              {% if u.is_document_viewer %}<span style="font-size:10px;background:rgba(168,85,247,.15);color:#C084FC;padding:2px 6px;border-radius:99px;border:1px solid rgba(168,85,247,.3);margin-left:4px">Doc Viewer</span>{% endif %}
             </td>
             <td class="text-dim text-sm">{{ (u.created_at|string)[:10] if u.created_at else '—' }}</td>
             <td>
               <div class="action-btns">
                 {% if user.role == 'admin' %}
-                <button class="btn btn-xs btn-ghost" onclick="openEditUser({{ u.id }}, '{{ u.display_name|replace("'","\\'") or u.username }}', '{{ u.email or '' }}', '{{ u.role }}', {{ 1 if u.is_readonly else 0 }}, {{ 1 if u.is_scheduler else 0 }}, {{ 1 if u.is_asset_manager else 0 }})">Edit</button>
+                <button class="btn btn-xs btn-ghost" data-edit-user
+                        data-uid="{{ u.id }}"
+                        data-name="{{ u.display_name or u.username }}"
+                        data-email="{{ u.email or '' }}"
+                        data-role="{{ u.role }}"
+                        data-readonly="{{ 1 if u.is_readonly else 0 }}"
+                        data-scheduler="{{ 1 if u.is_scheduler else 0 }}"
+                        data-asset-mgr="{{ 1 if u.is_asset_manager else 0 }}"
+                        data-doc-viewer="{{ 1 if u.is_document_viewer else 0 }}"
+                        data-venues="{{ u.viewer_venues_list|tojson }}"
+                        data-doc-types="{{ u.viewer_doc_types_list|tojson }}">Edit</button>
                 <button class="btn btn-xs btn-ghost" onclick="resetPassword({{ u.id }})">Reset PW</button>
                 {% if u.id != user.id %}
                 <button class="btn btn-xs btn-danger-ghost" onclick="deleteUser({{ u.id }}, this)">Delete</button>
@@ -1756,6 +1767,16 @@
             Allow multiple selections
           </label>
         </div>
+        <div class="field-group" style="margin-top:4px">
+          <label class="checkbox-label">
+            <input type="checkbox" name="auto_select_visible">
+            Auto-check visible options when 2 or fewer are shown
+          </label>
+          <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:2px">
+            Useful with conditional options — once a trigger narrows the list to 1 or 2 choices,
+            they'll be pre-checked. (Multi-select only. Won't override choices the user has already toggled.)
+          </p>
+        </div>
       </div>
       <div class="contact-dept-group" style="display:none">
         <div class="field-group">
@@ -1988,6 +2009,39 @@
             <input type="checkbox" id="edit-user-asset-manager" style="width:auto;margin:0">
             Asset Manager — access to asset inventory, approvals, retired &amp; reports pages
           </label>
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text);cursor:pointer">
+            <input type="checkbox" id="edit-user-doc-viewer" style="width:auto;margin:0"
+                   onchange="document.getElementById('edit-user-viewer-extras').style.display = this.checked ? '' : 'none'">
+            Document Viewer — read-only; can only see filtered documents
+          </label>
+        </div>
+        <div id="edit-user-viewer-extras" style="display:none;margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:4px;background:var(--bg-hover)">
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
+            Document viewers land on a documents-only page. Pick which venues and document types they can see.
+            Leave a list empty for "no filter on this dimension".
+          </div>
+          <div class="form-row cols-2">
+            <div class="field-group">
+              <label class="field-label">ALLOWED VENUES</label>
+              <select id="edit-user-viewer-venues" class="field-input" multiple size="5" style="height:auto;min-height:96px">
+                {% for v in distinct_venues %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
+              </select>
+              <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:2px">
+                Ctrl/Cmd-click to multi-select. Empty = all venues.
+              </p>
+            </div>
+            <div class="field-group">
+              <label class="field-label">ALLOWED DOCUMENT TYPES</label>
+              <select id="edit-user-viewer-doc-types" class="field-input" multiple size="5" style="height:auto;min-height:96px">
+                <option value="advance">Advance</option>
+                <option value="schedule">Production Schedule</option>
+                <option value="postnotes">Post-show Notes</option>
+              </select>
+              <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:2px">
+                Empty = all document types.
+              </p>
+            </div>
+          </div>
         </div>
         <div style="font-size:11px;color:var(--text-dim);margin-top:6px">Admins always have full access. These only apply to User/Staff accounts.</div>
       </div>
@@ -2134,13 +2188,51 @@ async function resetPassword(id) {
   alert(data.success ? 'Password reset successfully.' : data.error);
 }
 
-function openEditUser(id, name, email, role, isReadonly, isScheduler, isAssetManager) {
+document.addEventListener('click', e => {
+  const btn = e.target.closest('[data-edit-user]');
+  if (!btn) return;
+  let venues = [], docTypes = [];
+  try { venues   = JSON.parse(btn.dataset.venues   || '[]'); } catch(_) {}
+  try { docTypes = JSON.parse(btn.dataset.docTypes || '[]'); } catch(_) {}
+  openEditUser(
+    Number(btn.dataset.uid),
+    btn.dataset.name || '',
+    btn.dataset.email || '',
+    btn.dataset.role || 'user',
+    Number(btn.dataset.readonly) ? 1 : 0,
+    Number(btn.dataset.scheduler) ? 1 : 0,
+    Number(btn.dataset.assetMgr) ? 1 : 0,
+    Number(btn.dataset.docViewer) ? 1 : 0,
+    venues,
+    docTypes,
+  );
+});
+
+function openEditUser(id, name, email, role, isReadonly, isScheduler, isAssetManager,
+                      isDocViewer, viewerVenues, viewerDocTypes) {
   document.getElementById('edit-user-id').value = id;
   document.getElementById('edit-user-name').value = name;
   document.getElementById('edit-user-email').value = email;
   document.getElementById('edit-user-role').value = isReadonly ? 'readonly' : role;
   document.getElementById('edit-user-scheduler').checked = !!isScheduler;
   document.getElementById('edit-user-asset-manager').checked = !!isAssetManager;
+  const docViewer = !!isDocViewer;
+  const docViewerCb = document.getElementById('edit-user-doc-viewer');
+  if (docViewerCb) {
+    docViewerCb.checked = docViewer;
+    const extras = document.getElementById('edit-user-viewer-extras');
+    if (extras) extras.style.display = docViewer ? '' : 'none';
+  }
+  const venuesSel = document.getElementById('edit-user-viewer-venues');
+  if (venuesSel) {
+    const want = new Set(Array.isArray(viewerVenues) ? viewerVenues : []);
+    Array.from(venuesSel.options).forEach(o => { o.selected = want.has(o.value); });
+  }
+  const docTypesSel = document.getElementById('edit-user-viewer-doc-types');
+  if (docTypesSel) {
+    const want = new Set(Array.isArray(viewerDocTypes) ? viewerDocTypes : []);
+    Array.from(docTypesSel.options).forEach(o => { o.selected = want.has(o.value); });
+  }
   document.getElementById('edit-user-msg').style.display = 'none';
   document.getElementById('edit-user-modal').style.display = 'flex';
 }
@@ -2161,13 +2253,21 @@ function handleAddUserSubmit(form) {
 async function saveEditUser() {
   const id = document.getElementById('edit-user-id').value;
   const selectedRole = document.getElementById('edit-user-role').value;
+  const isDocViewer = document.getElementById('edit-user-doc-viewer').checked;
+  const venuesSel = document.getElementById('edit-user-viewer-venues');
+  const docTypesSel = document.getElementById('edit-user-viewer-doc-types');
+  const viewer_venues    = venuesSel   ? Array.from(venuesSel.selectedOptions).map(o => o.value)   : [];
+  const viewer_doc_types = docTypesSel ? Array.from(docTypesSel.selectedOptions).map(o => o.value) : [];
   const payload = {
     display_name: document.getElementById('edit-user-name').value.trim(),
     email: document.getElementById('edit-user-email').value.trim(),
     role: selectedRole === 'readonly' ? 'user' : selectedRole,
-    is_readonly: selectedRole === 'readonly',
+    is_readonly: selectedRole === 'readonly' || isDocViewer,
     is_scheduler: document.getElementById('edit-user-scheduler').checked,
     is_asset_manager: document.getElementById('edit-user-asset-manager').checked,
+    is_document_viewer: isDocViewer,
+    viewer_venues,
+    viewer_doc_types,
   };
   const resp = await fetch(`/settings/users/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'},

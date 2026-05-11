@@ -102,8 +102,169 @@ app.secret_key = _secret
 # ── Session cookie security ───────────────────────────────────────────────────
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-# SESSION_COOKIE_SECURE intentionally omitted (app typically runs on LAN over HTTP)
+# Default: omit Secure flag so the LAN/HTTP deployment still works. HTTPS
+# deployments should set SESSION_COOKIE_SECURE=1 in the env to upgrade the
+# cookie to Secure-only — the sid is now a bearer token (DB-backed sessions),
+# so leaking it over plaintext is more dangerous than the old signed cookie.
+if os.environ.get('SESSION_COOKIE_SECURE', '').lower() in ('1', 'true', 'yes'):
+    app.config['SESSION_COOKIE_SECURE'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
+
+
+# ── DB-backed sessions ────────────────────────────────────────────────────────
+# Replaces Flask's signed-cookie sessions with a server-side store. The cookie
+# carries only an opaque random session ID; all the data lives in the
+# `app_sessions` table. When two apps point at the same PostgreSQL DB (sharing
+# the `shared` schema) they automatically share login state — sign in once
+# and you're authenticated in both.
+#
+# Set DISABLE_DB_SESSIONS=1 in the environment to fall back to Flask's default
+# signed-cookie sessions (e.g. for troubleshooting).
+import secrets as _secrets_mod
+from flask.sessions import SessionInterface as _FlaskSessionInterface, SessionMixin as _FlaskSessionMixin
+from werkzeug.datastructures import CallbackDict as _CallbackDict
+
+_SID_RE = re.compile(r'^[A-Za-z0-9_-]{20,128}$')
+
+
+class _DBSession(_CallbackDict, _FlaskSessionMixin):
+    def __init__(self, initial=None, sid=None, new=False):
+        def _on_update(_self):
+            _self.modified = True
+        _CallbackDict.__init__(self, initial, _on_update)
+        self.sid = sid
+        self.new = new
+        self.modified = False
+
+
+class _DBSessionInterface(_FlaskSessionInterface):
+    """Server-side session backend that stores session data in the
+    `app_sessions` table (lives in the shared schema on PostgreSQL).
+    The cookie carries only a 256-bit random session ID."""
+
+    def _new_sid(self):
+        return _secrets_mod.token_urlsafe(32)
+
+    def _load(self, sid):
+        """Return (data_dict, ok). ok=False if the row is missing or expired."""
+        try:
+            db = get_db()
+        except Exception:
+            return {}, False
+        try:
+            row = db.execute(
+                "SELECT data, expires_at FROM app_sessions WHERE sid = ?", (sid,)
+            ).fetchone()
+        except Exception:
+            try: db.close()
+            except Exception: pass
+            return {}, False
+        if not row:
+            try: db.close()
+            except Exception: pass
+            return {}, False
+        expires = row['expires_at']
+        if isinstance(expires, str):
+            try:
+                expires_dt = datetime.fromisoformat(expires.split('.')[0].replace('Z', ''))
+            except Exception:
+                expires_dt = datetime.utcnow() - timedelta(seconds=1)  # treat as expired
+        else:
+            expires_dt = expires
+        if expires_dt < datetime.utcnow():
+            try:
+                db.execute("DELETE FROM app_sessions WHERE sid = ?", (sid,))
+                db.commit()
+            except Exception:
+                pass
+            try: db.close()
+            except Exception: pass
+            return {}, False
+        try:
+            data = json.loads(row['data']) if row['data'] else {}
+            if not isinstance(data, dict):
+                data = {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            data = {}
+        try: db.close()
+        except Exception: pass
+        return data, True
+
+    def open_session(self, app, request):
+        cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+        sid = request.cookies.get(cookie_name)
+        if not sid or not _SID_RE.match(sid):
+            return _DBSession(sid=self._new_sid(), new=True)
+        data, ok = self._load(sid)
+        if not ok:
+            # Never adopt a client-supplied sid that doesn't exist in our store —
+            # mint a fresh one. Otherwise an attacker who plants a known sid via
+            # an open-redirect / XSS-adjacent vector could pre-fixate the victim's
+            # session before login.
+            return _DBSession(sid=self._new_sid(), new=True)
+        return _DBSession(data, sid=sid, new=False)
+
+    def save_session(self, app, session, response):
+        domain = self.get_cookie_domain(app)
+        path = self.get_cookie_path(app)
+        cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+
+        # Session was cleared — drop the row and the cookie
+        if not session:
+            if session.modified:
+                try:
+                    db = get_db()
+                    try:
+                        db.execute("DELETE FROM app_sessions WHERE sid = ?", (session.sid,))
+                        db.commit()
+                    finally:
+                        db.close()
+                except Exception:
+                    pass
+                response.delete_cookie(cookie_name, domain=domain, path=path)
+            return
+
+        # Nothing to persist
+        if not session.modified and not session.new:
+            return
+
+        lifetime = app.permanent_session_lifetime
+        expires_dt = datetime.utcnow() + lifetime
+        try:
+            data_json = json.dumps(dict(session), default=str)
+        except (TypeError, ValueError):
+            data_json = '{}'
+        user_id = session.get('user_id')
+        try:
+            db = get_db()
+            try:
+                db.execute(
+                    "INSERT OR REPLACE INTO app_sessions "
+                    "(sid, user_id, data, last_seen, expires_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)",
+                    (session.sid, user_id, data_json, expires_dt)
+                )
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            app.logger.warning(f'DB session save failed: {e}')
+            return
+
+        response.set_cookie(
+            cookie_name,
+            session.sid,
+            expires=expires_dt,
+            httponly=self.get_cookie_httponly(app),
+            domain=domain,
+            path=path,
+            secure=self.get_cookie_secure(app),
+            samesite=self.get_cookie_samesite(app),
+        )
+
+
+if os.environ.get('DISABLE_DB_SESSIONS', '').lower() not in ('1', 'true', 'yes'):
+    app.session_interface = _DBSessionInterface()
 
 
 @app.after_request
@@ -247,7 +408,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.10.0'
+APP_VERSION = '2.11.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -821,6 +982,30 @@ def show_advance_editor_required(f):
 
 
 @app.before_request
+def _populate_session_from_user(user, ts=None):
+    """Copy role / permission flags from a users row into the Flask session.
+    Used by both the login route (initial population) and the periodic role
+    refresh below."""
+    uid = user['id']
+    session['user_id']            = uid
+    if user.get('username') is not None:
+        session['username']       = user['username']
+    session['display_name']       = user['display_name'] or session.get('username', '')
+    session['user_role']          = user['role']
+    if user.get('theme') is not None:
+        session['theme']          = user['theme'] or 'dark'
+    session['is_restricted']      = is_restricted_user(uid)
+    session['is_content_admin']   = is_content_admin(uid)
+    session['is_labor_scheduler'] = is_labor_scheduler(uid)
+    session['is_readonly']        = bool(user.get('is_readonly', 0))
+    session['is_scheduler']       = bool(user.get('is_scheduler', 0))
+    session['is_asset_manager']   = bool(user.get('is_asset_manager', 0))
+    session['is_document_viewer'] = bool(user.get('is_document_viewer', 0))
+    session['viewer_venues']      = _decode_json_list(user.get('viewer_venues'))
+    session['viewer_doc_types']   = _decode_json_list(user.get('viewer_doc_types'))
+    session['_role_checked_at']   = ts if ts is not None else datetime.utcnow().timestamp()
+
+
 def _refresh_session_roles():
     """Re-check user role/permissions from DB every 5 minutes to catch demotions."""
     if 'user_id' not in session:
@@ -832,22 +1017,16 @@ def _refresh_session_roles():
     try:
         db = get_db()
         user = db.execute(
-            'SELECT id, role, display_name, is_readonly, is_scheduler, is_asset_manager FROM users WHERE id=?',
+            'SELECT id, role, display_name, is_readonly, is_scheduler, is_asset_manager, '
+            '       is_document_viewer, viewer_venues, viewer_doc_types '
+            'FROM users WHERE id=?',
             (session['user_id'],)
         ).fetchone()
         db.close()
         if not user:
             session.clear()
             return redirect(url_for('login'))
-        session['user_role'] = user['role']
-        session['display_name'] = user['display_name'] or session.get('username', '')
-        session['is_restricted'] = is_restricted_user(user['id'])
-        session['is_content_admin'] = is_content_admin(user['id'])
-        session['is_labor_scheduler'] = is_labor_scheduler(user['id'])
-        session['is_readonly'] = bool(user.get('is_readonly', 0))
-        session['is_scheduler'] = bool(user.get('is_scheduler', 0))
-        session['is_asset_manager'] = bool(user.get('is_asset_manager', 0))
-        session['_role_checked_at'] = now
+        _populate_session_from_user(user, ts=now)
     except Exception:
         pass
 
@@ -955,6 +1134,137 @@ def is_labor_scheduler(user_id):
         return True
     group_types = _get_user_group_types(user_id)
     return any(t in ('scheduler_group', 'admin_group') for t in group_types)
+
+
+# ─── Document Viewer ─────────────────────────────────────────────────────────
+# A document viewer is a stricter read-only role: they're bounced to /viewer
+# on login and can only see PDFs / read-only document pages whose VENUE and
+# DOCUMENT TYPE match their per-user allow-lists. Empty list = "all".
+DOCUMENT_TYPES = ('advance', 'schedule', 'postnotes')
+DOCUMENT_TYPE_LABELS = {
+    'advance':   'Advance',
+    'schedule':  'Production Schedule',
+    'postnotes': 'Post-show Notes',
+}
+
+
+def _decode_json_list(raw):
+    """Parse a JSON list column. None / '' / invalid → []."""
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(x).strip() for x in raw if str(x).strip()]
+    try:
+        v = json.loads(raw)
+        if isinstance(v, list):
+            return [str(x).strip() for x in v if str(x).strip()]
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    return []
+
+
+def get_document_viewer_settings(user_id):
+    """Return (is_viewer: bool, venues: list[str], doc_types: list[str]).
+    Empty lists mean 'no filter' (allow everything of that dimension)."""
+    db = get_db()
+    try:
+        user = db.execute(
+            'SELECT is_document_viewer, viewer_venues, viewer_doc_types '
+            'FROM users WHERE id=?', (user_id,)
+        ).fetchone()
+    except Exception:
+        user = None
+    db.close()
+    if not user:
+        return False, [], []
+    return (
+        bool(user['is_document_viewer'] or 0),
+        _decode_json_list(user['viewer_venues']),
+        _decode_json_list(user['viewer_doc_types']),
+    )
+
+
+def viewer_can_see_doc_type(doc_type):
+    """Session-aware check. Non-viewers always return True."""
+    if not session.get('is_document_viewer'):
+        return True
+    allowed = session.get('viewer_doc_types') or []
+    return (not allowed) or (doc_type in allowed)
+
+
+def viewer_can_see_venue(venue):
+    if not session.get('is_document_viewer'):
+        return True
+    allowed = session.get('viewer_venues') or []
+    if not allowed:
+        return True
+    return (venue or '').strip() in allowed
+
+
+def viewer_accessible_shows(user_id):
+    """Return list of show_ids the viewer can see (intersection of their
+    group-show-ACL and venue filter). None means no restriction (admins).
+    A viewer with no venue filter still respects the group ACL."""
+    base = get_accessible_shows(user_id)
+    is_viewer, venues, _ = get_document_viewer_settings(user_id)
+    if not is_viewer:
+        return base
+    db = get_db()
+    if base is None:
+        # Viewer with all_access group — still apply venue filter if any
+        if not venues:
+            rows = db.execute(
+                "SELECT id FROM shows WHERE COALESCE(status, 'active') != 'archived'"
+            ).fetchall()
+        else:
+            ph = ','.join(['?'] * len(venues))
+            rows = db.execute(
+                f"SELECT id FROM shows WHERE COALESCE(status, 'active') != 'archived' "
+                f"AND venue IN ({ph})", venues
+            ).fetchall()
+        db.close()
+        return [r['id'] for r in rows]
+    if not base:
+        db.close()
+        return []
+    if not venues:
+        db.close()
+        return list(base)
+    ph_ids = ','.join(['?'] * len(base))
+    ph_v   = ','.join(['?'] * len(venues))
+    rows = db.execute(
+        f"SELECT id FROM shows WHERE id IN ({ph_ids}) AND venue IN ({ph_v})",
+        list(base) + venues
+    ).fetchall()
+    db.close()
+    return [r['id'] for r in rows]
+
+
+# Whitelist of endpoint names a document viewer is allowed to hit. Anything
+# else triggers a redirect to /viewer in _viewer_gate() below.
+_VIEWER_ALLOWED_ENDPOINTS = frozenset({
+    'viewer_home', 'viewer_show', 'viewer_export',
+    'login', 'logout', 'static',
+    'force_change_password',
+    # Theme + password change so the user can still toggle dark/light + reset
+    'set_theme', 'change_own_password',
+})
+
+
+@app.before_request
+def _viewer_gate():
+    """Redirect document viewers away from any non-viewer endpoint."""
+    if not session.get('is_document_viewer'):
+        return None
+    ep = request.endpoint or ''
+    if ep in _VIEWER_ALLOWED_ENDPOINTS:
+        return None
+    if ep.startswith('static'):
+        return None
+    # AJAX / API calls: respond 403 JSON instead of redirecting
+    if request.is_json or request.path.startswith('/api/'):
+        return jsonify({'error': 'Document viewers are restricted to /viewer.'}), 403
+    return redirect(url_for('viewer_home'))
 
 
 # ─── Form Fields Helper ───────────────────────────────────────────────────────
@@ -1892,21 +2202,18 @@ def _login_route():
                 db.commit()
             except Exception:
                 pass
-            # Regenerate session to prevent session fixation
+            # Regenerate session to prevent session fixation. session.clear()
+            # empties the dict but does NOT rotate the sid on the DB-backed
+            # session, so we explicitly mint a new sid here. The old DB row
+            # (if any) becomes orphaned and is harvested on expiry.
             next_url = request.form.get('next') or url_for('dashboard')
             session.clear()
-            session['user_id']        = user['id']
-            session['username']       = user['username']
-            session['display_name']   = user['display_name'] or user['username']
-            session['user_role']      = user['role']
-            session['theme']          = user['theme'] or 'dark'
-            session['is_restricted']  = is_restricted_user(user['id'])
-            session['is_content_admin'] = is_content_admin(user['id'])
-            session['is_labor_scheduler'] = is_labor_scheduler(user['id'])
-            session['is_readonly'] = bool(user.get('is_readonly', 0))
-            session['is_scheduler'] = bool(user.get('is_scheduler', 0))
-            session['is_asset_manager'] = bool(user.get('is_asset_manager', 0))
-            session['_role_checked_at'] = datetime.utcnow().timestamp()
+            try:
+                session.sid = _secrets_mod.token_urlsafe(32)
+                session.new = True
+            except AttributeError:
+                pass  # Non-DB session backend in use (DISABLE_DB_SESSIONS=1)
+            _populate_session_from_user(user)
             log_audit(db, 'LOGIN', 'user', user['id'], detail=username)
             db.commit()
             db.close()
@@ -1923,6 +2230,9 @@ def _login_route():
             if _must_change:
                 session['must_change_password'] = True
                 return redirect(url_for('force_change_password'))
+            # Document viewers always land on their restricted page.
+            if session.get('is_document_viewer'):
+                return redirect(url_for('viewer_home'))
             return redirect(next_url)
         else:
             # Constant-time failure: always hash something to prevent user enumeration
@@ -4090,6 +4400,112 @@ def export_postnotes(show_id):
     return resp
 
 
+# ─── Document Viewer Routes ───────────────────────────────────────────────────
+# Read-only landing for users with users.is_document_viewer=1. The @before_request
+# gate above redirects them here from every other endpoint.
+
+@app.route('/viewer')
+@login_required
+def viewer_home():
+    if not session.get('is_document_viewer'):
+        return redirect(url_for('dashboard'))
+    user_id = session['user_id']
+    is_viewer, venues_allow, doc_types_allow = get_document_viewer_settings(user_id)
+    accessible = viewer_accessible_shows(user_id)
+    db = get_db()
+    if not accessible:
+        rows = []
+    else:
+        ph = ','.join(['?'] * len(accessible))
+        rows = db.execute(
+            f"SELECT id, name, venue, show_date, show_time "
+            f"FROM shows WHERE id IN ({ph}) AND COALESCE(status, 'active') != 'archived' "
+            f"ORDER BY show_date IS NULL, show_date, name",
+            accessible
+        ).fetchall()
+    db.close()
+    # Group by venue for an easy-to-scan layout
+    by_venue = {}
+    for r in rows:
+        v = (r['venue'] or '— No venue —').strip() or '— No venue —'
+        by_venue.setdefault(v, []).append(dict(r))
+    grouped = sorted(by_venue.items(), key=lambda kv: kv[0].lower())
+    doc_types = [(d, DOCUMENT_TYPE_LABELS[d]) for d in DOCUMENT_TYPES
+                 if (not doc_types_allow) or d in doc_types_allow]
+    return render_template(
+        'viewer_home.html',
+        user=get_current_user(),
+        grouped=grouped,
+        doc_types=doc_types,
+        venues_allow=venues_allow,
+        doc_types_allow=doc_types_allow,
+    )
+
+
+@app.route('/viewer/shows/<int:show_id>')
+@login_required
+def viewer_show(show_id):
+    if not session.get('is_document_viewer'):
+        return redirect(url_for('show_page', show_id=show_id))
+    user_id = session['user_id']
+    accessible = viewer_accessible_shows(user_id)
+    if not accessible or show_id not in accessible:
+        abort(403)
+    db = get_db()
+    show = db.execute(
+        "SELECT id, name, venue, show_date, show_time FROM shows WHERE id=?",
+        (show_id,)
+    ).fetchone()
+    db.close()
+    if not show:
+        abort(404)
+    if not viewer_can_see_venue(show['venue']):
+        abort(403)
+    _, _, doc_types_allow = get_document_viewer_settings(user_id)
+    doc_types = [(d, DOCUMENT_TYPE_LABELS[d]) for d in DOCUMENT_TYPES
+                 if (not doc_types_allow) or d in doc_types_allow]
+    return render_template(
+        'viewer_show.html',
+        user=get_current_user(),
+        show=dict(show),
+        doc_types=doc_types,
+    )
+
+
+@app.route('/viewer/shows/<int:show_id>/<doc_type>.pdf')
+@login_required
+def viewer_export(show_id, doc_type):
+    if not session.get('is_document_viewer'):
+        return redirect(url_for('show_page', show_id=show_id))
+    if doc_type not in DOCUMENT_TYPES:
+        abort(404)
+    if not viewer_can_see_doc_type(doc_type):
+        abort(403)
+    user_id = session['user_id']
+    accessible = viewer_accessible_shows(user_id)
+    if not accessible or show_id not in accessible:
+        abort(403)
+    db = get_db()
+    show = db.execute("SELECT venue FROM shows WHERE id=?", (show_id,)).fetchone()
+    db.close()
+    if not show:
+        abort(404)
+    if not viewer_can_see_venue(show['venue']):
+        abort(403)
+    # Audit trail — viewer document access is a sensitive event worth logging.
+    syslog_logger.info(
+        f"VIEWER_DOC_ACCESS show_id={show_id} doc_type={doc_type} "
+        f"by={session.get('username')} ip={request.remote_addr}"
+    )
+    # Reuse the existing PDF builders — they already enforce can_access_show
+    # via the user's group ACL, which we've already passed above.
+    if doc_type == 'advance':
+        return export_advance(show_id)
+    if doc_type == 'schedule':
+        return export_schedule(show_id)
+    return export_postnotes(show_id)
+
+
 # ─── Show Management ──────────────────────────────────────────────────────────
 
 @app.route('/shows/<int:show_id>/archive', methods=['POST'])
@@ -4492,9 +4908,19 @@ def audit_undo(log_id):
 def settings():
     db = get_db()
     contacts = db.execute('SELECT * FROM contacts ORDER BY department, name').fetchall()
-    users    = db.execute(
-        'SELECT id, username, display_name, role, created_at, is_readonly, is_scheduler, is_asset_manager FROM users ORDER BY display_name'
+    users_raw = db.execute(
+        'SELECT id, username, display_name, email, role, created_at, '
+        '       is_readonly, is_scheduler, is_asset_manager, '
+        '       is_document_viewer, viewer_venues, viewer_doc_types '
+        'FROM users ORDER BY display_name'
     ).fetchall()
+    # Decode the viewer JSON columns so the template can use |tojson cleanly
+    users = []
+    for u in users_raw:
+        ud = dict(u)
+        ud['viewer_venues_list']    = _decode_json_list(ud.get('viewer_venues'))
+        ud['viewer_doc_types_list'] = _decode_json_list(ud.get('viewer_doc_types'))
+        users.append(ud)
     groups   = db.execute('SELECT * FROM user_groups ORDER BY name').fetchall()
 
     # Attach members and shows to each group
@@ -4770,22 +5196,69 @@ def edit_user(uid):
     is_readonly = 1 if data.get('is_readonly') else 0
     is_scheduler = 1 if data.get('is_scheduler') else 0
     is_asset_manager = 1 if data.get('is_asset_manager') else 0
+    is_document_viewer = 1 if data.get('is_document_viewer') else 0
+    # Doc viewer implies read-only — they only see read views/PDFs.
+    if is_document_viewer:
+        is_readonly = 1
+    # Sanitize JSON lists; only persist known doc types.
+    viewer_venues_list = []
+    for v in (data.get('viewer_venues') or []):
+        s = str(v).strip()
+        if s:
+            viewer_venues_list.append(s)
+    viewer_doc_types_list = []
+    for v in (data.get('viewer_doc_types') or []):
+        s = str(v).strip().lower()
+        if s in DOCUMENT_TYPES:
+            viewer_doc_types_list.append(s)
+    viewer_venues_json    = json.dumps(viewer_venues_list)    if viewer_venues_list    else None
+    viewer_doc_types_json = json.dumps(viewer_doc_types_list) if viewer_doc_types_list else None
+
     if role not in ('user', 'staff', 'admin'):
         return jsonify({'success': False, 'error': 'Invalid role'}), 400
+    # Guard against admin self-lockout: a doc-viewer cannot reach the settings
+    # page (the _viewer_gate redirects them to /viewer), so flipping it on
+    # yourself locks you out of the admin UI permanently.
+    if is_document_viewer and uid == session.get('user_id'):
+        return jsonify({'success': False,
+                        'error': "You can't make your own account a document viewer — "
+                                 "you'd be locked out of admin."}), 400
     db = get_db()
-    row = db.execute('SELECT username FROM users WHERE id=?', (uid,)).fetchone()
+    row = db.execute(
+        'SELECT username, is_document_viewer FROM users WHERE id=?', (uid,)
+    ).fetchone()
     if not row:
         db.close()
         return jsonify({'success': False, 'error': 'User not found'}), 404
+    was_document_viewer = bool(row.get('is_document_viewer', 0))
     db.execute(
-        'UPDATE users SET display_name=?, email=?, role=?, is_readonly=?, is_scheduler=?, is_asset_manager=? WHERE id=?',
-        (display_name or row['username'], email, role, is_readonly, is_scheduler, is_asset_manager, uid)
+        'UPDATE users SET display_name=?, email=?, role=?, is_readonly=?, '
+        '                 is_scheduler=?, is_asset_manager=?, '
+        '                 is_document_viewer=?, viewer_venues=?, viewer_doc_types=? '
+        'WHERE id=?',
+        (display_name or row['username'], email, role, is_readonly,
+         is_scheduler, is_asset_manager,
+         is_document_viewer, viewer_venues_json, viewer_doc_types_json, uid)
     )
+    # If the doc-viewer flag flipped (either direction), invalidate any active
+    # sessions for this user so the new permission set takes effect immediately
+    # instead of waiting for the next 5-minute role refresh.
+    if was_document_viewer != bool(is_document_viewer):
+        try:
+            db.execute('DELETE FROM app_sessions WHERE user_id=?', (uid,))
+        except Exception:
+            pass  # Table missing or DB-sessions disabled — fall through
     log_audit(db, 'USER_EDIT', 'user', uid,
-              detail=f'role={role} readonly={is_readonly} scheduler={is_scheduler} asset_mgr={is_asset_manager} by={session.get("username")}')
+              detail=(f'role={role} readonly={is_readonly} scheduler={is_scheduler} '
+                      f'asset_mgr={is_asset_manager} doc_viewer={is_document_viewer} '
+                      f'by={session.get("username")}'))
     db.commit()
     db.close()
-    syslog_logger.info(f"USER_EDIT user_id={uid} role={role} readonly={is_readonly} scheduler={is_scheduler} asset_mgr={is_asset_manager} by={session.get('username')}")
+    syslog_logger.info(
+        f"USER_EDIT user_id={uid} role={role} readonly={is_readonly} "
+        f"scheduler={is_scheduler} asset_mgr={is_asset_manager} "
+        f"doc_viewer={is_document_viewer} by={session.get('username')}"
+    )
     return jsonify({'success': True})
 
 
@@ -5050,8 +5523,8 @@ def add_form_field():
             (section_id, field_key, label, field_type, sort_order,
              options_json, contact_dept, conditional_show_when,
              help_text, placeholder, width_hint, is_notes_field, ai_hint,
-             display_as, allow_multi, hide_from_pdf, upload_button_only)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             display_as, allow_multi, auto_select_visible, hide_from_pdf, upload_button_only)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (section_id, field_key, label,
               data.get('field_type','text'), max_order + 10,
               options_json,
@@ -5064,6 +5537,7 @@ def add_form_field():
               data.get('ai_hint') or None,
               data.get('display_as') or None,
               1 if data.get('allow_multi') else 0,
+              1 if data.get('auto_select_visible') else 0,
               1 if data.get('hide_from_pdf') else 0,
               1 if data.get('upload_button_only') else 0))
         fid = cur.lastrowid
@@ -5091,7 +5565,7 @@ def edit_form_field(fid):
             section_id=?, label=?, field_type=?,
             options_json=?, contact_dept=?, conditional_show_when=?,
             help_text=?, placeholder=?, width_hint=?, is_notes_field=?, ai_hint=?,
-            display_as=?, allow_multi=?, hide_from_pdf=?, upload_button_only=?
+            display_as=?, allow_multi=?, auto_select_visible=?, hide_from_pdf=?, upload_button_only=?
         WHERE id=?
     """, (data.get('section_id'), data.get('label',''),
           data.get('field_type','text'), options_json,
@@ -5102,6 +5576,7 @@ def edit_form_field(fid):
           data.get('ai_hint') or None,
           data.get('display_as') or None,
           1 if data.get('allow_multi') else 0,
+          1 if data.get('auto_select_visible') else 0,
           1 if data.get('hide_from_pdf') else 0,
           1 if data.get('upload_button_only') else 0,
           fid))
@@ -7588,6 +8063,17 @@ def api_labor_scheduler_list():
 
     rows = db.execute(sql, params).fetchall()
 
+    # Optional: include shows even when they have zero labor entries — used by
+    # the scheduler when adding a show / picking an existing show that doesn't
+    # yet have any labor lines.
+    include_raw = (request.args.get('include_show_ids') or '').strip()
+    extra_ids = []
+    if include_raw:
+        for tok in include_raw.split(','):
+            tok = tok.strip()
+            if tok.isdigit():
+                extra_ids.append(int(tok))
+
     # Group by show
     shows = {}
     order = []
@@ -7606,6 +8092,35 @@ def api_labor_scheduler_list():
             }
             order.append(sid)
         shows[sid]['requests'].append(rd)
+
+    # Pull in any forced-include shows that didn't surface above because they
+    # have zero labor rows. They become empty sections in the scheduler so the
+    # user can add the first labor line.
+    if extra_ids:
+        missing = [sid for sid in extra_ids if sid not in shows]
+        if missing:
+            if accessible is not None:
+                missing = [sid for sid in missing if sid in accessible]
+            if missing:
+                ph = ','.join(['?'] * len(missing))
+                extra_rows = db.execute(
+                    f"SELECT id, name, venue, show_date, status, labor_notes "
+                    f"FROM shows WHERE id IN ({ph}) AND status != 'archived'",
+                    missing
+                ).fetchall()
+                for er in extra_rows:
+                    erd = _normalize_row_dates(dict(er))
+                    sid = erd['id']
+                    shows[sid] = {
+                        'show_id':          sid,
+                        'show_name':        erd['name'],
+                        'show_venue':       erd['venue'],
+                        'show_date':        erd['show_date'],
+                        'show_status':      erd['status'],
+                        'show_labor_notes': erd.get('labor_notes') or '',
+                        'requests':         [],
+                    }
+                    order.insert(0, sid)  # surface at top so they're easy to find
 
     # ── Overhead & Project Crew labor (not tied to any show) ─────────────────
     # Pulled in here so the labor scheduler sees a single unified to-do list.
@@ -7802,6 +8317,114 @@ def api_labor_scheduler_add():
     db.close()
     syslog_logger.info(f"LABOR_REQUEST_ADD (scheduler) show_id={show_id} id={rid} by={session.get('username')}")
     return jsonify({'success': True, 'row': _normalize_row_dates(dict(row)) if row else {'id': rid}})
+
+
+@app.route('/api/labor-scheduler/create-show', methods=['POST'])
+@scheduler_required
+def api_labor_scheduler_create_show():
+    """Create a barebones show from the labor scheduler. The PM is expected
+    to come back later via the normal advance flow and fill in the rest."""
+    if session.get('is_readonly'):
+        return jsonify({'success': False, 'error': 'Read-only access.'}), 403
+    data = request.get_json(force=True) or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'success': False, 'error': 'Show name is required.'}), 400
+    if len(name) > 200:
+        return jsonify({'success': False, 'error': 'Show name is too long.'}), 400
+    show_date = (data.get('show_date') or '').strip() or None
+    show_time = _normalize_perf_time(data.get('show_time', ''))
+    venue     = (data.get('venue') or '').strip() or "Judson's Live"
+    pm_name   = (data.get('production_manager') or '').strip()
+    if len(venue) > 120 or len(pm_name) > 120:
+        return jsonify({'success': False, 'error': 'Venue / PM name is too long.'}), 400
+
+    db = get_db()
+    cur = db.execute("""
+        INSERT INTO shows (name, show_date, show_time, venue, created_by)
+        VALUES (?, ?, ?, ?, ?)
+    """, (name, show_date, show_time, venue, session['user_id']))
+    show_id = cur.lastrowid
+
+    advance_kv = [
+        ('show_name', name),
+        ('show_date', show_date or ''),
+        ('show_time', show_time),
+        ('venue',     venue),
+    ]
+    if pm_name:
+        advance_kv.append(('production_manager', pm_name))
+    for key, val in advance_kv:
+        if val:
+            db.execute(
+                "INSERT OR REPLACE INTO advance_data (show_id, field_key, field_value) "
+                "VALUES (?, ?, ?)",
+                (show_id, key, val)
+            )
+
+    if show_date:
+        db.execute(
+            "INSERT INTO show_performances (show_id, perf_date, perf_time, sort_order) "
+            "VALUES (?, ?, ?, 0)",
+            (show_id, show_date, show_time)
+        )
+
+    log_audit(db, 'SHOW_CREATE', 'show', show_id, show_id=show_id,
+              after={'name': name, 'show_date': show_date, 'venue': venue,
+                     'production_manager': pm_name, 'via': 'labor_scheduler'})
+    db.commit()
+    db.close()
+    syslog_logger.info(
+        f"SHOW_CREATE (scheduler) show_id={show_id} name={name!r} venue={venue!r} "
+        f"by={session.get('username')}"
+    )
+    return jsonify({
+        'success':   True,
+        'show_id':   show_id,
+        'show_name': name,
+        'show_date': show_date or '',
+        'show_time': show_time,
+        'venue':     venue,
+    })
+
+
+@app.route('/api/labor-scheduler/shows-without-labor', methods=['GET'])
+@scheduler_required
+def api_labor_scheduler_shows_without_labor():
+    """List active shows that have zero labor_requests rows so the scheduler
+    can pull one up and start adding labor. Optional 'from'/'to' ISO dates
+    constrain by show_date (inclusive)."""
+    date_from = (request.args.get('from') or '').strip()
+    date_to   = (request.args.get('to') or '').strip()
+
+    db = get_db()
+    accessible = get_accessible_shows(session['user_id'])
+
+    sql = """
+        SELECT s.id, s.name, s.show_date, s.show_time, s.venue
+        FROM shows s
+        LEFT JOIN labor_requests lr ON lr.show_id = s.id
+        WHERE COALESCE(s.status, 'active') != 'archived'
+          AND lr.id IS NULL
+    """
+    params = []
+    if date_from and date_to:
+        # Either show_date in range, OR no show_date set at all (so brand-new
+        # shows that haven't picked a date yet still appear).
+        sql += " AND (s.show_date IS NULL OR s.show_date BETWEEN ? AND ?)"
+        params.extend([date_from, date_to])
+    if accessible is not None:
+        if not accessible:
+            db.close()
+            return jsonify({'shows': []})
+        ph = ','.join(['?'] * len(accessible))
+        sql += f' AND s.id IN ({ph})'
+        params.extend(accessible)
+    sql += ' ORDER BY s.show_date IS NULL, s.show_date, s.name'
+
+    rows = db.execute(sql, params).fetchall()
+    db.close()
+    return jsonify({'shows': [_normalize_row_dates(dict(r)) for r in rows]})
 
 
 # ─── Overhead & Project Crew ─────────────────────────────────────────────────

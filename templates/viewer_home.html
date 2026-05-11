@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Documents — 3·2·1→Theater{% endblock %}
+
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 class="page-title">Documents</h1>
+    <p class="page-sub">
+      You're viewing documents only.
+      {% if venues_allow %}
+        Venues: <strong>{{ venues_allow|join(', ') }}</strong>.
+      {% else %}
+        All venues.
+      {% endif %}
+      {% if doc_types_allow %}
+        Types: <strong>{{ doc_types_allow|map('title')|join(', ') }}</strong>.
+      {% else %}
+        All document types.
+      {% endif %}
+    </p>
+  </div>
+</div>
+
+{% if not grouped %}
+  <div class="form-section">
+    <div class="form-section-body">
+      <div class="scheduler-empty">No documents are available for your account.</div>
+    </div>
+  </div>
+{% else %}
+  {% for venue, shows in grouped %}
+  <div class="form-section" style="margin-bottom:14px">
+    <div class="form-section-header">
+      <span class="section-icon">◈</span>
+      <strong style="text-transform:none;letter-spacing:normal;font-size:14px">{{ venue }}</strong>
+      <span class="text-dim" style="font-size:11px">{{ shows|length }} show{{ '' if shows|length == 1 else 's' }}</span>
+    </div>
+    <div class="form-section-body no-pad">
+      <table class="data-table">
+        <thead><tr>
+          <th>SHOW</th>
+          <th style="width:130px">DATE</th>
+          <th style="width:90px">TIME</th>
+          <th style="width:140px">DOCUMENTS</th>
+        </tr></thead>
+        <tbody>
+          {% for s in shows %}
+          <tr>
+            <td><a href="{{ url_for('viewer_show', show_id=s.id) }}" style="color:var(--text);text-decoration:none;font-weight:500">{{ s.name }}</a></td>
+            <td class="text-dim">{{ s.show_date or '—' }}</td>
+            <td class="text-dim">{{ s.show_time or '—' }}</td>
+            <td>
+              <a href="{{ url_for('viewer_show', show_id=s.id) }}" class="btn btn-xs btn-ghost">Open →</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endfor %}
+{% endif %}
+{% endblock %}
