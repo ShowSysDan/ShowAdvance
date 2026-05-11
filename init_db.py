@@ -31,6 +31,19 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Server-side session store. Lives in the shared schema on PostgreSQL so
+-- multiple apps that point at the same DB will share login state.
+CREATE TABLE IF NOT EXISTS app_sessions (
+    sid         TEXT PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    data        TEXT NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at  TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_app_sessions_expires ON app_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_app_sessions_user    ON app_sessions(user_id);
+
 CREATE TABLE IF NOT EXISTS shows (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -162,6 +175,7 @@ CREATE TABLE IF NOT EXISTS form_fields (
     ai_hint TEXT DEFAULT NULL,
     display_as TEXT DEFAULT NULL,
     allow_multi INTEGER DEFAULT 0,
+    auto_select_visible INTEGER DEFAULT 0,
     hide_from_pdf INTEGER DEFAULT 0,
     upload_button_only INTEGER DEFAULT 0
 );
@@ -1160,6 +1174,19 @@ def migrate_db():
             value TEXT DEFAULT ''
         );
 
+        -- Server-side Flask sessions. On PostgreSQL this lives in the shared
+        -- schema so multiple apps pointed at the same DB share login state.
+        CREATE TABLE IF NOT EXISTS app_sessions (
+            sid         TEXT PRIMARY KEY,
+            user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+            data        TEXT NOT NULL DEFAULT '{}',
+            created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            last_seen   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at  TIMESTAMP NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_app_sessions_expires ON app_sessions(expires_at);
+        CREATE INDEX IF NOT EXISTS idx_app_sessions_user    ON app_sessions(user_id);
+
         -- Tracks who is currently viewing/editing a show (for presence indicators)
         -- Rows older than 60 s are considered stale and pruned automatically.
         CREATE TABLE IF NOT EXISTS active_sessions (
@@ -1239,6 +1266,7 @@ def migrate_db():
         'ALTER TABLE form_fields ADD COLUMN ai_hint TEXT DEFAULT NULL',
         'ALTER TABLE form_fields ADD COLUMN display_as TEXT DEFAULT NULL',
         'ALTER TABLE form_fields ADD COLUMN allow_multi INTEGER DEFAULT 0',
+        'ALTER TABLE form_fields ADD COLUMN auto_select_visible INTEGER DEFAULT 0',
         'ALTER TABLE form_fields ADD COLUMN hide_from_pdf INTEGER DEFAULT 0',
         'ALTER TABLE form_fields ADD COLUMN upload_button_only INTEGER DEFAULT 0',
         'ALTER TABLE schedule_meta_fields ADD COLUMN show_in_contacts INTEGER DEFAULT 0',
@@ -1887,6 +1915,17 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+CREATE TABLE IF NOT EXISTS app_sessions (
+    sid         TEXT PRIMARY KEY,
+    user_id     INTEGER REFERENCES users(id) ON DELETE CASCADE,
+    data        TEXT NOT NULL DEFAULT '{}',
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_seen   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    expires_at  TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_app_sessions_expires ON app_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_app_sessions_user    ON app_sessions(user_id);
+
 CREATE TABLE IF NOT EXISTS shows (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
@@ -2018,6 +2057,7 @@ CREATE TABLE IF NOT EXISTS form_fields (
     ai_hint TEXT DEFAULT NULL,
     display_as TEXT DEFAULT NULL,
     allow_multi INTEGER DEFAULT 0,
+    auto_select_visible INTEGER DEFAULT 0,
     hide_from_pdf INTEGER DEFAULT 0,
     upload_button_only INTEGER DEFAULT 0
 );
@@ -2564,6 +2604,9 @@ SHARED_TABLES = {
     'users', 'user_groups', 'user_group_members', 'app_settings',
     'password_reset_tokens', 'user_pending_registration',
     'site_messages', 'site_message_dismissals',
+    # Server-side session store — shared so multiple apps can read the
+    # same login state when pointed at the same PostgreSQL DB.
+    'app_sessions',
 }
 
 # Regex to extract the table name from a CREATE TABLE statement
@@ -2814,6 +2857,7 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS ai_hint TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS display_as TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS allow_multi INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS auto_select_visible INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS hide_from_pdf INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".form_fields ADD COLUMN IF NOT EXISTS upload_button_only INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".schedule_meta_fields ADD COLUMN IF NOT EXISTS show_in_contacts INTEGER DEFAULT 0',

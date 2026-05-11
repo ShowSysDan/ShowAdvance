@@ -79,6 +79,7 @@ _CONFLICT_COLS = {
     'user_group_members':['user_id', 'group_id'],
     'advance_reads':     ['show_id', 'user_id'],
     'active_sessions':   ['user_id', 'show_id'],
+    'app_sessions':      ['sid'],
     'form_fields':       ['field_key'],
     'form_sections':     ['section_key'],
     'schedule_meta_fields': ['field_key'],

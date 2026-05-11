@@ -106,6 +106,158 @@ app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
 
 
+# ── DB-backed sessions ────────────────────────────────────────────────────────
+# Replaces Flask's signed-cookie sessions with a server-side store. The cookie
+# carries only an opaque random session ID; all the data lives in the
+# `app_sessions` table. When two apps point at the same PostgreSQL DB (sharing
+# the `shared` schema) they automatically share login state — sign in once
+# and you're authenticated in both.
+#
+# Set DISABLE_DB_SESSIONS=1 in the environment to fall back to Flask's default
+# signed-cookie sessions (e.g. for troubleshooting).
+import secrets as _secrets_mod
+from flask.sessions import SessionInterface as _FlaskSessionInterface, SessionMixin as _FlaskSessionMixin
+from werkzeug.datastructures import CallbackDict as _CallbackDict
+
+_SID_RE = re.compile(r'^[A-Za-z0-9_-]{20,128}$')
+
+
+class _DBSession(_CallbackDict, _FlaskSessionMixin):
+    def __init__(self, initial=None, sid=None, new=False):
+        def _on_update(_self):
+            _self.modified = True
+        _CallbackDict.__init__(self, initial, _on_update)
+        self.sid = sid
+        self.new = new
+        self.modified = False
+
+
+class _DBSessionInterface(_FlaskSessionInterface):
+    """Server-side session backend that stores session data in the
+    `app_sessions` table (lives in the shared schema on PostgreSQL).
+    The cookie carries only a 256-bit random session ID."""
+
+    def _new_sid(self):
+        return _secrets_mod.token_urlsafe(32)
+
+    def _load(self, sid):
+        """Return (data_dict, ok). ok=False if the row is missing or expired."""
+        try:
+            db = get_db()
+        except Exception:
+            return {}, False
+        try:
+            row = db.execute(
+                "SELECT data, expires_at FROM app_sessions WHERE sid = ?", (sid,)
+            ).fetchone()
+        except Exception:
+            try: db.close()
+            except Exception: pass
+            return {}, False
+        if not row:
+            try: db.close()
+            except Exception: pass
+            return {}, False
+        expires = row['expires_at']
+        if isinstance(expires, str):
+            try:
+                expires_dt = datetime.fromisoformat(expires.split('.')[0].replace('Z', ''))
+            except Exception:
+                expires_dt = datetime.utcnow() - timedelta(seconds=1)  # treat as expired
+        else:
+            expires_dt = expires
+        if expires_dt < datetime.utcnow():
+            try:
+                db.execute("DELETE FROM app_sessions WHERE sid = ?", (sid,))
+                db.commit()
+            except Exception:
+                pass
+            try: db.close()
+            except Exception: pass
+            return {}, False
+        try:
+            data = json.loads(row['data']) if row['data'] else {}
+            if not isinstance(data, dict):
+                data = {}
+        except (json.JSONDecodeError, TypeError, ValueError):
+            data = {}
+        try: db.close()
+        except Exception: pass
+        return data, True
+
+    def open_session(self, app, request):
+        cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+        sid = request.cookies.get(cookie_name)
+        if not sid or not _SID_RE.match(sid):
+            return _DBSession(sid=self._new_sid(), new=True)
+        data, ok = self._load(sid)
+        if not ok:
+            return _DBSession(sid=sid, new=True)
+        return _DBSession(data, sid=sid, new=False)
+
+    def save_session(self, app, session, response):
+        domain = self.get_cookie_domain(app)
+        path = self.get_cookie_path(app)
+        cookie_name = app.config.get('SESSION_COOKIE_NAME', 'session')
+
+        # Session was cleared — drop the row and the cookie
+        if not session:
+            if session.modified:
+                try:
+                    db = get_db()
+                    try:
+                        db.execute("DELETE FROM app_sessions WHERE sid = ?", (session.sid,))
+                        db.commit()
+                    finally:
+                        db.close()
+                except Exception:
+                    pass
+                response.delete_cookie(cookie_name, domain=domain, path=path)
+            return
+
+        # Nothing to persist
+        if not session.modified and not session.new:
+            return
+
+        lifetime = app.permanent_session_lifetime
+        expires_dt = datetime.utcnow() + lifetime
+        try:
+            data_json = json.dumps(dict(session), default=str)
+        except (TypeError, ValueError):
+            data_json = '{}'
+        user_id = session.get('user_id')
+        try:
+            db = get_db()
+            try:
+                db.execute(
+                    "INSERT OR REPLACE INTO app_sessions "
+                    "(sid, user_id, data, last_seen, expires_at) "
+                    "VALUES (?, ?, ?, CURRENT_TIMESTAMP, ?)",
+                    (session.sid, user_id, data_json, expires_dt)
+                )
+                db.commit()
+            finally:
+                db.close()
+        except Exception as e:
+            app.logger.warning(f'DB session save failed: {e}')
+            return
+
+        response.set_cookie(
+            cookie_name,
+            session.sid,
+            expires=expires_dt,
+            httponly=self.get_cookie_httponly(app),
+            domain=domain,
+            path=path,
+            secure=self.get_cookie_secure(app),
+            samesite=self.get_cookie_samesite(app),
+        )
+
+
+if os.environ.get('DISABLE_DB_SESSIONS', '').lower() not in ('1', 'true', 'yes'):
+    app.session_interface = _DBSessionInterface()
+
+
 @app.after_request
 def _set_security_headers(response):
     """Add defense-in-depth security headers to every response."""
@@ -5050,8 +5202,8 @@ def add_form_field():
             (section_id, field_key, label, field_type, sort_order,
              options_json, contact_dept, conditional_show_when,
              help_text, placeholder, width_hint, is_notes_field, ai_hint,
-             display_as, allow_multi, hide_from_pdf, upload_button_only)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+             display_as, allow_multi, auto_select_visible, hide_from_pdf, upload_button_only)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (section_id, field_key, label,
               data.get('field_type','text'), max_order + 10,
               options_json,
@@ -5064,6 +5216,7 @@ def add_form_field():
               data.get('ai_hint') or None,
               data.get('display_as') or None,
               1 if data.get('allow_multi') else 0,
+              1 if data.get('auto_select_visible') else 0,
               1 if data.get('hide_from_pdf') else 0,
               1 if data.get('upload_button_only') else 0))
         fid = cur.lastrowid
@@ -5091,7 +5244,7 @@ def edit_form_field(fid):
             section_id=?, label=?, field_type=?,
             options_json=?, contact_dept=?, conditional_show_when=?,
             help_text=?, placeholder=?, width_hint=?, is_notes_field=?, ai_hint=?,
-            display_as=?, allow_multi=?, hide_from_pdf=?, upload_button_only=?
+            display_as=?, allow_multi=?, auto_select_visible=?, hide_from_pdf=?, upload_button_only=?
         WHERE id=?
     """, (data.get('section_id'), data.get('label',''),
           data.get('field_type','text'), options_json,
@@ -5102,6 +5255,7 @@ def edit_form_field(fid):
           data.get('ai_hint') or None,
           data.get('display_as') or None,
           1 if data.get('allow_multi') else 0,
+          1 if data.get('auto_select_visible') else 0,
           1 if data.get('hide_from_pdf') else 0,
           1 if data.get('upload_button_only') else 0,
           fid))

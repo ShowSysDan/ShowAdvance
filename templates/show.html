@@ -85,7 +85,7 @@
           <span class="multi-check-summary">— Select —</span>
           <span class="multi-check-caret" aria-hidden="true">▾</span>
         </button>
-        <div class="multi-check-list{% if restricted %} multi-check-disabled{% endif %}" data-key="{{ field.field_key }}" hidden>
+        <div class="multi-check-list{% if restricted %} multi-check-disabled{% endif %}" data-key="{{ field.field_key }}"{% if field.auto_select_visible %} data-auto-select-visible="1"{% endif %} hidden>
           <input type="hidden" class="adv-field" data-key="{{ field.field_key }}" value="{{ cur|e }}">
           {% for opt in field.options %}
             {% set _opt_val = opt.value if opt is mapping else opt %}
@@ -579,27 +579,16 @@ const SHOW_VENUE = {{ show.venue | tojson }};
             </tr>
           </thead>
           <tbody id="schedule-rows-{{ d.date_key }}">
-            {% if day_rows %}
-              {% for row in day_rows %}
-              <tr class="schedule-row">
-                {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
-                <td><input type="text" class="sched-cell" placeholder="15:00" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="16:00" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
-                {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)" title="Remove">×</button></td>{% endif %}
-              </tr>
-              {% endfor %}
-            {% else %}
-              <tr class="schedule-row">
-                {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
-                <td><input type="text" class="sched-cell" placeholder="15:00" value="" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="16:00" value="" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="Crew Called" value="" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="" value="" {% if restricted %}disabled{% endif %}></td>
-                {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
-              </tr>
-            {% endif %}
+            {% for row in day_rows %}
+            <tr class="schedule-row">
+              {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+              <td><input type="text" class="sched-cell" placeholder="15:00" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="16:00" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
+              {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)" title="Remove">×</button></td>{% endif %}
+            </tr>
+            {% endfor %}
           </tbody>
         </table>
       </div>
@@ -643,27 +632,16 @@ const SHOW_VENUE = {{ show.venue | tojson }};
           </tr></thead>
           <tbody id="schedule-rows-null">
             {% set null_rows = schedule_rows | selectattr('perf_id', 'none') | list %}
-            {% if null_rows %}
-              {% for row in null_rows %}
-              <tr class="schedule-row">
-                {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
-                <td><input type="text" class="sched-cell" placeholder="15:00" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="16:00" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
-                {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
-              </tr>
-              {% endfor %}
-            {% else %}
-              <tr class="schedule-row">
-                {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
-                <td><input type="text" class="sched-cell" placeholder="15:00" value="" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="16:00" value="" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="Crew Called" value="" {% if restricted %}disabled{% endif %}></td>
-                <td><input type="text" class="sched-cell" placeholder="" value="" {% if restricted %}disabled{% endif %}></td>
-                {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
-              </tr>
-            {% endif %}
+            {% for row in null_rows %}
+            <tr class="schedule-row">
+              {% if not restricted %}<td class="drag-col"><span class="row-drag-handle" title="Drag to reorder">⠿</span></td>{% endif %}
+              <td><input type="text" class="sched-cell" placeholder="15:00" value="{{ row.start_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="16:00" value="{{ row.end_time }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Description" value="{{ row.description }}" {% if restricted %}disabled{% endif %}></td>
+              <td><input type="text" class="sched-cell" placeholder="Notes" value="{{ row.notes }}" {% if restricted %}disabled{% endif %}></td>
+              {% if not restricted %}<td><button type="button" class="row-del-btn" onclick="removeRow(this)">×</button></td>{% endif %}
+            </tr>
+            {% endfor %}
           </tbody>
         </table>
       </div>

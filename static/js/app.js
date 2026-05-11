@@ -578,6 +578,17 @@ function bindAdvanceForm() {
     try { vals = JSON.parse(hidden.value || '[]'); } catch(e) { if (hidden.value) vals = [hidden.value]; }
     list.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = vals.includes(cb.value); });
     updateSummary();
+    // If anything was saved already, treat the field as user-touched so the
+    // auto-select-visible helper doesn't second-guess the saved selection.
+    if (vals.length > 0) list.dataset.userTouched = '1';
+    // Mark as user-touched on any real click — change events also fire for
+    // programmatic checks (the auto-select helper), so we discriminate via
+    // a 'click' on the checkbox itself.
+    list.addEventListener('click', (e) => {
+      if (e.target && e.target.matches('input[type=checkbox]')) {
+        list.dataset.userTouched = '1';
+      }
+    });
     // update on change
     list.addEventListener('change', () => {
       const selected = Array.from(list.querySelectorAll('input[type=checkbox]:checked')).map(cb => cb.value);
@@ -728,8 +739,28 @@ async function saveAdvance() {
 function bindScheduleForm() {
   const form = document.getElementById('schedule-form');
   if (!form) return;
-  form.addEventListener('change', () => scheduleSave());
+  form.addEventListener('change', (e) => {
+    _maybeAutoSortAfterEdit(e.target);
+    scheduleSave();
+  });
   form.addEventListener('input',  () => scheduleSave());
+}
+
+/* Re-sort a day's rows by start time after a start-time cell is edited,
+   so the timeline always stays in chronological order. */
+function _maybeAutoSortAfterEdit(el) {
+  if (!el || !el.classList || !el.classList.contains('sched-cell')) return;
+  const tr = el.closest('tr.schedule-row');
+  if (!tr) return;
+  const cells = Array.from(tr.querySelectorAll('.sched-cell'));
+  // Only the START column triggers a re-sort
+  if (cells[0] !== el) return;
+  const tbody = tr.closest('tbody');
+  if (!tbody || !tbody.id) return;
+  const m = /^schedule-rows-(.*)$/.exec(tbody.id);
+  if (!m) return;
+  const dayKey = (m[1] === 'null') ? null : m[1];
+  sortSchedRowsByTime(dayKey);
 }
 
 /* Add a row to the day identified by dayKey (date string, or null for legacy single-day) */
@@ -931,16 +962,84 @@ function pullAdvanceTime(dayKey, perfTime) {
   scheduleSave();
 }
 
+/* Ask user how to apply a template when the target day already has rows.
+   Returns 'replace' | 'merge' | 'cancel'. */
+function _confirmTemplateApply(existingCount) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:9999;align-items:center;justify-content:center';
+    overlay.innerHTML = `
+      <div style="background:var(--bg-card);color:var(--text);padding:18px 20px;border-radius:6px;max-width:440px;border:1px solid var(--border);box-shadow:0 10px 40px rgba(0,0,0,0.4)">
+        <h3 style="margin:0 0 8px;font-size:14px;letter-spacing:0.5px">APPLY TEMPLATE</h3>
+        <p style="margin:0 0 16px;font-size:13px;line-height:1.45;color:var(--text-dim,#aaa)">
+          This day already has <strong>${existingCount}</strong> timeline ${existingCount === 1 ? 'entry' : 'entries'}.
+          Replace them with the template, or merge the template rows in after what's already there?
+        </p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+          <button type="button" class="btn btn-ghost btn-sm" data-action="cancel">Cancel</button>
+          <button type="button" class="btn btn-ghost btn-sm" data-action="merge">Merge (append)</button>
+          <button type="button" class="btn btn-primary btn-sm" data-action="replace">Replace existing</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    let escHandler;
+    const finish = (action) => {
+      try { document.body.removeChild(overlay); } catch (e) {}
+      if (escHandler) document.removeEventListener('keydown', escHandler);
+      resolve(action);
+    };
+    overlay.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (btn) finish(btn.dataset.action);
+      else if (e.target === overlay) finish('cancel');
+    });
+    escHandler = (e) => { if (e.key === 'Escape') finish('cancel'); };
+    document.addEventListener('keydown', escHandler);
+    // Focus the safest default
+    setTimeout(() => {
+      const def = overlay.querySelector('[data-action="cancel"]');
+      if (def) def.focus();
+    }, 0);
+  });
+}
+
 /* Apply a saved template to a day */
 async function applySchedTemplate(templateId, dayKey) {
   if (!templateId) return;
-  const resp = await fetch(`/api/schedule-templates/${templateId}`);
-  const d = await resp.json();
-  if (!d.rows) return;
   const tbodyId = (dayKey !== null && dayKey !== undefined && dayKey !== '') ? `schedule-rows-${dayKey}` : 'schedule-rows-null';
   const tbody   = document.getElementById(tbodyId);
   if (!tbody) return;
-  tbody.innerHTML = '';
+
+  // Count existing rows that have any content (so a single blank/placeholder
+  // row doesn't trigger the prompt).
+  const existingRows = Array.from(tbody.querySelectorAll('.schedule-row')).filter(tr =>
+    Array.from(tr.querySelectorAll('.sched-cell')).some(c => (c.value || '').trim())
+  );
+
+  let mode = 'replace';
+  if (existingRows.length > 0) {
+    mode = await _confirmTemplateApply(existingRows.length);
+    if (mode === 'cancel') return;
+  }
+
+  const resp = await fetch(`/api/schedule-templates/${templateId}`);
+  const d = await resp.json();
+  if (!d.rows) return;
+
+  if (mode === 'replace') {
+    tbody.innerHTML = '';
+  } else {
+    // Merge: strip out any all-empty rows currently in the tbody so they
+    // don't end up sandwiched between real entries.
+    Array.from(tbody.querySelectorAll('.schedule-row')).forEach(tr => {
+      const hasContent = Array.from(tr.querySelectorAll('.sched-cell'))
+        .some(c => (c.value || '').trim());
+      if (!hasContent) tr.remove();
+    });
+  }
+
   d.rows.forEach(r => {
     const tr = document.createElement('tr');
     tr.className = 'schedule-row';
@@ -955,7 +1054,9 @@ async function applySchedTemplate(templateId, dayKey) {
     tbody.appendChild(tr);
     _bindRowDrag(tr);
   });
-  scheduleSave();
+  // Keep the day's rows chronological after applying — especially in merge
+  // mode where template rows are appended after existing ones.
+  sortSchedRowsByTime(dayKey);
 }
 
 function collectScheduleData() {
@@ -1109,6 +1210,34 @@ function _evaluateAllConditionalsImpl() {
     const firstVisible = Array.from(sel.options).find(o => !o.hidden && !o.disabled);
     sel.value = firstVisible ? firstVisible.value : '';
     sel.dispatchEvent(new Event('change', {bubbles: true}));
+  });
+
+  // Multi-check fields opted into auto-select: once conditional filtering
+  // narrows the visible options to 1 or 2 and the user hasn't touched the
+  // field yet, pre-check the visible ones.
+  _autoSelectVisibleMultiChecks();
+}
+
+function _autoSelectVisibleMultiChecks() {
+  document.querySelectorAll('.multi-check-list[data-auto-select-visible="1"]').forEach(list => {
+    // Don't fight the user: only run while the field has no existing selection.
+    if (list.dataset.userTouched === '1') return;
+    const items = Array.from(list.querySelectorAll('.multi-check-item'));
+    const visible = items.filter(it => it.style.display !== 'none');
+    if (visible.length === 0 || visible.length > 2) return;
+
+    const boxes = visible.map(it => it.querySelector('input[type=checkbox]')).filter(Boolean);
+    if (boxes.some(cb => cb.checked)) return;  // Something already chosen
+
+    let changed = false;
+    boxes.forEach(cb => {
+      if (!cb.disabled && !cb.checked) { cb.checked = true; changed = true; }
+    });
+    if (changed) {
+      // Use the bubbling change event so the list's own change listener
+      // (which writes the hidden JSON + summary text) picks it up.
+      list.dispatchEvent(new Event('change', {bubbles: true}));
+    }
   });
 }
 
