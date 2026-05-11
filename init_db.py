@@ -28,6 +28,13 @@ CREATE TABLE IF NOT EXISTS users (
     must_change_password INTEGER DEFAULT 0,
     is_scheduler INTEGER DEFAULT 0,
     is_asset_manager INTEGER DEFAULT 0,
+    -- Document-viewer role: a stricter variant of read-only. The user is
+    -- bounced to /viewer on login and can only see documents (PDFs +
+    -- read-only views) whose venue/type match the JSON allow-lists below.
+    -- Empty / NULL list = "all".
+    is_document_viewer INTEGER DEFAULT 0,
+    viewer_venues TEXT DEFAULT NULL,
+    viewer_doc_types TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1636,6 +1643,9 @@ def migrate_db():
         "ALTER TABLE users ADD COLUMN pending_approval INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN is_scheduler INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN is_asset_manager INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN is_document_viewer INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN viewer_venues TEXT DEFAULT NULL",
+        "ALTER TABLE users ADD COLUMN viewer_doc_types TEXT DEFAULT NULL",
         # Asset manager enhancements
         "ALTER TABLE asset_types ADD COLUMN supplier_name TEXT DEFAULT ''",
         "ALTER TABLE asset_types ADD COLUMN supplier_contact TEXT DEFAULT ''",
@@ -1912,6 +1922,9 @@ CREATE TABLE IF NOT EXISTS users (
     pending_approval INTEGER DEFAULT 0,
     is_scheduler INTEGER DEFAULT 0,
     is_asset_manager INTEGER DEFAULT 0,
+    is_document_viewer INTEGER DEFAULT 0,
+    viewer_venues TEXT DEFAULT NULL,
+    viewer_doc_types TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -2925,6 +2938,9 @@ def migrate_db_postgres():
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS must_change_password INTEGER DEFAULT 0',
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS is_scheduler INTEGER DEFAULT 0',
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS is_asset_manager INTEGER DEFAULT 0',
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS is_document_viewer INTEGER DEFAULT 0',
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS viewer_venues TEXT DEFAULT NULL',
+            f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS viewer_doc_types TEXT DEFAULT NULL',
         ]
 
         n = 0

@@ -107,6 +107,11 @@
     <p class="page-sub">Pick a date range to see all labor requests grouped by show. Schedule positions and assign technicians.</p>
   </div>
   <div class="header-actions">
+    <button class="btn btn-ghost" onclick="window.__scheduler.openAddShow()" title="Create a barebones show right here so you can start adding labor before the PM advances it">+ Add show</button>
+    <select id="sched-pick-show" class="field-input" style="width:auto;min-width:220px"
+            onchange="window.__scheduler.onPickShow(this)" title="Shows in this range that have no labor lines yet">
+      <option value="">+ Add labor to existing show…</option>
+    </select>
     <button class="btn btn-primary" onclick="window.__scheduler.saveAll()">Save All</button>
   </div>
 </div>
@@ -130,10 +135,69 @@
 
 <div id="scheduler-results"></div>
 
+<!-- ── Add-show modal (opens from the page header) ──────────────────────── -->
+<div id="add-show-modal" class="modal-overlay" style="display:none"
+     onclick="if(event.target===this)window.__scheduler.closeAddShow()">
+  <div class="modal-card" style="max-width:480px">
+    <div class="modal-header">
+      <h3 style="margin:0;font-size:14px;letter-spacing:0.5px">CREATE SHOW</h3>
+      <button type="button" class="modal-close" onclick="window.__scheduler.closeAddShow()" aria-label="Close">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="text-dim" style="font-size:12px;margin:0 0 12px">
+        Quick-create a show so you can start scheduling labor right now.
+        The PM can fill in the rest later from the normal advance flow.
+      </p>
+      <div class="form-grid">
+        <div class="form-row">
+          <div class="field-group required">
+            <label class="field-label">SHOW / EVENT NAME *</label>
+            <input type="text" id="ash-name" class="field-input" placeholder="e.g. Friday Night Concert" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field-group">
+            <label class="field-label">PRODUCTION MANAGER</label>
+            <input type="text" id="ash-pm" class="field-input" placeholder="Name of the PM handling this show" autocomplete="off">
+          </div>
+        </div>
+        <div class="form-row cols-2">
+          <div class="field-group">
+            <label class="field-label">SHOW DATE</label>
+            <input type="date" id="ash-date" class="field-input">
+          </div>
+          <div class="field-group">
+            <label class="field-label">SHOW TIME</label>
+            <input type="text" id="ash-time" class="field-input" placeholder="e.g. 19:30">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="field-group">
+            <label class="field-label">VENUE</label>
+            <select id="ash-venue" class="field-input">
+              <option value="">— Pick a venue —</option>
+            </select>
+          </div>
+        </div>
+      </div>
+      <div id="ash-error" class="field-msg field-msg-error" style="display:none"></div>
+    </div>
+    <div class="modal-footer">
+      <button type="button" class="btn btn-ghost" onclick="window.__scheduler.closeAddShow()">Cancel</button>
+      <button type="button" class="btn btn-primary" onclick="window.__scheduler.submitAddShow()">Create &amp; add labor</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   let _crewMembers = null;
   let _positions   = null;
+  /* Shows we've explicitly pulled in (created or picked) that have zero
+     labor lines — the API filters them out by default, so we ask the
+     server to include them by id. */
+  const _includedShowIds = new Set();
+  let _venues = null;
 
   function fmtDate(d) {
     const y = d.getFullYear();
@@ -465,7 +529,11 @@
     status.textContent = 'Loading…';
     try {
       await Promise.all([loadCrew(), loadPositions()]);
-      const r = await fetch(`/api/labor-scheduler?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`);
+      let url = `/api/labor-scheduler?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+      if (_includedShowIds.size) {
+        url += '&include_show_ids=' + encodeURIComponent(Array.from(_includedShowIds).join(','));
+      }
+      const r = await fetch(url);
       if (!r.ok) {
         status.textContent = 'Failed to load.';
         return;
@@ -483,6 +551,8 @@
           '<div class="scheduler-empty">No labor requests found in this date range.</div>' +
           '</div></div>';
       }
+      // Refresh the "+ Add labor to existing show…" dropdown in the background
+      reloadPickShowDropdown(from, to);
       const showLines = shows.reduce((n, s) => n + s.requests.length, 0);
       const ohLines   = overheadGroups.reduce((n, g) => n + g.requests.length, 0);
       const parts = [];
@@ -693,7 +763,139 @@
     }
   }, true);
 
-  window.__scheduler = { onScheduledToggle, onCrewChange, onPositionChange, onTimeChange, addRow, addOverheadRow, removeRow, saveAll, saveShowNotes, saveGroupNotes };
+  /* ── Add-show modal ──────────────────────────────────────────────── */
+  async function loadVenues() {
+    if (_venues) return _venues;
+    try {
+      const r = await fetch('/settings/venues');
+      const d = await r.json();
+      _venues = d.venues || [];
+    } catch (e) {
+      _venues = [];
+    }
+    return _venues;
+  }
+
+  function openAddShow() {
+    const m = document.getElementById('add-show-modal');
+    if (!m) return;
+    // Reset
+    document.getElementById('ash-name').value = '';
+    document.getElementById('ash-pm').value = '';
+    document.getElementById('ash-date').value = document.getElementById('sched-from').value || '';
+    document.getElementById('ash-time').value = '';
+    const err = document.getElementById('ash-error');
+    err.textContent = ''; err.style.display = 'none';
+    // Populate venue dropdown
+    loadVenues().then(venues => {
+      const sel = document.getElementById('ash-venue');
+      const current = sel.value;
+      sel.innerHTML = '<option value="">— Pick a venue —</option>';
+      venues.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = v;
+        if (v === current) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    });
+    m.style.display = 'flex';
+    setTimeout(() => document.getElementById('ash-name').focus(), 0);
+  }
+
+  function closeAddShow() {
+    const m = document.getElementById('add-show-modal');
+    if (m) m.style.display = 'none';
+  }
+
+  async function submitAddShow() {
+    const name = document.getElementById('ash-name').value.trim();
+    const err = document.getElementById('ash-error');
+    err.style.display = 'none';
+    if (!name) {
+      err.textContent = 'Show name is required.';
+      err.style.display = 'block';
+      return;
+    }
+    const payload = {
+      name,
+      production_manager: document.getElementById('ash-pm').value.trim(),
+      show_date:          document.getElementById('ash-date').value || '',
+      show_time:          document.getElementById('ash-time').value.trim(),
+      venue:              document.getElementById('ash-venue').value || '',
+    };
+    try {
+      const r = await fetch('/api/labor-scheduler/create-show', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest'},
+        body: JSON.stringify(payload),
+      });
+      const d = await r.json();
+      if (!r.ok || !d.success) {
+        err.textContent = d.error || 'Failed to create show.';
+        err.style.display = 'block';
+        return;
+      }
+      closeAddShow();
+      // If the show's date is outside the current range, widen it.
+      if (payload.show_date) {
+        const from = document.getElementById('sched-from').value;
+        const to   = document.getElementById('sched-to').value;
+        if (!from || payload.show_date < from) document.getElementById('sched-from').value = payload.show_date;
+        if (!to   || payload.show_date > to)   document.getElementById('sched-to').value   = payload.show_date;
+      }
+      _includedShowIds.add(d.show_id);
+      showSaveToast('✓ Show created');
+      await loadScheduler();
+      // Scroll the new section into view so the scheduler sees the "+ Add Line"
+      const section = document.querySelector(`#scheduler-results [data-show-id="${d.show_id}"]`);
+      if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    } catch (e) {
+      err.textContent = 'Network error.';
+      err.style.display = 'block';
+    }
+  }
+
+  async function reloadPickShowDropdown(from, to) {
+    const sel = document.getElementById('sched-pick-show');
+    if (!sel) return;
+    try {
+      const params = (from && to) ? `?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}` : '';
+      const r = await fetch(`/api/labor-scheduler/shows-without-labor${params}`);
+      const d = await r.json();
+      const shows = (d.shows || []).filter(s => !_includedShowIds.has(s.id));
+      sel.innerHTML = '';
+      const placeholder = document.createElement('option');
+      placeholder.value = '';
+      placeholder.textContent = shows.length
+        ? `+ Add labor to existing show… (${shows.length})`
+        : '+ Add labor to existing show… (none in range)';
+      sel.appendChild(placeholder);
+      shows.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        const dateBit = s.show_date ? ` · ${s.show_date}` : ' · no date';
+        const venueBit = s.venue ? ` · ${s.venue}` : '';
+        opt.textContent = `${s.name}${dateBit}${venueBit}`;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      console.error('shows-without-labor load failed', e);
+    }
+  }
+
+  async function onPickShow(selectEl) {
+    const sid = parseInt(selectEl.value, 10);
+    selectEl.value = '';  // reset
+    if (!sid) return;
+    _includedShowIds.add(sid);
+    await loadScheduler();
+    const section = document.querySelector(`#scheduler-results [data-show-id="${sid}"]`);
+    if (section) section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  window.__scheduler = { onScheduledToggle, onCrewChange, onPositionChange, onTimeChange, addRow, addOverheadRow, removeRow, saveAll, saveShowNotes, saveGroupNotes,
+                         openAddShow, closeAddShow, submitAddShow, onPickShow };
   window.loadScheduler = loadScheduler;
 
   document.addEventListener('DOMContentLoaded', () => {
