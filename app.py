@@ -102,7 +102,12 @@ app.secret_key = _secret
 # ── Session cookie security ───────────────────────────────────────────────────
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-# SESSION_COOKIE_SECURE intentionally omitted (app typically runs on LAN over HTTP)
+# Default: omit Secure flag so the LAN/HTTP deployment still works. HTTPS
+# deployments should set SESSION_COOKIE_SECURE=1 in the env to upgrade the
+# cookie to Secure-only — the sid is now a bearer token (DB-backed sessions),
+# so leaking it over plaintext is more dangerous than the old signed cookie.
+if os.environ.get('SESSION_COOKIE_SECURE', '').lower() in ('1', 'true', 'yes'):
+    app.config['SESSION_COOKIE_SECURE'] = True
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(hours=12)
 
 
@@ -192,7 +197,11 @@ class _DBSessionInterface(_FlaskSessionInterface):
             return _DBSession(sid=self._new_sid(), new=True)
         data, ok = self._load(sid)
         if not ok:
-            return _DBSession(sid=sid, new=True)
+            # Never adopt a client-supplied sid that doesn't exist in our store —
+            # mint a fresh one. Otherwise an attacker who plants a known sid via
+            # an open-redirect / XSS-adjacent vector could pre-fixate the victim's
+            # session before login.
+            return _DBSession(sid=self._new_sid(), new=True)
         return _DBSession(data, sid=sid, new=False)
 
     def save_session(self, app, session, response):
@@ -399,7 +408,7 @@ BACKUP_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backups')
 #   MAJOR — breaking schema or architectural changes
 #   MINOR — new feature sets (e.g. asset manager, user enhancements)
 #   PATCH — bug fixes, small improvements, security patches
-APP_VERSION = '2.10.0'
+APP_VERSION = '2.11.0'
 
 # Flask-Limiter for login rate limiting
 try:
@@ -973,6 +982,30 @@ def show_advance_editor_required(f):
 
 
 @app.before_request
+def _populate_session_from_user(user, ts=None):
+    """Copy role / permission flags from a users row into the Flask session.
+    Used by both the login route (initial population) and the periodic role
+    refresh below."""
+    uid = user['id']
+    session['user_id']            = uid
+    if user.get('username') is not None:
+        session['username']       = user['username']
+    session['display_name']       = user['display_name'] or session.get('username', '')
+    session['user_role']          = user['role']
+    if user.get('theme') is not None:
+        session['theme']          = user['theme'] or 'dark'
+    session['is_restricted']      = is_restricted_user(uid)
+    session['is_content_admin']   = is_content_admin(uid)
+    session['is_labor_scheduler'] = is_labor_scheduler(uid)
+    session['is_readonly']        = bool(user.get('is_readonly', 0))
+    session['is_scheduler']       = bool(user.get('is_scheduler', 0))
+    session['is_asset_manager']   = bool(user.get('is_asset_manager', 0))
+    session['is_document_viewer'] = bool(user.get('is_document_viewer', 0))
+    session['viewer_venues']      = _decode_json_list(user.get('viewer_venues'))
+    session['viewer_doc_types']   = _decode_json_list(user.get('viewer_doc_types'))
+    session['_role_checked_at']   = ts if ts is not None else datetime.utcnow().timestamp()
+
+
 def _refresh_session_roles():
     """Re-check user role/permissions from DB every 5 minutes to catch demotions."""
     if 'user_id' not in session:
@@ -993,18 +1026,7 @@ def _refresh_session_roles():
         if not user:
             session.clear()
             return redirect(url_for('login'))
-        session['user_role'] = user['role']
-        session['display_name'] = user['display_name'] or session.get('username', '')
-        session['is_restricted'] = is_restricted_user(user['id'])
-        session['is_content_admin'] = is_content_admin(user['id'])
-        session['is_labor_scheduler'] = is_labor_scheduler(user['id'])
-        session['is_readonly'] = bool(user.get('is_readonly', 0))
-        session['is_scheduler'] = bool(user.get('is_scheduler', 0))
-        session['is_asset_manager'] = bool(user.get('is_asset_manager', 0))
-        session['is_document_viewer'] = bool(user.get('is_document_viewer', 0))
-        session['viewer_venues']    = _decode_json_list(user.get('viewer_venues'))
-        session['viewer_doc_types'] = _decode_json_list(user.get('viewer_doc_types'))
-        session['_role_checked_at'] = now
+        _populate_session_from_user(user, ts=now)
     except Exception:
         pass
 
@@ -2180,24 +2202,18 @@ def _login_route():
                 db.commit()
             except Exception:
                 pass
-            # Regenerate session to prevent session fixation
+            # Regenerate session to prevent session fixation. session.clear()
+            # empties the dict but does NOT rotate the sid on the DB-backed
+            # session, so we explicitly mint a new sid here. The old DB row
+            # (if any) becomes orphaned and is harvested on expiry.
             next_url = request.form.get('next') or url_for('dashboard')
             session.clear()
-            session['user_id']        = user['id']
-            session['username']       = user['username']
-            session['display_name']   = user['display_name'] or user['username']
-            session['user_role']      = user['role']
-            session['theme']          = user['theme'] or 'dark'
-            session['is_restricted']  = is_restricted_user(user['id'])
-            session['is_content_admin'] = is_content_admin(user['id'])
-            session['is_labor_scheduler'] = is_labor_scheduler(user['id'])
-            session['is_readonly'] = bool(user.get('is_readonly', 0))
-            session['is_scheduler'] = bool(user.get('is_scheduler', 0))
-            session['is_asset_manager'] = bool(user.get('is_asset_manager', 0))
-            session['is_document_viewer'] = bool(user.get('is_document_viewer', 0))
-            session['viewer_venues']    = _decode_json_list(user.get('viewer_venues'))
-            session['viewer_doc_types'] = _decode_json_list(user.get('viewer_doc_types'))
-            session['_role_checked_at'] = datetime.utcnow().timestamp()
+            try:
+                session.sid = _secrets_mod.token_urlsafe(32)
+                session.new = True
+            except AttributeError:
+                pass  # Non-DB session backend in use (DISABLE_DB_SESSIONS=1)
+            _populate_session_from_user(user)
             log_audit(db, 'LOGIN', 'user', user['id'], detail=username)
             db.commit()
             db.close()
@@ -4476,6 +4492,11 @@ def viewer_export(show_id, doc_type):
         abort(404)
     if not viewer_can_see_venue(show['venue']):
         abort(403)
+    # Audit trail — viewer document access is a sensitive event worth logging.
+    syslog_logger.info(
+        f"VIEWER_DOC_ACCESS show_id={show_id} doc_type={doc_type} "
+        f"by={session.get('username')} ip={request.remote_addr}"
+    )
     # Reuse the existing PDF builders — they already enforce can_access_show
     # via the user's group ACL, which we've already passed above.
     if doc_type == 'advance':
@@ -5195,11 +5216,21 @@ def edit_user(uid):
 
     if role not in ('user', 'staff', 'admin'):
         return jsonify({'success': False, 'error': 'Invalid role'}), 400
+    # Guard against admin self-lockout: a doc-viewer cannot reach the settings
+    # page (the _viewer_gate redirects them to /viewer), so flipping it on
+    # yourself locks you out of the admin UI permanently.
+    if is_document_viewer and uid == session.get('user_id'):
+        return jsonify({'success': False,
+                        'error': "You can't make your own account a document viewer — "
+                                 "you'd be locked out of admin."}), 400
     db = get_db()
-    row = db.execute('SELECT username FROM users WHERE id=?', (uid,)).fetchone()
+    row = db.execute(
+        'SELECT username, is_document_viewer FROM users WHERE id=?', (uid,)
+    ).fetchone()
     if not row:
         db.close()
         return jsonify({'success': False, 'error': 'User not found'}), 404
+    was_document_viewer = bool(row.get('is_document_viewer', 0))
     db.execute(
         'UPDATE users SET display_name=?, email=?, role=?, is_readonly=?, '
         '                 is_scheduler=?, is_asset_manager=?, '
@@ -5209,6 +5240,14 @@ def edit_user(uid):
          is_scheduler, is_asset_manager,
          is_document_viewer, viewer_venues_json, viewer_doc_types_json, uid)
     )
+    # If the doc-viewer flag flipped (either direction), invalidate any active
+    # sessions for this user so the new permission set takes effect immediately
+    # instead of waiting for the next 5-minute role refresh.
+    if was_document_viewer != bool(is_document_viewer):
+        try:
+            db.execute('DELETE FROM app_sessions WHERE user_id=?', (uid,))
+        except Exception:
+            pass  # Table missing or DB-sessions disabled — fall through
     log_audit(db, 'USER_EDIT', 'user', uid,
               detail=(f'role={role} readonly={is_readonly} scheduler={is_scheduler} '
                       f'asset_mgr={is_asset_manager} doc_viewer={is_document_viewer} '
@@ -8291,10 +8330,14 @@ def api_labor_scheduler_create_show():
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'success': False, 'error': 'Show name is required.'}), 400
+    if len(name) > 200:
+        return jsonify({'success': False, 'error': 'Show name is too long.'}), 400
     show_date = (data.get('show_date') or '').strip() or None
     show_time = _normalize_perf_time(data.get('show_time', ''))
     venue     = (data.get('venue') or '').strip() or "Judson's Live"
     pm_name   = (data.get('production_manager') or '').strip()
+    if len(venue) > 120 or len(pm_name) > 120:
+        return jsonify({'success': False, 'error': 'Venue / PM name is too long.'}), 400
 
     db = get_db()
     cur = db.execute("""
