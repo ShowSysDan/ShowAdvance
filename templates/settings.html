@@ -1977,9 +1977,9 @@
 
 {# ── EDIT USER MODAL ──────────────────────────────────────────────────────────── #}
 <div id="edit-user-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeEditUser()">
-  <div class="modal-card" style="max-width:420px">
+  <div class="modal-card" style="max-width:480px;max-height:88vh;display:flex;flex-direction:column">
     <div class="modal-header">Edit User <button onclick="closeEditUser()" class="modal-close">×</button></div>
-    <div class="modal-body">
+    <div class="modal-body" style="overflow-y:auto;flex:1">
       <input type="hidden" id="edit-user-id">
       <div class="field-group">
         <label class="field-label">DISPLAY NAME</label>
@@ -2016,30 +2016,39 @@
           </label>
         </div>
         <div id="edit-user-viewer-extras" style="display:none;margin-top:10px;padding:10px;border:1px dashed var(--border);border-radius:4px;background:var(--bg-hover)">
-          <div style="font-size:11px;color:var(--text-dim);margin-bottom:8px">
-            Document viewers land on a documents-only page. Pick which venues and document types they can see.
-            Leave a list empty for "no filter on this dimension".
+          <div style="font-size:11px;color:var(--text-dim);margin-bottom:10px">
+            Document viewers land on a documents-only page. Leave a section empty for no filter on that dimension.
           </div>
-          <div class="form-row cols-2">
+          <div class="form-row cols-2" style="align-items:start">
             <div class="field-group">
               <label class="field-label">ALLOWED VENUES</label>
-              <select id="edit-user-viewer-venues" class="field-input" multiple size="5" style="height:auto;min-height:96px">
-                {% for v in distinct_venues %}<option value="{{ v }}">{{ v }}</option>{% endfor %}
-              </select>
-              <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:2px">
-                Ctrl/Cmd-click to multi-select. Empty = all venues.
-              </p>
+              <div id="edit-user-viewer-venues-list" style="display:flex;flex-direction:column;gap:5px;max-height:140px;overflow-y:auto;padding:2px 0">
+                {% for v in distinct_venues %}
+                <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer">
+                  <input type="checkbox" class="viewer-venue-cb" value="{{ v }}" style="flex-shrink:0;width:14px;height:14px;margin:0">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{{ v }}">{{ v }}</span>
+                </label>
+                {% endfor %}
+              </div>
+              <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px">None checked = all venues.</p>
             </div>
             <div class="field-group">
               <label class="field-label">ALLOWED DOCUMENT TYPES</label>
-              <select id="edit-user-viewer-doc-types" class="field-input" multiple size="5" style="height:auto;min-height:96px">
-                <option value="advance">Advance</option>
-                <option value="schedule">Production Schedule</option>
-                <option value="postnotes">Post-show Notes</option>
-              </select>
-              <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:2px">
-                Empty = all document types.
-              </p>
+              <div style="display:flex;flex-direction:column;gap:5px;padding:2px 0">
+                <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer">
+                  <input type="checkbox" class="viewer-doctype-cb" value="advance" style="width:14px;height:14px;margin:0">
+                  Advance
+                </label>
+                <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer">
+                  <input type="checkbox" class="viewer-doctype-cb" value="schedule" style="width:14px;height:14px;margin:0">
+                  Production Schedule
+                </label>
+                <label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer">
+                  <input type="checkbox" class="viewer-doctype-cb" value="postnotes" style="width:14px;height:14px;margin:0">
+                  Post-show Notes
+                </label>
+              </div>
+              <p class="field-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px">None checked = all types.</p>
             </div>
           </div>
         </div>
@@ -2223,16 +2232,14 @@ function openEditUser(id, name, email, role, isReadonly, isScheduler, isAssetMan
     const extras = document.getElementById('edit-user-viewer-extras');
     if (extras) extras.style.display = docViewer ? '' : 'none';
   }
-  const venuesSel = document.getElementById('edit-user-viewer-venues');
-  if (venuesSel) {
-    const want = new Set(Array.isArray(viewerVenues) ? viewerVenues : []);
-    Array.from(venuesSel.options).forEach(o => { o.selected = want.has(o.value); });
-  }
-  const docTypesSel = document.getElementById('edit-user-viewer-doc-types');
-  if (docTypesSel) {
-    const want = new Set(Array.isArray(viewerDocTypes) ? viewerDocTypes : []);
-    Array.from(docTypesSel.options).forEach(o => { o.selected = want.has(o.value); });
-  }
+  const wantVenues = new Set(Array.isArray(viewerVenues) ? viewerVenues : []);
+  document.querySelectorAll('.viewer-venue-cb').forEach(cb => {
+    cb.checked = wantVenues.has(cb.value);
+  });
+  const wantTypes = new Set(Array.isArray(viewerDocTypes) ? viewerDocTypes : []);
+  document.querySelectorAll('.viewer-doctype-cb').forEach(cb => {
+    cb.checked = wantTypes.has(cb.value);
+  });
   document.getElementById('edit-user-msg').style.display = 'none';
   document.getElementById('edit-user-modal').style.display = 'flex';
 }
@@ -2254,10 +2261,8 @@ async function saveEditUser() {
   const id = document.getElementById('edit-user-id').value;
   const selectedRole = document.getElementById('edit-user-role').value;
   const isDocViewer = document.getElementById('edit-user-doc-viewer').checked;
-  const venuesSel = document.getElementById('edit-user-viewer-venues');
-  const docTypesSel = document.getElementById('edit-user-viewer-doc-types');
-  const viewer_venues    = venuesSel   ? Array.from(venuesSel.selectedOptions).map(o => o.value)   : [];
-  const viewer_doc_types = docTypesSel ? Array.from(docTypesSel.selectedOptions).map(o => o.value) : [];
+  const viewer_venues    = Array.from(document.querySelectorAll('.viewer-venue-cb:checked')).map(cb => cb.value);
+  const viewer_doc_types = Array.from(document.querySelectorAll('.viewer-doctype-cb:checked')).map(cb => cb.value);
   const payload = {
     display_name: document.getElementById('edit-user-name').value.trim(),
     email: document.getElementById('edit-user-email').value.trim(),
