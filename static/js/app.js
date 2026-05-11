@@ -1244,24 +1244,38 @@ function _evaluateAllConditionalsImpl() {
 
 function _autoSelectVisibleMultiChecks() {
   document.querySelectorAll('.multi-check-list[data-auto-select-visible="1"]').forEach(list => {
-    // Don't fight the user: only run while the field has no existing selection.
-    if (list.dataset.userTouched === '1') return;
     const items = Array.from(list.querySelectorAll('.multi-check-item'));
     const visible = items.filter(it => it.style.display !== 'none');
-    if (visible.length === 0 || visible.length > 2) return;
+    const hidden  = items.filter(it => it.style.display === 'none');
 
+    // Always uncheck hidden options — user can't reach them to fix it themselves.
+    let hiddenCleared = false;
+    hidden.forEach(it => {
+      const cb = it.querySelector('input[type=checkbox]');
+      if (cb && cb.checked) { cb.checked = false; hiddenCleared = true; }
+    });
+
+    // If nothing visible is checked anymore, allow auto-check to run again.
+    const anyVisibleChecked = visible.some(it => {
+      const cb = it.querySelector('input[type=checkbox]');
+      return cb && cb.checked;
+    });
+    if (!anyVisibleChecked) delete list.dataset.userTouched;
+
+    if (hiddenCleared) list.dispatchEvent(new Event('change', {bubbles: true}));
+
+    // Don't fight the user if they've made a visible selection.
+    if (list.dataset.userTouched === '1') return;
+
+    if (visible.length === 0 || visible.length > 2) return;
     const boxes = visible.map(it => it.querySelector('input[type=checkbox]')).filter(Boolean);
-    if (boxes.some(cb => cb.checked)) return;  // Something already chosen
+    if (boxes.some(cb => cb.checked)) return;
 
     let changed = false;
     boxes.forEach(cb => {
       if (!cb.disabled && !cb.checked) { cb.checked = true; changed = true; }
     });
-    if (changed) {
-      // Use the bubbling change event so the list's own change listener
-      // (which writes the hidden JSON + summary text) picks it up.
-      list.dispatchEvent(new Event('change', {bubbles: true}));
-    }
+    if (changed) list.dispatchEvent(new Event('change', {bubbles: true}));
   });
 }
 
