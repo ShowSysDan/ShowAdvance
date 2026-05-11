@@ -155,12 +155,6 @@
             <input type="text" id="ash-name" class="field-input" placeholder="e.g. Friday Night Concert" autocomplete="off">
           </div>
         </div>
-        <div class="form-row">
-          <div class="field-group">
-            <label class="field-label">PRODUCTION MANAGER</label>
-            <input type="text" id="ash-pm" class="field-input" placeholder="Name of the PM handling this show" autocomplete="off">
-          </div>
-        </div>
         <div class="form-row cols-2">
           <div class="field-group">
             <label class="field-label">SHOW DATE</label>
@@ -781,7 +775,6 @@
     if (!m) return;
     // Reset
     document.getElementById('ash-name').value = '';
-    document.getElementById('ash-pm').value = '';
     document.getElementById('ash-date').value = document.getElementById('sched-from').value || '';
     document.getElementById('ash-time').value = '';
     const err = document.getElementById('ash-error');
@@ -819,8 +812,7 @@
     }
     const payload = {
       name,
-      production_manager: document.getElementById('ash-pm').value.trim(),
-      show_date:          document.getElementById('ash-date').value || '',
+      show_date: document.getElementById('ash-date').value || '',
       show_time:          document.getElementById('ash-time').value.trim(),
       venue:              document.getElementById('ash-venue').value || '',
     };
