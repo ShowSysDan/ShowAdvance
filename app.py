@@ -981,7 +981,6 @@ def show_advance_editor_required(f):
     return decorated
 
 
-@app.before_request
 def _populate_session_from_user(user, ts=None):
     """Copy role / permission flags from a users row into the Flask session.
     Used by both the login route (initial population) and the periodic role
@@ -1006,6 +1005,7 @@ def _populate_session_from_user(user, ts=None):
     session['_role_checked_at']   = ts if ts is not None else datetime.utcnow().timestamp()
 
 
+@app.before_request
 def _refresh_session_roles():
     """Re-check user role/permissions from DB every 5 minutes to catch demotions."""
     if 'user_id' not in session:
