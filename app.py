@@ -8335,9 +8335,8 @@ def api_labor_scheduler_create_show():
     show_date = (data.get('show_date') or '').strip() or None
     show_time = _normalize_perf_time(data.get('show_time', ''))
     venue     = (data.get('venue') or '').strip() or "Judson's Live"
-    pm_name   = (data.get('production_manager') or '').strip()
-    if len(venue) > 120 or len(pm_name) > 120:
-        return jsonify({'success': False, 'error': 'Venue / PM name is too long.'}), 400
+    if len(venue) > 120:
+        return jsonify({'success': False, 'error': 'Venue name is too long.'}), 400
 
     db = get_db()
     cur = db.execute("""
@@ -8346,15 +8345,8 @@ def api_labor_scheduler_create_show():
     """, (name, show_date, show_time, venue, session['user_id']))
     show_id = cur.lastrowid
 
-    advance_kv = [
-        ('show_name', name),
-        ('show_date', show_date or ''),
-        ('show_time', show_time),
-        ('venue',     venue),
-    ]
-    if pm_name:
-        advance_kv.append(('production_manager', pm_name))
-    for key, val in advance_kv:
+    for key, val in [('show_name', name), ('show_date', show_date or ''),
+                     ('show_time', show_time), ('venue', venue)]:
         if val:
             db.execute(
                 "INSERT OR REPLACE INTO advance_data (show_id, field_key, field_value) "
@@ -8371,7 +8363,7 @@ def api_labor_scheduler_create_show():
 
     log_audit(db, 'SHOW_CREATE', 'show', show_id, show_id=show_id,
               after={'name': name, 'show_date': show_date, 'venue': venue,
-                     'production_manager': pm_name, 'via': 'labor_scheduler'})
+                     'via': 'labor_scheduler'})
     db.commit()
     db.close()
     syslog_logger.info(

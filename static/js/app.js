@@ -736,6 +736,16 @@ async function saveAdvance() {
 }
 
 /* ── Schedule Form ──────────────────────────────────────────────── */
+function _normalizeSchedTime(val) {
+  const s = val.trim();
+  // Already has colon or is empty/description-like — leave it
+  if (!s || s.includes(':')) return s;
+  // 3 digits: 930 → 9:30, 4 digits: 1300 → 13:00
+  if (/^\d{3}$/.test(s))  return s[0] + ':' + s.slice(1);
+  if (/^\d{4}$/.test(s))  return s.slice(0, 2) + ':' + s.slice(2);
+  return s;
+}
+
 function bindScheduleForm() {
   const form = document.getElementById('schedule-form');
   if (!form) return;
@@ -744,6 +754,20 @@ function bindScheduleForm() {
     scheduleSave();
   });
   form.addEventListener('input',  () => scheduleSave());
+  // Auto-insert colon on blur for start/end time cells
+  form.addEventListener('blur', (e) => {
+    const el = e.target;
+    if (!el.classList.contains('sched-cell')) return;
+    const tr = el.closest('tr');
+    if (!tr) return;
+    const cells = Array.from(tr.querySelectorAll('.sched-cell'));
+    if (el !== cells[0] && el !== cells[1]) return; // only time columns
+    const formatted = _normalizeSchedTime(el.value);
+    if (formatted !== el.value) {
+      el.value = formatted;
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+  }, true); // capture so blur propagates
 }
 
 /* Re-sort a day's rows by start time after a start-time cell is edited,
