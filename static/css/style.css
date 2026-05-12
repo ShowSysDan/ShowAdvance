@@ -182,24 +182,31 @@ button.section-label:hover { color: var(--text); }
 
 .show-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px,1fr)); gap: 12px; }
 .show-card {
-  background: var(--bg-card); border: 1px solid var(--border);
-  border-radius: var(--radius-lg); overflow: hidden;
-  transition: border-color 0.15s, box-shadow 0.15s;
+  display: block; text-decoration: none;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-dim);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  transition: border-left-color 0.15s, background 0.15s, box-shadow 0.15s;
+  cursor: pointer;
 }
-.show-card:hover { border-color: var(--border-light); box-shadow: 0 4px 20px rgba(0,0,0,.3); }
-.show-card.archived { opacity: .65; }
-.show-card-top { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
-.show-date-badge {
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-  width: 46px; height: 46px; flex-shrink: 0;
-  background: var(--accent-glow); border: 1px solid var(--accent-dim);
-  border-radius: var(--radius); font-family: var(--font-cond);
+.show-card:hover {
+  border-left-color: var(--accent);
+  background: var(--bg-surface);
+  box-shadow: 0 2px 12px rgba(0,0,0,.25);
+  text-decoration: none;
 }
-.show-date-badge.dim { background: var(--bg-surface); border-color: var(--border); }
-.show-month { font-size: 9px; font-weight: 700; color: var(--accent-dim); letter-spacing: 0.05em; }
-.show-day   { font-size: 16px; font-weight: 700; color: var(--accent); line-height: 1; }
-.show-name  { font-size: 13px; font-weight: 600; color: var(--text); }
-.show-meta  { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+.show-card.archived { opacity: .6; position: relative; display: block; }
+.show-card-link-overlay { position: absolute; inset: 0; z-index: 0; }
+.show-card-actions { position: relative; z-index: 1; }
+.show-card-name {
+  font-size: 13px; font-weight: 600; color: var(--text);
+  line-height: 1.3; word-wrap: break-word; margin-bottom: 5px;
+}
+.show-card-dates { display: flex; flex-direction: column; gap: 2px; }
+.show-card-dates div { font-size: 11px; color: var(--text-muted); }
+.show-meta  { font-size: 11px; color: var(--text-muted); }
 .show-card-actions { display: flex; gap: 6px; padding: 9px 14px; background: var(--bg-surface); border-top: 1px solid var(--border); flex-wrap: wrap; }
 .empty-state { text-align: center; padding: 48px; color: var(--text-muted); }
 .empty-state p { margin-top: 16px; font-size: 14px; }
@@ -258,7 +265,7 @@ button.section-label:hover { color: var(--text); }
   display: flex; gap: 14px; align-items: flex-start;
   overflow-x: auto; padding-bottom: 8px;
 }
-.venue-col { flex: 0 0 270px; min-width: 0; }
+.venue-col { flex: 0 0 220px; min-width: 0; }
 .venue-col-header {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 10px; padding: 0 2px;
@@ -284,6 +291,7 @@ button.section-label:hover { color: var(--text); }
   color: var(--accent); border-radius: 3px; padding: 1px 5px;
   margin-left: 6px; vertical-align: middle;
 }
+
 
 /* ── Form Shared ────────────────────────────────────────────────── */
 .field-group { display: flex; flex-direction: column; gap: 6px; }
