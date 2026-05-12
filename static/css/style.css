@@ -612,12 +612,13 @@ html[data-theme="light"] select.field-input {
 .export-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
 .export-card {
   background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-lg);
-  padding: 16px 18px; display: flex; align-items: flex-start; gap: 14px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;
 }
+.export-card-header { display: flex; align-items: center; gap: 8px; }
 .export-card-icon { color: var(--accent); opacity: .7; flex-shrink: 0; }
-.export-card-info { flex: 1; }
-.export-card-info h3 { font-size: 15px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
-.export-card-info p  { font-size: 12px; color: var(--text-dim); }
+.export-card-title { font-size: 13px; font-weight: 600; color: var(--text); margin: 0; }
+.export-card-desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; flex: 1; }
+.export-card-foot { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: auto; }
 .version-badge { display: inline-block; margin-top: 6px; font-family: var(--font-mono); font-size: 11px; background: var(--bg-surface); color: var(--text-muted); padding: 2px 7px; border-radius: 3px; border: 1px solid var(--border); }
 .mt-lg { margin-top: 24px; }
 

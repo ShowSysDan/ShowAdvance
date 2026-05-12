@@ -1572,71 +1572,62 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   <div class="export-grid">
     <!-- Advance PDF -->
     <div class="export-card">
-      <div class="export-card-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      <div class="export-card-header">
+        <div class="export-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <h3 class="export-card-title">Advance Sheet PDF</h3>
       </div>
-      <div class="export-card-info">
-        <h3>Advance Sheet PDF</h3>
-        <p>Full advance form with all filled-in fields. Empty fields are omitted.</p>
-        {% if show.advance_version > 0 %}
-        <span class="version-badge">Current: v{{ show.advance_version }}</span>
-        {% endif %}
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <a href="{{ url_for('export_advance', show_id=show.id) }}" class="btn btn-primary" target="_blank">
-          Export → v{{ (show.advance_version or 0) + 1 }}
-        </a>
-        <button class="btn btn-ghost btn-sm" title="Generate PDF and email to report recipients"
-                onclick="emailPdf({{ show.id }}, 'advance', this)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16" style="margin-right:4px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email
-        </button>
+      <p class="export-card-desc">Full advance form with all filled-in fields. Empty fields are omitted.</p>
+      <div class="export-card-foot">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <a href="{{ url_for('export_advance', show_id=show.id) }}" class="btn btn-primary btn-sm" target="_blank">Export → v{{ (show.advance_version or 0) + 1 }}</a>
+          <button class="btn btn-ghost btn-sm" title="Email to report recipients" onclick="emailPdf({{ show.id }}, 'advance', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" style="margin-right:3px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email
+          </button>
+        </div>
+        {% if show.advance_version > 0 %}<span class="version-badge">Current: v{{ show.advance_version }}</span>{% endif %}
       </div>
     </div>
 
     <!-- Schedule PDF -->
     <div class="export-card">
-      <div class="export-card-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+      <div class="export-card-header">
+        <div class="export-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+        </div>
+        <h3 class="export-card-title">Production Schedule PDF</h3>
       </div>
-      <div class="export-card-info">
-        <h3>Production Schedule PDF</h3>
-        <p>Day-of schedule with timeline, contacts, and venue info.</p>
-        {% if show.schedule_version > 0 %}
-        <span class="version-badge">Current: v{{ show.schedule_version }}</span>
-        {% endif %}
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <a href="{{ url_for('export_schedule', show_id=show.id) }}" class="btn btn-primary" target="_blank">
-          Export → v{{ (show.schedule_version or 0) + 1 }}
-        </a>
-        <button class="btn btn-ghost btn-sm" title="Generate PDF and email to report recipients"
-                onclick="emailPdf({{ show.id }}, 'schedule', this)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16" style="margin-right:4px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email
-        </button>
+      <p class="export-card-desc">Day-of schedule with timeline, contacts, and venue info.</p>
+      <div class="export-card-foot">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <a href="{{ url_for('export_schedule', show_id=show.id) }}" class="btn btn-primary btn-sm" target="_blank">Export → v{{ (show.schedule_version or 0) + 1 }}</a>
+          <button class="btn btn-ghost btn-sm" title="Email to report recipients" onclick="emailPdf({{ show.id }}, 'schedule', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" style="margin-right:3px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email
+          </button>
+        </div>
+        {% if show.schedule_version > 0 %}<span class="version-badge">Current: v{{ show.schedule_version }}</span>{% endif %}
       </div>
     </div>
 
     <!-- Post-Show Report PDF -->
     {% set _postnotes_v = (show.postnotes_version | default(0, true)) | int %}
     <div class="export-card">
-      <div class="export-card-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="40" height="40"><path d="M9 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2h-4"/><polyline points="9 6 12 3 15 6"/><line x1="12" y1="3" x2="12" y2="14"/></svg>
+      <div class="export-card-header">
+        <div class="export-card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="24" height="24"><path d="M9 11H5a2 2 0 00-2 2v7a2 2 0 002 2h14a2 2 0 002-2v-7a2 2 0 00-2-2h-4"/><polyline points="9 6 12 3 15 6"/><line x1="12" y1="3" x2="12" y2="14"/></svg>
+        </div>
+        <h3 class="export-card-title">Post-Show Report PDF</h3>
       </div>
-      <div class="export-card-info">
-        <h3>Post-Show Report PDF</h3>
-        <p>Closeout report with post-show notes, attached for archival or distribution.</p>
-        {% if _postnotes_v > 0 %}
-        <span class="version-badge">Current: v{{ _postnotes_v }}</span>
-        {% endif %}
-      </div>
-      <div style="display:flex;gap:8px;align-items:center">
-        <a href="{{ url_for('export_postnotes', show_id=show.id) }}" class="btn btn-primary" target="_blank">
-          Export → v{{ _postnotes_v + 1 }}
-        </a>
-        <button class="btn btn-ghost btn-sm" type="button" title="Generate PDF and email to post-show report recipients"
-                onclick="emailPdf({{ show.id }}, 'postnotes', this)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16" style="margin-right:4px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email
-        </button>
+      <p class="export-card-desc">Closeout report with post-show notes, attached for archival or distribution.</p>
+      <div class="export-card-foot">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <a href="{{ url_for('export_postnotes', show_id=show.id) }}" class="btn btn-primary btn-sm" target="_blank">Export → v{{ _postnotes_v + 1 }}</a>
+          <button class="btn btn-ghost btn-sm" type="button" title="Email to post-show report recipients" onclick="emailPdf({{ show.id }}, 'postnotes', this)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="14" height="14" style="margin-right:3px;vertical-align:middle"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>Email
+          </button>
+        </div>
+        {% if _postnotes_v > 0 %}<span class="version-badge">Current: v{{ _postnotes_v }}</span>{% endif %}
       </div>
     </div>
   </div>
