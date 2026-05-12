@@ -66,42 +66,21 @@
     </div>
     <div class="venue-col-body">
       {% for s in shows %}
-      <div class="show-card" data-search="{{ (s.name ~ ' ' ~ (s.venue or ''))|lower }}" data-date="{{ s.show_date or '' }}">
-        <div class="show-card-top">
-          <div class="show-date-badge">
-            {% if s.show_date %}
-              {% set _mo = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] %}
-              <span class="show-month">{{ _mo[(s.show_date|string)[5:7]|int - 1] }}</span>
-              <span class="show-day">{{ (s.show_date|string)[8:10] }}</span>
-            {% else %}
-              <span class="show-month">NO</span>
-              <span class="show-day">DATE</span>
-            {% endif %}
-          </div>
-          <div class="show-info">
-            <div class="show-name">{{ s.name }}{% if s.perf_count > 1 %}<span class="multi-date-badge">{{ s.perf_count }} DATES</span>{% endif %}</div>
-            {% if s.performances and s.performances|length > 1 %}
-              {% for p in s.performances %}
-                <div class="show-meta">{% if p.perf_date %}{{ p.perf_date }}{% endif %}{% if p.perf_time %} · {{ p.perf_time | hhmm }}{% endif %}</div>
-              {% endfor %}
-            {% else %}
-              <div class="show-meta">{% if s.show_time %}{{ s.show_time | hhmm }}{% else %}—{% endif %}</div>
-            {% endif %}
-          </div>
-        </div>
-        <div class="show-card-actions">
-          <a href="{{ url_for('show_page', show_id=s.id, tab='advance') }}" class="btn btn-sm btn-ghost">Advance</a>
-          <a href="{{ url_for('show_page', show_id=s.id, tab='schedule') }}" class="btn btn-sm btn-ghost">Schedule</a>
-          <a href="{{ url_for('show_page', show_id=s.id, tab='export') }}" class="btn btn-sm btn-accent">Export</a>
-          {% if not restricted %}
-          <form method="post" action="{{ url_for('archive_show', show_id=s.id) }}" style="display:inline" onsubmit="return confirm('Archive this show?')">
-            <button type="submit" class="btn btn-sm btn-danger-ghost" title="Archive">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-            </button>
-          </form>
+      <a class="show-card" href="{{ url_for('show_page', show_id=s.id, tab='advance') }}"
+         data-search="{{ (s.name ~ ' ' ~ (s.venue or ''))|lower }}" data-date="{{ s.show_date or '' }}">
+        <div class="show-card-name">{{ s.name }}</div>
+        <div class="show-card-dates">
+          {% if s.performances and s.performances|length > 1 %}
+            {% for p in s.performances %}
+              <div>{% if p.perf_date %}{{ p.perf_date }}{% endif %}{% if p.perf_time %} · {{ p.perf_time | hhmm }}{% endif %}</div>
+            {% endfor %}
+          {% elif s.show_date %}
+            <div>{{ s.show_date }}{% if s.show_time %} · {{ s.show_time | hhmm }}{% endif %}</div>
+          {% else %}
+            <div>No date set</div>
           {% endif %}
         </div>
-      </div>
+      </a>
       {% endfor %}
     </div>
     <p class="venue-col-empty" style="display:none">No matching shows</p>
@@ -129,22 +108,13 @@
   <div id="archived-list" class="show-grid archived hidden" style="margin-top:12px">
     {% for s in archived_shows %}
     <div class="show-card archived" data-search="{{ (s.name ~ ' ' ~ (s.venue or ''))|lower }}" data-date="{{ s.show_date or '' }}">
-      <div class="show-card-top">
-        <div class="show-date-badge dim">
-          {% if s.show_date %}
-            {% set _mo = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] %}
-            <span class="show-month">{{ _mo[(s.show_date|string)[5:7]|int - 1] }}</span>
-            <span class="show-day">{{ (s.show_date|string)[8:10] }}</span>
-          {% else %}
-            <span class="show-month">—</span><span class="show-day">—</span>
-          {% endif %}
-        </div>
-        <div class="show-info">
-          <div class="show-name">{{ s.name }}</div>
-          <div class="show-meta">{{ s.venue or '—' }}</div>
-        </div>
+      <a class="show-card-link-overlay" href="{{ url_for('show_page', show_id=s.id, tab='advance') }}"></a>
+      <div class="show-card-name">{{ s.name }}</div>
+      <div class="show-card-dates">
+        {% if s.show_date %}<div>{{ s.show_date }}</div>{% else %}<div>No date</div>{% endif %}
+        <div class="show-meta" style="margin-top:2px">{{ s.venue or '—' }}</div>
       </div>
-      <div class="show-card-actions">
+      <div class="show-card-actions" style="padding:8px 12px">
         <a href="{{ url_for('show_page', show_id=s.id, tab='advance') }}" class="btn btn-sm btn-ghost">View</a>
         <form method="post" action="{{ url_for('restore_show', show_id=s.id) }}" style="display:inline">
           <button class="btn btn-sm btn-ghost">Restore</button>
