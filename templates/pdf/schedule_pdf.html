@@ -69,6 +69,10 @@
 </head>
 <body>
 
+<!-- Running footer elements must be declared early for WeasyPrint to pick them up -->
+<div class="footer-left">{{ show.name }}  ·  {{ show.show_date or '—' }}  ·  Dr. Phillips Center for the Performing Arts</div>
+<div class="footer-right">PRODUCTION SCHEDULE v{{ version }}  ·  Exported {{ export_date }}</div>
+
 {% set d = schedule_meta %}
 {% set a = advance_data %}
 {% macro m(key, default='') %}{{ d.get(key, default)|string|trim }}{% endmacro %}
@@ -84,10 +88,11 @@
 
 {% for day in schedule_days %}
 {% set _is_last_day = loop.last %}
+{% set _is_first_day = loop.first %}
 <div class="day-section">
 
   {% for skey in layout.iter_sections(_section_keys) if layout.visible(skey) %}
-    {% if layout.page_break_before(skey) %}<div style="page-break-before: always"></div>{% endif %}
+    {% if layout.page_break_before(skey) and not (_is_first_day and loop.first) %}<div style="page-break-before: always"></div>{% endif %}
 
     {% if skey == 'header' %}
     <div class="doc-header">
@@ -210,7 +215,6 @@
     </table>
 
     {% elif skey == 'contacts_grid' %}
-    {% if _is_last_day %}
     <div class="contacts-grid" style="font-size: {{ layout.font_size('contacts_grid', '8pt') }}">
       <div class="contacts-box">
         <div class="contacts-box-head">{{ layout.label('contacts_grid', 'Artist / Tour Contacts') }}</div>
@@ -240,9 +244,11 @@
           ] %}
           {% set val = adv(key) %}
           {% if val and val not in ['-',''] %}
+          {% set _c = contact_name_map.get(val, {}) %}
+          {% set _phone = _c.get('phone', '') %}
           <tr>
             <td class="lbl">{{ role }}</td>
-            <td>{{ val }}</td>
+            <td>{{ val }}{% if _phone %}<br><span style="font-size:7pt;color:#666">{{ _phone }}</span>{% endif %}</td>
           </tr>
           {% endif %}
           {% endfor %}
@@ -254,16 +260,11 @@
       </div>
     </div>
     {% endif %}
-    {% endif %}
 
   {% endfor %}
 
 </div>{# end .day-section #}
 {% endfor %}
-
-<!-- Running footer elements (positioned by @page margin boxes) -->
-<div class="footer-left">{{ show.name }}  ·  {{ show.show_date or '—' }}  ·  Dr. Phillips Center for the Performing Arts</div>
-<div class="footer-right">PRODUCTION SCHEDULE v{{ version }}  ·  Exported {{ export_date }}</div>
 
 </body>
 </html>

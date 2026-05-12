@@ -3978,6 +3978,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
     ).fetchall()]
     contacts = db.execute('SELECT * FROM contacts ORDER BY name').fetchall()
     contact_map = {c['id']: dict(c) for c in contacts}
+    contact_name_map = {c['name']: dict(c) for c in contacts}
 
     logo_data = get_app_setting('logo_data', '')
 
@@ -4087,6 +4088,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
                            sched_meta_fields=get_schedule_meta_fields(),
                            advance_data=advance_data,
                            contact_map=contact_map,
+                           contact_name_map=contact_name_map,
                            logo_data=logo_data,
                            wifi_ssid=wifi_ssid,
                            wifi_pass=wifi_pass,
@@ -6533,7 +6535,8 @@ def venues_settings():
 def arts_groups_list():
     db = get_db()
     rows = db.execute(
-        'SELECT id, name, sort_order FROM arts_groups ORDER BY sort_order, name'
+        'SELECT id, name, sort_order, primary_contact_name, primary_contact_email, '
+        'primary_contact_phone, notes FROM arts_groups ORDER BY sort_order, name'
     ).fetchall()
     db.close()
     return jsonify({'arts_groups': [dict(r) for r in rows]})
@@ -6546,22 +6549,49 @@ def arts_groups_add():
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'success': False, 'error': 'Name required.'}), 400
+    pc_name  = (data.get('primary_contact_name')  or '').strip()
+    pc_email = (data.get('primary_contact_email') or '').strip()
+    pc_phone = (data.get('primary_contact_phone') or '').strip()
+    notes    = (data.get('notes') or '').strip()
     db = get_db()
     max_order = db.execute('SELECT MAX(sort_order) FROM arts_groups').fetchone()[0] or 0
     try:
         cur = db.execute(
-            'INSERT INTO arts_groups (name, sort_order) VALUES (?, ?)',
-            (name, max_order + 10)
+            'INSERT INTO arts_groups (name, sort_order, primary_contact_name, '
+            'primary_contact_email, primary_contact_phone, notes) VALUES (?,?,?,?,?,?)',
+            (name, max_order + 10, pc_name, pc_email, pc_phone, notes)
         )
         gid = cur.lastrowid
         log_audit(db, 'ARTS_GROUP_ADD', 'arts_group', gid, detail=name)
         db.commit()
         syslog_logger.info(f"ARTS_GROUP_ADD id={gid} name={name!r} by={session.get('username')}")
-        return jsonify({'success': True, 'id': gid, 'name': name})
+        return jsonify({'success': True, 'id': gid, 'name': name,
+                        'primary_contact_name': pc_name, 'primary_contact_email': pc_email,
+                        'primary_contact_phone': pc_phone, 'notes': notes})
     except sqlite3.IntegrityError:
         return jsonify({'success': False, 'error': f'"{name}" already exists.'}), 400
     finally:
         db.close()
+
+
+@app.route('/settings/arts-groups/<int:gid>', methods=['GET'])
+@login_required
+def arts_groups_get(gid):
+    db = get_db()
+    row = db.execute(
+        'SELECT id, name, sort_order, primary_contact_name, primary_contact_email, '
+        'primary_contact_phone, notes FROM arts_groups WHERE id=?', (gid,)
+    ).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'success': False, 'error': 'Not found.'}), 404
+    contacts = db.execute(
+        'SELECT id, name, email, phone, sort_order FROM arts_group_contacts '
+        'WHERE arts_group_id=? ORDER BY sort_order, id', (gid,)
+    ).fetchall()
+    db.close()
+    return jsonify({'success': True, 'group': dict(row),
+                    'contacts': [dict(c) for c in contacts]})
 
 
 @app.route('/settings/arts-groups/<int:gid>/edit', methods=['POST'])
@@ -6571,10 +6601,18 @@ def arts_groups_edit(gid):
     name = (data.get('name') or '').strip()
     if not name:
         return jsonify({'success': False, 'error': 'Name required.'}), 400
+    pc_name  = (data.get('primary_contact_name')  or '').strip()
+    pc_email = (data.get('primary_contact_email') or '').strip()
+    pc_phone = (data.get('primary_contact_phone') or '').strip()
+    notes    = (data.get('notes') or '').strip()
     db = get_db()
     before = _snapshot_row(db, 'arts_groups', gid)
     try:
-        db.execute('UPDATE arts_groups SET name=? WHERE id=?', (name, gid))
+        db.execute(
+            'UPDATE arts_groups SET name=?, primary_contact_name=?, '
+            'primary_contact_email=?, primary_contact_phone=?, notes=? WHERE id=?',
+            (name, pc_name, pc_email, pc_phone, notes, gid)
+        )
         after = _snapshot_row(db, 'arts_groups', gid)
         log_audit(db, 'ARTS_GROUP_EDIT', 'arts_group', gid, detail=name,
                   before=before, after=after)
@@ -6585,6 +6623,55 @@ def arts_groups_edit(gid):
         return jsonify({'success': False, 'error': f'"{name}" already exists.'}), 400
     finally:
         db.close()
+
+
+@app.route('/settings/arts-groups/<int:gid>/contacts/add', methods=['POST'])
+@content_admin_required
+def arts_group_contact_add(gid):
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    if not db.execute('SELECT id FROM arts_groups WHERE id=?', (gid,)).fetchone():
+        db.close()
+        return jsonify({'success': False, 'error': 'Group not found.'}), 404
+    max_order = db.execute(
+        'SELECT MAX(sort_order) FROM arts_group_contacts WHERE arts_group_id=?', (gid,)
+    ).fetchone()[0] or 0
+    cur = db.execute(
+        'INSERT INTO arts_group_contacts (arts_group_id, name, email, phone, sort_order) '
+        'VALUES (?,?,?,?,?)',
+        (gid, (data.get('name') or '').strip(),
+         (data.get('email') or '').strip(),
+         (data.get('phone') or '').strip(),
+         max_order + 10)
+    )
+    cid = cur.lastrowid
+    db.commit(); db.close()
+    return jsonify({'success': True, 'id': cid})
+
+
+@app.route('/settings/arts-groups/<int:gid>/contacts/<int:cid>/edit', methods=['POST'])
+@content_admin_required
+def arts_group_contact_edit(gid, cid):
+    data = request.get_json(force=True) or {}
+    db = get_db()
+    db.execute(
+        'UPDATE arts_group_contacts SET name=?, email=?, phone=? WHERE id=? AND arts_group_id=?',
+        ((data.get('name') or '').strip(),
+         (data.get('email') or '').strip(),
+         (data.get('phone') or '').strip(),
+         cid, gid)
+    )
+    db.commit(); db.close()
+    return jsonify({'success': True})
+
+
+@app.route('/settings/arts-groups/<int:gid>/contacts/<int:cid>/delete', methods=['POST'])
+@content_admin_required
+def arts_group_contact_delete(gid, cid):
+    db = get_db()
+    db.execute('DELETE FROM arts_group_contacts WHERE id=? AND arts_group_id=?', (cid, gid))
+    db.commit(); db.close()
+    return jsonify({'success': True})
 
 
 @app.route('/settings/arts-groups/<int:gid>/delete', methods=['POST'])

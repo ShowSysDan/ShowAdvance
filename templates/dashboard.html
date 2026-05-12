@@ -55,6 +55,8 @@
 </div>
 
 {# ── Venue Columns ────────────────────────────────────────────────────────── #}
+<div class="venue-columns-wrap">
+<div class="venue-columns-top-scroll" id="venue-top-scroll"><div class="venue-columns-top-scroll-inner" id="venue-top-scroll-inner"></div></div>
 <div class="venue-columns" id="venue-columns">
   {% for venue, shows in venue_groups %}
   <div class="venue-col" data-venue="{{ venue }}">
@@ -106,6 +108,7 @@
   </div>
   {% endfor %}
 </div>
+</div>{# end .venue-columns-wrap #}
 
 <p id="dash-no-results" class="text-dim" style="display:none;font-size:13px;padding:24px 0">No shows match your search.</p>
 
@@ -237,5 +240,30 @@ function dismissMotd(id) {
   fetch('/api/messages/' + id + '/dismiss', {method:'POST'})
     .then(() => { const el = document.getElementById('motd-'+id); if(el) el.remove(); });
 }
+
+(function() {
+  const cols = document.getElementById('venue-columns');
+  const topScroll = document.getElementById('venue-top-scroll');
+  const inner = document.getElementById('venue-top-scroll-inner');
+  if (!cols || !topScroll || !inner) return;
+
+  function syncInnerWidth() { inner.style.width = cols.scrollWidth + 'px'; }
+  syncInnerWidth();
+  new ResizeObserver(syncInnerWidth).observe(cols);
+
+  let syncingFromTop = false, syncingFromCols = false;
+  topScroll.addEventListener('scroll', () => {
+    if (syncingFromCols) return;
+    syncingFromTop = true;
+    cols.scrollLeft = topScroll.scrollLeft;
+    syncingFromTop = false;
+  });
+  cols.addEventListener('scroll', () => {
+    if (syncingFromTop) return;
+    syncingFromCols = true;
+    topScroll.scrollLeft = cols.scrollLeft;
+    syncingFromCols = false;
+  });
+})();
 </script>
 {% endblock %}
