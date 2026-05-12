@@ -239,9 +239,11 @@
           ] %}
           {% set val = adv(key) %}
           {% if val and val not in ['-',''] %}
+          {% set _c = contact_name_map.get(val, {}) %}
+          {% set _phone = _c.get('phone', '') %}
           <tr>
             <td class="lbl">{{ role }}</td>
-            <td>{{ val }}</td>
+            <td>{{ val }}{% if _phone %}<br><span style="font-size:7pt;color:#666">{{ _phone }}</span>{% endif %}</td>
           </tr>
           {% endif %}
           {% endfor %}

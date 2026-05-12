@@ -3978,6 +3978,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
     ).fetchall()]
     contacts = db.execute('SELECT * FROM contacts ORDER BY name').fetchall()
     contact_map = {c['id']: dict(c) for c in contacts}
+    contact_name_map = {c['name']: dict(c) for c in contacts}
 
     logo_data = get_app_setting('logo_data', '')
 
@@ -4087,6 +4088,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
                            sched_meta_fields=get_schedule_meta_fields(),
                            advance_data=advance_data,
                            contact_map=contact_map,
+                           contact_name_map=contact_name_map,
                            logo_data=logo_data,
                            wifi_ssid=wifi_ssid,
                            wifi_pass=wifi_pass,
