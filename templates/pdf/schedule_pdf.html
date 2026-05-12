@@ -210,7 +210,6 @@
     </table>
 
     {% elif skey == 'contacts_grid' %}
-    {% if _is_last_day %}
     <div class="contacts-grid" style="font-size: {{ layout.font_size('contacts_grid', '8pt') }}">
       <div class="contacts-box">
         <div class="contacts-box-head">{{ layout.label('contacts_grid', 'Artist / Tour Contacts') }}</div>
@@ -253,7 +252,6 @@
         </table>
       </div>
     </div>
-    {% endif %}
     {% endif %}
 
   {% endfor %}
