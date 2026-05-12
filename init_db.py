@@ -159,11 +159,26 @@ CREATE TABLE IF NOT EXISTS form_sections (
 );
 
 CREATE TABLE IF NOT EXISTS arts_groups (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT UNIQUE NOT NULL,
-    sort_order INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    name                  TEXT UNIQUE NOT NULL,
+    sort_order            INTEGER DEFAULT 0,
+    primary_contact_name  TEXT DEFAULT '',
+    primary_contact_email TEXT DEFAULT '',
+    primary_contact_phone TEXT DEFAULT '',
+    notes                 TEXT DEFAULT '',
+    created_at            TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS arts_group_contacts (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    arts_group_id  INTEGER NOT NULL REFERENCES arts_groups(id) ON DELETE CASCADE,
+    name           TEXT DEFAULT '',
+    email          TEXT DEFAULT '',
+    phone          TEXT DEFAULT '',
+    sort_order     INTEGER DEFAULT 0,
+    created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_agc_group ON arts_group_contacts(arts_group_id);
 
 CREATE TABLE IF NOT EXISTS form_fields (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1708,6 +1723,21 @@ def migrate_db():
         "ALTER TABLE job_positions ADD COLUMN override_rate REAL DEFAULT NULL",
         # Venue field on job positions (replaces is_venue category approach)
         "ALTER TABLE job_positions ADD COLUMN venue TEXT DEFAULT NULL",
+        # Arts group contact & notes fields
+        "ALTER TABLE arts_groups ADD COLUMN primary_contact_name TEXT DEFAULT ''",
+        "ALTER TABLE arts_groups ADD COLUMN primary_contact_email TEXT DEFAULT ''",
+        "ALTER TABLE arts_groups ADD COLUMN primary_contact_phone TEXT DEFAULT ''",
+        "ALTER TABLE arts_groups ADD COLUMN notes TEXT DEFAULT ''",
+        """CREATE TABLE IF NOT EXISTS arts_group_contacts (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            arts_group_id  INTEGER NOT NULL REFERENCES arts_groups(id) ON DELETE CASCADE,
+            name           TEXT DEFAULT '',
+            email          TEXT DEFAULT '',
+            phone          TEXT DEFAULT '',
+            sort_order     INTEGER DEFAULT 0,
+            created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_agc_group ON arts_group_contacts(arts_group_id)",
     ]:
         try:
             conn.execute(alter_sql)
