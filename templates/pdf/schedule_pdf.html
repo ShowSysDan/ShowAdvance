@@ -84,10 +84,11 @@
 
 {% for day in schedule_days %}
 {% set _is_last_day = loop.last %}
+{% set _is_first_day = loop.first %}
 <div class="day-section">
 
   {% for skey in layout.iter_sections(_section_keys) if layout.visible(skey) %}
-    {% if layout.page_break_before(skey) %}<div style="page-break-before: always"></div>{% endif %}
+    {% if layout.page_break_before(skey) and not (_is_first_day and loop.first) %}<div style="page-break-before: always"></div>{% endif %}
 
     {% if skey == 'header' %}
     <div class="doc-header">
