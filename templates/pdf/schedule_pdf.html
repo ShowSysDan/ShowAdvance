@@ -69,6 +69,10 @@
 </head>
 <body>
 
+<!-- Running footer elements must be declared early for WeasyPrint to pick them up -->
+<div class="footer-left">{{ show.name }}  ·  {{ show.show_date or '—' }}  ·  Dr. Phillips Center for the Performing Arts</div>
+<div class="footer-right">PRODUCTION SCHEDULE v{{ version }}  ·  Exported {{ export_date }}</div>
+
 {% set d = schedule_meta %}
 {% set a = advance_data %}
 {% macro m(key, default='') %}{{ d.get(key, default)|string|trim }}{% endmacro %}
@@ -261,10 +265,6 @@
 
 </div>{# end .day-section #}
 {% endfor %}
-
-<!-- Running footer elements (positioned by @page margin boxes) -->
-<div class="footer-left">{{ show.name }}  ·  {{ show.show_date or '—' }}  ·  Dr. Phillips Center for the Performing Arts</div>
-<div class="footer-right">PRODUCTION SCHEDULE v{{ version }}  ·  Exported {{ export_date }}</div>
 
 </body>
 </html>
