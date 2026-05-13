@@ -6973,10 +6973,12 @@ def venue_logos_list():
     """Return every distinct active-show venue plus its configured logo (if any)."""
     db = get_db()
     # Distinct venues currently in use across shows (active + archived).
+    # Sorting happens in Python below — keeping it out of SQL avoids the
+    # Postgres "SELECT DISTINCT … ORDER BY expression not in select list"
+    # error that LOWER(venue) triggers there.
     venues = [r['venue'] for r in db.execute(
         "SELECT DISTINCT venue FROM shows "
-        "WHERE venue IS NOT NULL AND TRIM(venue) != '' "
-        "ORDER BY LOWER(venue)"
+        "WHERE venue IS NOT NULL AND TRIM(venue) != ''"
     ).fetchall()]
     logos = {r['venue_name']: r['logo_data'] for r in db.execute(
         'SELECT venue_name, logo_data FROM venue_logos'
