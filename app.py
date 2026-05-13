@@ -1576,9 +1576,16 @@ def _send_email_smtp(subject, recipients, body_text=None, body_html=None,
 
 def _send_email_direct(subject, recipients, body_text=None, body_html=None,
                        attachments=None, from_address=None, error_context=None):
-    """Send email directly via MX lookup (no relay). Returns (success, message)."""
+    """Send email directly via MX lookup (no relay). Returns (success, message).
+
+    Recipients are grouped by domain. The per-domain SMTP transactions
+    (MX lookup → connect → STARTTLS → DATA) run in parallel via a thread
+    pool so a single slow MX can't hold up delivery to the rest. Workers
+    are capped at 8 to keep DNS/network load reasonable for typical
+    distribution lists."""
     import smtplib
     import dns.resolver
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     smtp_cfg = _get_smtp_settings()
     from_addr = from_address or smtp_cfg.get('smtp_from') or 'noreply@localhost'
@@ -1603,22 +1610,21 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
         if '@' in addr:
             by_domain[addr.split('@')[1].lower()].append(addr)
 
-    errors = []
-    sent_count = 0
+    if not by_domain:
+        return False, 'No valid recipient addresses.'
 
-    for domain, addrs in by_domain.items():
-        # Resolve MX records
+    def _deliver_to_domain(domain, addrs):
+        """Run a full MX → SMTP delivery for one domain. Returns
+        {'sent': int, 'errors': [str]}. Never raises — all failures are
+        captured and logged via _log_email_error."""
         try:
             mx_records = dns.resolver.resolve(domain, 'MX')
             mx_hosts = sorted(mx_records, key=lambda r: r.preference)
         except Exception as e:
             err_msg = f'MX lookup failed for {domain}: {e}'
-            errors.append(err_msg)
             _log_email_error(addrs, subject, err_msg, **(error_context or {}))
-            continue
+            return {'sent': 0, 'errors': [err_msg]}
 
-        # Try each MX host in priority order
-        delivered = False
         last_error = None
         for mx in mx_hosts:
             mx_host = str(mx.exchange).rstrip('.')
@@ -1634,26 +1640,42 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
                 refused = server.sendmail(from_addr, addrs, msg_str)
                 try: server.quit()
                 except Exception: pass
-                # Partial refusal — server accepted the connection but rejected
-                # specific addresses; log each so the admin can act on bad
-                # addresses (e.g. typo'd recipient).
                 if refused:
                     for addr, (code, why) in refused.items():
                         _log_email_error(addr, subject, f'{code} {why!r}',
                                          smtp_code=str(code), **(error_context or {}))
-                sent_count += len(addrs) - len(refused or {})
-                delivered = True
-                break
+                return {'sent': len(addrs) - len(refused or {}), 'errors': []}
             except Exception as e:
                 last_error = f'{mx_host}: {e}'
-                app.logger.warning(f'Direct send to MX {mx_host} for {domain} failed: {e}')
+                app.logger.warning(
+                    f'Direct send to MX {mx_host} for {domain} failed: {e}'
+                )
                 continue
 
-        if not delivered:
-            detail = f' ({last_error})' if last_error else ''
-            err_msg = f'All MX hosts failed for {domain}{detail}'
-            errors.append(err_msg)
-            _log_email_error(addrs, subject, err_msg, **(error_context or {}))
+        # No MX accepted the message
+        detail = f' ({last_error})' if last_error else ''
+        err_msg = f'All MX hosts failed for {domain}{detail}'
+        _log_email_error(addrs, subject, err_msg, **(error_context or {}))
+        return {'sent': 0, 'errors': [err_msg]}
+
+    sent_count = 0
+    errors = []
+    # Up to 8 concurrent per-domain workers. Each opens its own SMTP
+    # connection — no shared state across threads.
+    max_workers = min(8, max(1, len(by_domain)))
+    with ThreadPoolExecutor(max_workers=max_workers,
+                            thread_name_prefix='email-mx') as pool:
+        futures = [pool.submit(_deliver_to_domain, d, addrs)
+                   for d, addrs in by_domain.items()]
+        for fut in as_completed(futures):
+            try:
+                r = fut.result()
+            except Exception as e:
+                # _deliver_to_domain swallows everything; this is just defence.
+                app.logger.error(f'Email delivery worker crashed: {e}')
+                continue
+            sent_count += r.get('sent', 0)
+            errors.extend(r.get('errors', []))
 
     if errors and sent_count == 0:
         return False, '; '.join(errors)
