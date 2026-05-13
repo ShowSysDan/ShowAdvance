@@ -69,6 +69,16 @@
     <option value="cost-desc">Highest cost</option>
     <option value="cost-asc">Lowest cost</option>
   </select>
+  <button id="bulk-edit-btn" class="btn btn-ghost btn-sm" onclick="enterBulkEdit()" title="Mass-toggle Hide-from-PM across categories, groups, and types">✎ Bulk: Hide-from-PM</button>
+</div>
+
+{# ── Bulk Edit Toolbar (only visible in bulk-edit mode) ── #}
+<div id="bulk-edit-toolbar" style="display:none;margin-bottom:12px;padding:8px 12px;background:rgba(245,127,32,.10);border:1px solid rgba(245,127,32,.4);border-radius:4px;align-items:center;gap:10px;flex-wrap:wrap">
+  <strong style="font-size:12px;color:var(--accent)">BULK EDIT · HIDE FROM PM</strong>
+  <span style="font-size:11px;color:var(--text-dim)">Check a category or group to apply to every type beneath it. <span style="font-style:italic">Indeterminate (—)</span> means at least one child differs.</span>
+  <span id="bulk-edit-counter" style="margin-left:auto;font-size:11px;color:var(--text-dim)">0 pending</span>
+  <button class="btn btn-sm btn-ghost" onclick="cancelBulkEdit()">Cancel</button>
+  <button id="bulk-edit-save-btn" class="btn btn-sm btn-primary" onclick="saveBulkEdit()" disabled>Save</button>
 </div>
 
 {# ── Finder Browser ── #}
@@ -459,6 +469,171 @@ async function loadTypes() {
   _allTypes = await r.json();
 }
 
+// ── Bulk Edit: Hide-from-PM ───────────────────────────────────────────────────
+// Edit mode that exposes tri-state checkboxes throughout the finder browser
+// (categories → groups → types). Checking a category cascades down to every
+// type under it. A "-" / indeterminate state on a parent means at least one
+// descendant disagrees with the rest. Pending changes are kept locally until
+// the user clicks Save.
+let _bulkEditMode = false;
+let _pendingHide  = new Map();   // type id → bool (next hide_from_pm value)
+
+function _isBulkEligibleType(t) {
+  // Systems and packages don't carry meaningful hide_from_pm semantics.
+  return !t.is_system && !t.is_package;
+}
+
+function _effHide(t) {
+  if (_pendingHide.has(t.id)) return _pendingHide.get(t.id) ? 1 : 0;
+  return t.hide_from_pm ? 1 : 0;
+}
+
+function _stateForPool(pool) {
+  if (!pool.length) return 'unchecked';
+  const allHide = pool.every(t => _effHide(t) === 1);
+  if (allHide) return 'checked';
+  const allShow = pool.every(t => _effHide(t) === 0);
+  if (allShow) return 'unchecked';
+  return 'mixed';
+}
+
+function _categoryHideState(catId) {
+  return _stateForPool(_allTypes.filter(t =>
+    t.category_id === catId && _isBulkEligibleType(t)
+  ));
+}
+
+function _groupHideState(parentId) {
+  // Children of this parent, OR the parent itself if it has no children.
+  const children = _allTypes.filter(t => t.parent_type_id === parentId && _isBulkEligibleType(t));
+  if (children.length === 0) {
+    const parent = _allTypes.find(t => t.id === parentId);
+    return _stateForPool(parent && _isBulkEligibleType(parent) ? [parent] : []);
+  }
+  return _stateForPool(children);
+}
+
+function _typeHideState(t) {
+  return _effHide(t) ? 'checked' : 'unchecked';
+}
+
+function _bulkCheckboxHtml(scope, id, state) {
+  if (!_bulkEditMode) return '';
+  const indet = state === 'mixed';
+  const checked = state === 'checked' ? 'checked' : '';
+  return `<input type="checkbox" class="bulk-cb" data-scope="${scope}" data-id="${id}" ${checked} ${indet ? 'data-indet="1"' : ''}
+                 onclick="event.stopPropagation();onBulkCheckbox(this)"
+                 title="${state === 'mixed' ? 'Mixed — at least one descendant differs. Click to set all hidden.' : (state === 'checked' ? 'All hidden from PM. Click to show all.' : 'All shown to PM. Click to hide all.')}"
+                 style="flex-shrink:0;margin-right:4px;cursor:pointer;accent-color:var(--accent);width:14px;height:14px">`;
+}
+
+function _applyIndeterminate() {
+  document.querySelectorAll('.bulk-cb[data-indet="1"]').forEach(cb => {
+    cb.indeterminate = true;
+  });
+}
+
+window.onBulkCheckbox = function(cb) {
+  // Browser already toggled .checked; if the box was indeterminate before,
+  // treat the click as "go to checked" (hide everything underneath).
+  const wasIndet = cb.dataset.indet === '1';
+  const next = wasIndet ? true : cb.checked;
+  const scope = cb.dataset.scope;
+  const id = parseInt(cb.dataset.id, 10);
+  let affected = [];
+  if (scope === 'type') {
+    const t = _allTypes.find(x => x.id === id);
+    if (t) affected = [t];
+  } else if (scope === 'group') {
+    const children = _allTypes.filter(t => t.parent_type_id === id && _isBulkEligibleType(t));
+    if (children.length === 0) {
+      const parent = _allTypes.find(t => t.id === id);
+      if (parent && _isBulkEligibleType(parent)) affected = [parent];
+    } else {
+      affected = children;
+    }
+  } else if (scope === 'cat') {
+    affected = _allTypes.filter(t => t.category_id === id && _isBulkEligibleType(t));
+  }
+  affected.forEach(t => {
+    const cur = !!t.hide_from_pm;
+    if (cur === next) _pendingHide.delete(t.id);
+    else              _pendingHide.set(t.id, next);
+  });
+  // Cascading state means every column may need to redraw.
+  renderFinderCats();
+  renderFinderGroups();
+  renderFinderTypes();
+  _updateBulkEditCounter();
+};
+
+function _updateBulkEditCounter() {
+  const el = document.getElementById('bulk-edit-counter');
+  const saveBtn = document.getElementById('bulk-edit-save-btn');
+  const n = _pendingHide.size;
+  if (el) el.textContent = `${n} pending`;
+  if (saveBtn) saveBtn.disabled = n === 0;
+}
+
+window.enterBulkEdit = function() {
+  _bulkEditMode = true;
+  _pendingHide.clear();
+  document.getElementById('bulk-edit-toolbar').style.display = 'flex';
+  document.getElementById('bulk-edit-btn').style.display = 'none';
+  renderFinderCats();
+  renderFinderGroups();
+  renderFinderTypes();
+  _updateBulkEditCounter();
+};
+
+window.cancelBulkEdit = function() {
+  if (_pendingHide.size && !confirm(`Discard ${_pendingHide.size} pending change${_pendingHide.size === 1 ? '' : 's'}?`)) return;
+  _bulkEditMode = false;
+  _pendingHide.clear();
+  document.getElementById('bulk-edit-toolbar').style.display = 'none';
+  document.getElementById('bulk-edit-btn').style.display = '';
+  renderFinderCats();
+  renderFinderGroups();
+  renderFinderTypes();
+};
+
+window.saveBulkEdit = async function() {
+  if (_pendingHide.size === 0) return;
+  const updates = [];
+  _pendingHide.forEach((hide, id) => updates.push({ id, hide_from_pm: !!hide }));
+  const btn = document.getElementById('bulk-edit-save-btn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    const r = await fetch('/settings/asset-types/bulk-hide-from-pm', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+      body: JSON.stringify({ updates })
+    });
+    const d = await r.json();
+    if (!r.ok || !d.success) {
+      alert(d.error || 'Bulk save failed');
+      if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+      return;
+    }
+    // Reflect in local cache so the UI doesn't have to re-fetch.
+    _pendingHide.forEach((hide, id) => {
+      const t = _allTypes.find(x => x.id === id);
+      if (t) t.hide_from_pm = hide ? 1 : 0;
+    });
+    _pendingHide.clear();
+    _bulkEditMode = false;
+    document.getElementById('bulk-edit-toolbar').style.display = 'none';
+    document.getElementById('bulk-edit-btn').style.display = '';
+    renderFinderCats();
+    renderFinderGroups();
+    renderFinderTypes();
+    showSaveToast(`✓ Updated ${d.updated} asset type${d.updated === 1 ? '' : 's'}`);
+  } catch (e) {
+    alert('Network error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Save'; }
+  }
+};
+
 // ── Tab Management ────────────────────────────────────────────────────────────
 let _activeTab = 'assets';
 let _selectedSystemId = null;
@@ -599,7 +774,9 @@ function renderFinderCats() {
   c.innerHTML = _categories.map(cat => {
     const cnt = _allTypes.filter(t => t.category_id === cat.id).length;
     const active = cat.id === _selectedCatId ? ' active' : '';
+    const bulkCb = _bulkCheckboxHtml('cat', cat.id, _categoryHideState(cat.id));
     return `<div class="finder-cat-row${active}" onclick="selectCat(${cat.id})">
+      ${bulkCb}
       <svg viewBox="0 0 16 16" fill="currentColor" width="13" height="13" style="flex-shrink:0;opacity:.5"><path d="M1.5 3A1.5 1.5 0 013 1.5h3.879a1.5 1.5 0 011.06.44l.622.621A1.5 1.5 0 009.621 3H13A1.5 1.5 0 0114.5 4.5v8A1.5 1.5 0 0113 14H3a1.5 1.5 0 01-1.5-1.5V3z"/></svg>
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(cat.name)}</span>
       <span style="font-size:10px;opacity:.5;flex-shrink:0">${cnt}</span>
@@ -610,6 +787,7 @@ function renderFinderCats() {
       <span style="color:var(--text-dim);font-size:14px;flex-shrink:0">›</span>
     </div>`;
   }).join('');
+  _applyIndeterminate();
 }
 
 window.selectCat = function(catId) {
@@ -659,13 +837,16 @@ function renderFinderGroups() {
     const isRetired = !!p.is_retired;
     // Show direct children count or own item count
     const countLabel = childCount > 0 ? childCount : (p.item_count || 0);
+    const bulkCb = _bulkCheckboxHtml('group', p.id, _groupHideState(p.id));
     return `<div class="finder-cat-row${active}" onclick="selectGroup(${p.id})" style="${isRetired?'opacity:.45':''}">
+      ${bulkCb}
       <svg viewBox="0 0 16 16" fill="currentColor" width="13" height="13" style="flex-shrink:0;opacity:.5"><path d="M1.5 3A1.5 1.5 0 013 1.5h3.879a1.5 1.5 0 011.06.44l.622.621A1.5 1.5 0 009.621 3H13A1.5 1.5 0 0114.5 4.5v8A1.5 1.5 0 0113 14H3a1.5 1.5 0 01-1.5-1.5V3z"/></svg>
       <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(p.name)}</span>
       <span style="font-size:10px;opacity:.5;flex-shrink:0">${countLabel}</span>
       <span style="color:var(--text-dim);font-size:14px;flex-shrink:0">›</span>
     </div>`;
   }).join('');
+  _applyIndeterminate();
 }
 
 window.selectGroup = function(parentId) {
@@ -757,7 +938,11 @@ function renderFinderTypes() {
       : '';
     const kitBadge = isSystem ? `<span style="font-size:9px;background:rgba(245,127,32,.2);color:var(--accent);border-radius:3px;padding:1px 4px;margin-left:3px;font-weight:700">SYSTEM</span>` : '';
     const nameStyle = isRetired ? 'opacity:.4;text-decoration:line-through' : '';
+    const bulkCb = (!isSystem && !t.is_package)
+      ? _bulkCheckboxHtml('type', t.id, _typeHideState(t))
+      : '';
     return `<div class="finder-type-row${active}" onclick="selectType(${t.id})">
+      ${bulkCb}
       ${thumb}
       <div style="flex:1;min-width:0">
         <div style="font-size:12.5px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${nameStyle}">
@@ -770,6 +955,7 @@ function renderFinderTypes() {
       <span style="color:var(--text-dim);font-size:14px;flex-shrink:0">›</span>
     </div>`;
   }).join('');
+  _applyIndeterminate();
 }
 
 // ── Type Detail Pane ──────────────────────────────────────────────────────────

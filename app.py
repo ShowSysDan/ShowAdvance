@@ -10612,6 +10612,45 @@ def asset_type_edit(type_id):
     return jsonify({'success': True})
 
 
+@app.route('/settings/asset-types/bulk-hide-from-pm', methods=['POST'])
+@asset_manager_required
+def bulk_hide_from_pm():
+    """Bulk-update the hide_from_pm flag across many asset_types in one call.
+
+    Body: {"updates": [{"id": 17, "hide_from_pm": true}, ...]}
+    Each entry's hide_from_pm is coerced to 0/1. Unknown ids are silently
+    skipped. Returns the count of rows actually written so the UI can
+    confirm.
+    """
+    data = request.get_json(force=True) or {}
+    updates = data.get('updates') or []
+    if not isinstance(updates, list):
+        return jsonify({'error': 'updates must be a list'}), 400
+    db = get_db()
+    written = 0
+    for u in updates:
+        try:
+            tid = int(u.get('id'))
+        except (TypeError, ValueError):
+            continue
+        flag = 1 if u.get('hide_from_pm') else 0
+        cur = db.execute(
+            'UPDATE asset_types SET hide_from_pm=? WHERE id=?',
+            (flag, tid)
+        )
+        if cur.rowcount:
+            written += 1
+    if written:
+        log_audit(db, 'ASSET_TYPE_BULK_EDIT', 'asset_type', None,
+                  detail=f'hide_from_pm updates={written}')
+    db.commit()
+    db.close()
+    syslog_logger.info(
+        f"ASSET_TYPE_BULK_EDIT hide_from_pm count={written} by={session.get('username')}"
+    )
+    return jsonify({'success': True, 'updated': written})
+
+
 @app.route('/settings/asset-types/<int:type_id>', methods=['DELETE'])
 @asset_manager_required
 def asset_type_delete(type_id):
