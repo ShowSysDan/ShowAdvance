@@ -14,7 +14,26 @@
     </label>
     <a href="/assets/retired" class="btn btn-ghost btn-sm">Retired Archive</a>
     <button class="btn btn-ghost btn-sm" onclick="openWarehouseModal()">Warehouse Locations</button>
+    <button id="overbooked-btn" class="btn btn-ghost btn-sm" onclick="openOverbookedModal()" style="display:none">⚠ Overbooked</button>
     <button class="btn btn-primary" onclick="openCategoryModal()">+ New Category</button>
+  </div>
+</div>
+
+{# ── Overbooked Assets Modal ── #}
+<div id="overbooked-modal" class="modal-overlay" style="display:none" onclick="if(event.target===this)closeOverbookedModal()">
+  <div class="modal" style="max-width:760px;width:90%">
+    <div class="modal-hdr">
+      <h2 style="margin:0;font-size:16px">⚠ Overbooked Assets</h2>
+      <button class="btn btn-ghost btn-sm" onclick="closeOverbookedModal()">✕</button>
+    </div>
+    <div class="modal-body" style="max-height:60vh;overflow:auto">
+      <p style="color:var(--text-dim);font-size:12px;margin:0 0 12px">
+        Asset types whose peak concurrent demand across all shows exceeds their usable units.
+      </p>
+      <div id="overbooked-list">
+        <p style="color:var(--text-dim);font-size:12px">Loading…</p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -405,6 +424,9 @@
 .avail-cal-day.booked:hover { background:rgba(245,127,32,.35); }
 .avail-cal-day.full { background:rgba(197,48,48,.2); color:#FC8181; font-weight:600; cursor:pointer; }
 .avail-cal-day.full:hover { background:rgba(197,48,48,.3); }
+.avail-cal-day.overbooked { background:rgba(197,48,48,.45); color:#fff; font-weight:700; cursor:pointer; outline:1px solid #FC8181; }
+.avail-cal-day.overbooked:hover { background:rgba(197,48,48,.6); }
+.avail-cal-day.overbooked::after { content:"!"; font-size:9px; margin-left:2px; }
 .avail-cal-day.empty-cell { opacity:0; }
 .comp-back-bar { padding:8px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; flex-shrink:0; background:var(--bg); }
 </style>
@@ -428,6 +450,7 @@ let _viewingComponentOf = null; // system type ID when navigated into a componen
   renderFinderCats();
   const typeId = parseInt(new URLSearchParams(window.location.search).get('type_id'));
   if (typeId) await selectType(typeId);
+  refreshOverbookedBadge();
 })();
 
 async function loadTypes() {
@@ -1063,6 +1086,68 @@ window.openAvailabilityCalendar = async function(typeId) {
   renderAvailCalendar();
 };
 window.closeAvailModal = function() { document.getElementById('avail-modal').style.display = 'none'; };
+
+// ── Overbooked Modal ──────────────────────────────────────────────────────────
+async function refreshOverbookedBadge() {
+  try {
+    const r = await fetch('/api/asset-types/overbooked', {headers:{'X-Requested-With':'XMLHttpRequest'}});
+    if (!r.ok) return;
+    const d = await r.json();
+    const btn = document.getElementById('overbooked-btn');
+    if (!btn) return;
+    const n = (d.overbooked || []).length;
+    if (n > 0) {
+      btn.style.display = '';
+      btn.textContent = `⚠ ${n} Overbooked`;
+      btn.style.color = '#FC8181';
+      btn.style.borderColor = 'rgba(197,48,48,.4)';
+    } else {
+      btn.style.display = 'none';
+    }
+  } catch(_) {}
+}
+
+window.openOverbookedModal = async function() {
+  const modal = document.getElementById('overbooked-modal');
+  const listEl = document.getElementById('overbooked-list');
+  modal.style.display = 'flex';
+  listEl.innerHTML = '<p style="color:var(--text-dim);font-size:12px">Loading…</p>';
+  try {
+    const r = await fetch('/api/asset-types/overbooked', {headers:{'X-Requested-With':'XMLHttpRequest'}});
+    const d = await r.json();
+    const list = d.overbooked || [];
+    if (!list.length) {
+      listEl.innerHTML = '<p style="color:var(--text-dim);font-size:13px;text-align:center;padding:24px">No overbooked asset types. ✓</p>';
+      return;
+    }
+    listEl.innerHTML = list.map(t => {
+      const showsHtml = (t.shows || []).map(s =>
+        `<li style="margin:2px 0">
+          <a href="/shows/${s.show_id}?tab=assets" style="color:var(--accent);text-decoration:none">${esc(s.show_name||'Show #'+s.show_id)}</a>
+          <span style="color:var(--text-dim);font-size:11px"> — qty ${s.quantity}, ${s.rental_start} → ${s.rental_end}</span>
+        </li>`
+      ).join('');
+      return `<div style="border:1px solid rgba(197,48,48,.4);background:rgba(197,48,48,.06);border-radius:6px;padding:12px;margin-bottom:10px">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;flex-wrap:wrap">
+          <div>
+            <a href="javascript:void(0)" onclick="closeOverbookedModal();selectType(${t.type_id})" style="font-size:14px;font-weight:600;color:var(--fg);text-decoration:none">${esc(t.type_name)}</a>
+            <span style="font-size:11px;color:var(--text-dim);margin-left:6px">${esc(t.category_name||'')}</span>
+          </div>
+          <div style="font-size:11px;color:#FC8181;font-weight:700">
+            Peak ${t.peak_qty} / ${t.usable} usable · <strong>${t.peak_over} over</strong> on ${t.peak_date}
+          </div>
+        </div>
+        <ul style="margin:8px 0 0;padding-left:18px;font-size:12px">${showsHtml}</ul>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    listEl.innerHTML = '<p style="color:#FC8181;font-size:12px">Failed to load overbooked list.</p>';
+  }
+};
+
+window.closeOverbookedModal = function() {
+  document.getElementById('overbooked-modal').style.display = 'none';
+};
 window.availNavMonth = function(delta) {
   _availMonth += delta;
   if (_availMonth < 0)  { _availMonth = 11; _availYear--; }
@@ -1107,8 +1192,16 @@ function renderAvailCalendar() {
     const qty = bk.reduce((s,b) => s+(b.quantity||1), 0);
     const isToday = ds === today ? ' today' : '';
     let cls = '';
-    if (!unlimited && qty > 0) cls = (qty >= usable && usable > 0) ? ' full' : ' booked';
-    const tip = qty > 0 ? `${qty} booked${usable>0?' / '+usable+' usable':''}` : 'Available';
+    if (!unlimited && qty > 0) {
+      if (qty > usable && usable >= 0)        cls = ' overbooked';
+      else if (qty >= usable && usable > 0)   cls = ' full';
+      else                                    cls = ' booked';
+    }
+    const tip = qty > 0
+      ? (cls === ' overbooked'
+          ? `⚠ OVERBOOKED — ${qty} booked / ${usable} usable (${qty - usable} over)`
+          : `${qty} booked${usable>0?' / '+usable+' usable':''}`)
+      : 'Available';
     html += `<div class="avail-cal-day${cls}${isToday}" onclick="showAvailDayDetail('${ds}')" title="${tip}">${d}</div>`;
   }
   grid.innerHTML = html;
