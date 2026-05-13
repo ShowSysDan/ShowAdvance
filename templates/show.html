@@ -1519,6 +1519,19 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         </div>
       </div>
 
+      <div class="form-row cols-2">
+        <div class="field-group">
+          <label class="field-label">CAST COUNT</label>
+          <input type="number" min="0" step="1" class="field-input notes-field" data-key="cast_count"
+                 value="{{ note('cast_count') }}" placeholder="0" {% if restricted %}disabled{% endif %}>
+        </div>
+        <div class="field-group">
+          <label class="field-label">CREW COUNT</label>
+          <input type="number" min="0" step="1" class="field-input notes-field" data-key="crew_count"
+                 value="{{ note('crew_count') }}" placeholder="0" {% if restricted %}disabled{% endif %}>
+        </div>
+      </div>
+
       {% for label, key, placeholder in [
         ('SHOW NOTES (Tour/Client)', 'show_notes_tour', 'Notes from artist / tour manager perspective...'),
         ('HOUSE NOTES', 'house_notes', 'Notes about the venue, audience, house-related issues...'),
