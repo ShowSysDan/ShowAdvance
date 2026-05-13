@@ -79,7 +79,7 @@
         <td class="text-dim">{{ a.category_name }}</td>
         <td>
           <strong>{{ a.type_name }}</strong>
-          {% if a.manufacturer %}<br><span class="text-dim">{{ a.manufacturer }}{% if a.model %} {{ a.model }}{% endif %}</span>{% endif %}
+          {% if a.model %}<br><span class="text-dim">{{ a.model }}</span>{% endif %}
           {% if a.notes %}<br><span class="text-dim">{{ a.notes }}</span>{% endif %}
         </td>
         <td class="num">{{ a.quantity }}</td>
