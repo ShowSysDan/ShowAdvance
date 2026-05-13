@@ -199,7 +199,21 @@ function _showOtherSavedBanner(savedAt) {
   const banner = document.createElement('div');
   banner.id = 'other-saved-banner';
   banner.className = 'other-saved-banner';
-  const time = savedAt ? new Date(savedAt + 'Z').toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+  // Parse savedAt robustly. SQLite returns plain "YYYY-MM-DD HH:MM:SS" with
+  // no timezone, so we treat that as UTC by appending 'Z'. Postgres / Flask
+  // jsonify can return RFC-2822 ("Fri, 03 Jan 2026 18:42:15 GMT") or already
+  // ISO-with-zone strings — those parse natively and must NOT have a 'Z'
+  // tacked on. Anything that still fails to parse drops back to no time
+  // rather than showing "Invalid Date" in the banner.
+  let time = '';
+  if (savedAt) {
+    const raw = String(savedAt).trim();
+    const looksTimezoned = /T|GMT|UTC|[+-]\d{2}:?\d{2}$|Z$/i.test(raw);
+    const d = new Date(looksTimezoned ? raw : raw + 'Z');
+    if (!isNaN(d.getTime())) {
+      time = d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+    }
+  }
   banner.innerHTML = `
     <span>⚠ Another user saved this form${time ? ' at ' + time : ''}. Reload to see their changes.</span>
     <div style="display:flex;gap:8px">
