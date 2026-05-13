@@ -10478,15 +10478,32 @@ def asset_category_delete(cat_id):
 @app.route('/api/asset-types', methods=['GET'])
 @login_required
 def asset_types_api():
-    """Return active (non-retired) asset types for search/browse."""
+    """Return active (non-retired) asset types for search/browse.
+
+    Asset types flagged with hide_from_pm=1 are filtered OUT by default so
+    they don't appear in the show page's "Add Asset" picker that PMs use
+    while advancing shows. Asset managers / content admins / admins can pass
+    `?include_hidden=1` to bypass the filter — that's how the approval
+    portal's own picker fetches the full catalog so the tech team can still
+    add the restricted items themselves.
+    """
+    include_hidden = request.args.get('include_hidden') == '1'
+    is_manager = (
+        session.get('user_role') == 'admin'
+        or session.get('is_content_admin')
+        or session.get('is_asset_manager')
+    )
     db = get_db()
-    rows = db.execute("""
+    where = ['at.is_retired = 0']
+    if not (include_hidden and is_manager):
+        where.append('COALESCE(at.hide_from_pm, 0) = 0')
+    rows = db.execute(f"""
         SELECT at.*, ac.name as category_name,
                pt.name as parent_name
         FROM asset_types at
         JOIN asset_categories ac ON ac.id = at.category_id
         LEFT JOIN asset_types pt ON pt.id = at.parent_type_id
-        WHERE at.is_retired = 0
+        WHERE {' AND '.join(where)}
         ORDER BY ac.sort_order, ac.name, at.sort_order, at.name
     """).fetchall()
     db.close()
@@ -10616,6 +10633,12 @@ def asset_type_edit(type_id):
 @asset_manager_required
 def bulk_hide_from_pm():
     """Bulk-update the hide_from_pm flag across many asset_types in one call.
+
+    The column name is kept for backwards compatibility, but the semantics
+    are now "hide from the advance picker" — flagged types are filtered out
+    of /api/asset-types unless the caller passes include_hidden=1 (which
+    only succeeds for admin / asset-manager roles). Once an asset is on a
+    show its line stays fully visible to everyone.
 
     Body: {"updates": [{"id": 17, "hide_from_pm": true}, ...]}
     Each entry's hide_from_pm is coerced to 0/1. Unknown ids are silently
@@ -11576,8 +11599,13 @@ def show_asset_add(show_id):
     else:
         locked_price = 0.0
 
-    # Default is_hidden from the asset type's hide_from_pm flag
-    is_hidden = 1 if (type_row and type_row['hide_from_pm']) else 0
+    # is_hidden is a per-line visibility toggle the user controls from the
+    # show's Assets tab. We no longer auto-hide based on hide_from_pm —
+    # that flag now ONLY filters the advance-picker; once an asset is on a
+    # show everyone should see the line and its cost. Honour an explicit
+    # is_hidden value in the request body for admin / asset-manager flows
+    # that may want to add a line pre-hidden, otherwise default to visible.
+    is_hidden = 1 if data.get('is_hidden') else 0
 
     # Server-side availability enforcement. Counts all existing show_assets for
     # this type in the requested date range (the requesting show may have none
