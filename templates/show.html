@@ -430,7 +430,9 @@
 <script>
 const SCHED_PERFORMANCES = {{ performances | tojson }};
 const SCHED_TEMPLATES = {{ sched_templates | default([]) | tojson }};
-const SHOW_VENUE = {{ show.venue | tojson }};
+// Mutable so the labor-tab dropdowns can react to live venue edits on the
+// Advance Sheet. Read everywhere via window.SHOW_VENUE.
+window.SHOW_VENUE = {{ show.venue | tojson }};
 </script>
 
 <div id="tab-schedule" class="tab-pane {% if tab == 'schedule' %}active{% endif %}">
@@ -2228,22 +2230,36 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   let _laborPositions = [];
   let _crewMembers = null;
 
-  async function _loadLaborPositions() {
-    if (_laborPositions.length) return _laborPositions;
+  async function _loadLaborPositions(force) {
+    if (!force && _laborPositions.length) return _laborPositions;
     try {
       const r = await fetch('/api/job-positions');
       _laborPositions = await r.json();
-    } catch(e) { _laborPositions = []; }
+    } catch(e) { /* keep last cached on transient failure */ }
     return _laborPositions;
   }
 
-  async function _loadCrewMembers() {
-    if (_crewMembers !== null) return;
+  async function _loadCrewMembers(force) {
+    if (!force && _crewMembers !== null) return;
     try {
       const r = await fetch('/api/crew-members');
       _crewMembers = await r.json();
-    } catch(e) { _crewMembers = []; }
+    } catch(e) { /* keep last cached on transient failure */ }
   }
+
+  /**
+   * Rebuild every existing labor-row position select against the latest
+   * window.SHOW_VENUE and the latest position catalog. Optionally re-fetches
+   * the catalog from the server first (use when the scheduler may have
+   * edited it from another tab — e.g. when we tab back into Labor).
+   */
+  window._refreshLaborPositionsForVenue = async function(refetch) {
+    if (refetch) await _loadLaborPositions(true);
+    document.querySelectorAll('#tab-staffing select[data-field="position_id"]').forEach(sel => {
+      const current = sel.value;
+      _buildPositionSelect(sel, current ? parseInt(current, 10) : null);
+    });
+  };
 
   function _buildTechnicianSelect(selectEl, positionId, selectedName) {
     selectEl.innerHTML = '';
@@ -2297,7 +2313,7 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   function _buildPositionSelect(selectEl, selectedId) {
     selectEl.innerHTML = '<option value="">— Select Position —</option>';
     // Filter to positions assigned to this show's venue, or positions with no venue (universal)
-    const venue = SHOW_VENUE || '';
+    const venue = window.SHOW_VENUE || '';
     const filtered = _laborPositions.filter(p => !p.venue || p.venue === venue);
     const cats = {};
     for (const p of filtered) {

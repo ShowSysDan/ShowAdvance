@@ -241,6 +241,12 @@ function switchTab(name) {
       if (name === 'comments') loadComments();
       if (name === 'export')   { loadAttachments(); loadReadReceipts(); }
       if (name === 'assets' && typeof loadAssetsTab === 'function') loadAssetsTab();
+      // Refresh position catalog when tabbing into Labor so concurrent
+      // scheduler edits (new positions, renames, retirements) show up
+      // without a full page reload.
+      if (name === 'staffing' && typeof window._refreshLaborPositionsForVenue === 'function') {
+        window._refreshLaborPositionsForVenue(true);
+      }
     }
   }
 }
@@ -534,6 +540,20 @@ function bindAdvanceForm() {
   if (!form) return;
   form.addEventListener('change', () => { evaluateAllConditionals(); _syncScheduleMirrors(); scheduleSave(); });
   form.addEventListener('input', () => { _syncScheduleMirrors(); scheduleSave(); });
+
+  // Venue change: rebuild any already-rendered labor position dropdowns so
+  // the user doesn't have to leave + re-enter the Labor tab to pick up the
+  // new venue's positions. Refetches the catalog in case scheduler edits
+  // also happened concurrently.
+  const venueEl = form.querySelector('[data-key="venue"]');
+  if (venueEl) {
+    venueEl.addEventListener('change', () => {
+      window.SHOW_VENUE = (venueEl.value || '').trim();
+      if (typeof window._refreshLaborPositionsForVenue === 'function') {
+        window._refreshLaborPositionsForVenue(true);
+      }
+    });
+  }
 
   // Normalize load-in/out time fields to 24-hour HH:MM on blur
   ['load_in_time', 'load_out_time'].forEach(key => {
