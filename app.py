@@ -10732,6 +10732,122 @@ def _get_asset_availability(db, asset_type_id, start_date=None, end_date=None):
     }
 
 
+def _find_overbooked_types(db):
+    """
+    Scan every trackable asset type and report any that are overbooked on at
+    least one day. For each type we sweep all show_asset bookings as
+    (date, +qty)/(date, -qty) events to find the day with peak concurrent
+    demand, then flag if peak > usable units.
+
+    Returns a list of dicts: {type_id, type_name, category_name, usable,
+    peak_qty, peak_over, peak_dates: [start, end], shows: [...]}.
+    """
+    type_rows = db.execute("""
+        SELECT at.id, at.name, at.reserve_count, at.is_system, at.is_package,
+               at.is_consumable, at.track_quantity,
+               ac.name AS category_name
+        FROM asset_types at
+        LEFT JOIN asset_categories ac ON ac.id = at.category_id
+    """).fetchall()
+
+    overbooked = []
+    for t in type_rows:
+        if t['is_system'] or t['is_package']:
+            continue
+        if t['is_consumable'] and not t['track_quantity']:
+            continue
+
+        total = db.execute(
+            "SELECT COUNT(*) FROM asset_items WHERE asset_type_id=? AND status != 'retired'",
+            (t['id'],)
+        ).fetchone()[0]
+        in_maint = db.execute(
+            "SELECT COUNT(*) FROM asset_items WHERE asset_type_id=? AND status='maintenance'",
+            (t['id'],)
+        ).fetchone()[0]
+        reserve = t['reserve_count'] or 0
+        usable = max(0, total - in_maint - reserve)
+
+        bookings = db.execute("""
+            SELECT sa.id, sa.show_id, sa.quantity, sa.rental_start, sa.rental_end,
+                   s.name AS show_name
+            FROM show_assets sa
+            JOIN shows s ON s.id = sa.show_id
+            WHERE sa.asset_type_id = ?
+              AND sa.rental_start IS NOT NULL AND sa.rental_end IS NOT NULL
+              AND sa.rental_start != '' AND sa.rental_end != ''
+        """, (t['id'],)).fetchall()
+        if not bookings:
+            continue
+
+        # Sweep-line: at each event, track concurrent quantity.
+        events = []
+        for b in bookings:
+            events.append((b['rental_start'], +b['quantity'], b['id']))
+            # rental_end is inclusive; the booking ends AFTER that day.
+            events.append((b['rental_end'],   'end_marker',   b['id']))
+        events.sort(key=lambda e: (e[0], 0 if e[1] != 'end_marker' else 1))
+
+        peak = 0
+        peak_date = None
+        concurrent_ids = set()
+        current = 0
+        # Walk events; when we hit a +qty, add; when we hit end_marker, remove
+        # AFTER measuring (because rental_end is inclusive).
+        i = 0
+        while i < len(events):
+            d = events[i][0]
+            # First apply all additions on this date
+            j = i
+            while j < len(events) and events[j][0] == d and events[j][1] != 'end_marker':
+                current += events[j][1]
+                concurrent_ids.add(events[j][2])
+                j += 1
+            if current > peak:
+                peak = current
+                peak_date = d
+                peak_ids = set(concurrent_ids)
+            # Then apply removals scheduled to end on this date
+            while j < len(events) and events[j][0] == d and events[j][1] == 'end_marker':
+                # Find the matching booking to subtract its qty
+                ev_id = events[j][2]
+                for b in bookings:
+                    if b['id'] == ev_id:
+                        current -= b['quantity']
+                        concurrent_ids.discard(ev_id)
+                        break
+                j += 1
+            i = j
+
+        if peak > usable:
+            offending = [dict(b) for b in bookings if b['id'] in peak_ids]
+            overbooked.append({
+                'type_id': t['id'],
+                'type_name': t['name'],
+                'category_name': t['category_name'] or '',
+                'usable': usable,
+                'total_items': total,
+                'in_maintenance': in_maint,
+                'reserve_count': reserve,
+                'peak_qty': peak,
+                'peak_over': peak - usable,
+                'peak_date': peak_date,
+                'shows': offending,
+            })
+
+    overbooked.sort(key=lambda r: (-r['peak_over'], r['type_name']))
+    return overbooked
+
+
+@app.route('/api/asset-types/overbooked')
+@login_required
+def asset_types_overbooked():
+    db = get_db()
+    result = _find_overbooked_types(db)
+    db.close()
+    return jsonify({'overbooked': result})
+
+
 @app.route('/api/asset-types/<int:type_id>/availability')
 @login_required
 def asset_type_availability(type_id):
@@ -10944,9 +11060,30 @@ def show_assets_list(show_id):
         'approver_name': (appr['approver_name'] or appr['approver_username']) if appr else None,
     }
 
+    # Attach per-line availability info so the UI can flag overbooked rows.
+    # Cached by (type_id, start, end) since multiple rows can share a window.
+    avail_cache = {}
+    assets_out = []
+    for r in rows:
+        d = dict(r)
+        key = (r['asset_type_id'], r['rental_start'], r['rental_end'])
+        if key not in avail_cache:
+            avail_cache[key] = _get_asset_availability(
+                db, r['asset_type_id'], r['rental_start'], r['rental_end']
+            ) or {}
+        av = avail_cache[key]
+        d['_avail_available'] = av.get('available')
+        d['_avail_unlimited'] = bool(av.get('unlimited'))
+        d['_avail_overbooked'] = (
+            not av.get('unlimited')
+            and av.get('available') is not None
+            and av.get('available') < 0
+        )
+        assets_out.append(d)
+
     db.close()
     return jsonify({
-        'assets': [dict(r) for r in rows],
+        'assets': assets_out,
         'external_rentals': [{k: v for k, v in dict(r).items() if k != 'pdf_data'} for r in ext_rows],
         'approval': approval,
     })
@@ -11026,35 +11163,38 @@ def show_asset_add(show_id):
           is_hidden, (data.get('notes') or '').strip(), session['user_id']))
     db.commit()
     row = db.execute('SELECT * FROM show_assets ORDER BY id DESC LIMIT 1').fetchone()
+
+    # Post-commit verification. The pre-check is best-effort; two simultaneous
+    # writers (from different sessions) can both pass it and both insert. After
+    # committing, re-read the now-visible state and roll back if we caused an
+    # over-allocation.
+    post_avail = _get_asset_availability(db, asset_type_id, rental_start, rental_end)
+    if (post_avail and not post_avail.get('unlimited')
+            and post_avail.get('available') is not None
+            and post_avail['available'] < 0):
+        db.execute('DELETE FROM show_assets WHERE id=?', (row['id'],))
+        db.commit()
+        type_name_row = db.execute('SELECT name FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
+        type_name = type_name_row['name'] if type_name_row else f'Type #{asset_type_id}'
+        # The negative count INCLUDES the row we just removed, so add it back
+        # for an accurate "what's still available" message.
+        available_after_rollback = post_avail['available'] + quantity
+        db.close()
+        return jsonify({
+            'error': f'Not enough units available for "{type_name}" — '
+                     f'{max(0, available_after_rollback)} unit{"" if available_after_rollback == 1 else "s"} available, '
+                     f'{quantity} requested. (Another user may have just booked this asset.)',
+            'available': available_after_rollback,
+            'requested': quantity,
+        }), 409
+
     log_audit(db, 'ASSET_ADDED_TO_SHOW', 'show_asset', row['id'], show_id=show_id,
               detail=f'type_id={asset_type_id} qty={quantity}')
     _reset_asset_approval(db, show_id, 'asset_added')
     db.commit()
     syslog_logger.info(f"ASSET_ADDED_TO_SHOW show_id={show_id} type_id={asset_type_id} qty={quantity} by={session.get('username')}")
-    result = dict(row)
-    # Concurrent-write safety net: pre-check above prevents over-allocation for
-    # single-user flows, but two simultaneous writers from different sessions
-    # could both pass the check and both insert. Notify admins if that happens.
-    try:
-        _avail = _get_asset_availability(db, asset_type_id, rental_start, rental_end)
-        if _avail and not _avail.get('unlimited') and _avail.get('available') is not None and _avail['available'] < 0:
-            _trow = db.execute('SELECT name FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
-            _type_name = _trow['name'] if _trow else f'Type #{asset_type_id}'
-            _show_name = show['name'] if show else f'Show #{show_id}'
-            _notify_asset_recipients(
-                db,
-                f'3·2·1→THEATER: Asset Over-Allocated — {_type_name}',
-                f'Asset "{_type_name}" is now over-allocated for show "{_show_name}".\n\n'
-                f'Current availability: {_avail["available"]} (negative = over-allocated)\n'
-                f'Total units: {_avail.get("total_items","?")}, In maintenance: {_avail.get("in_maintenance",0)}, '
-                f'Reserved spares: {_avail.get("reserve_count",0)}\n\n'
-                f'Review the show\'s assets tab for details.',
-                exclude_user_id=session.get('user_id'),
-            )
-    except Exception:
-        pass
     db.close()
-    return jsonify(result), 201
+    return jsonify(dict(row)), 201
 
 
 @app.route('/shows/<int:show_id>/assets/<int:sa_id>', methods=['PUT'])
@@ -11120,6 +11260,37 @@ def show_asset_edit(show_id, sa_id):
         WHERE id=? AND show_id=?
     """, (quantity, rental_start, rental_end, is_hidden, notes, sa_id, show_id))
     db.commit()
+
+    # Post-commit verification — see show_asset_add for rationale. If a
+    # concurrent writer pushed us over after we passed the pre-check, restore
+    # the original values and reject.
+    post_avail = _get_asset_availability(db, existing['asset_type_id'], rental_start, rental_end)
+    if (post_avail and not post_avail.get('unlimited')
+            and post_avail.get('available') is not None
+            and post_avail['available'] < 0):
+        db.execute("""
+            UPDATE show_assets SET quantity=?, rental_start=?, rental_end=?,
+                   is_hidden=?, notes=?
+            WHERE id=? AND show_id=?
+        """, (existing['quantity'], existing['rental_start'], existing['rental_end'],
+              existing['is_hidden'], existing['notes'], sa_id, show_id))
+        db.commit()
+        type_name_row = db.execute(
+            'SELECT name FROM asset_types WHERE id=?', (existing['asset_type_id'],)
+        ).fetchone()
+        type_name = type_name_row['name'] if type_name_row else f"Type #{existing['asset_type_id']}"
+        # Compute headroom against the now-restored state.
+        restored_avail = _get_asset_availability(db, existing['asset_type_id'], rental_start, rental_end)
+        headroom = (restored_avail.get('available') or 0) + (existing['quantity'] if restored_avail and not restored_avail.get('unlimited') else 0)
+        db.close()
+        return jsonify({
+            'error': f'Not enough units available for "{type_name}" — '
+                     f'{max(0, headroom)} unit{"" if headroom == 1 else "s"} available, '
+                     f'{quantity} requested. (Another user may have just booked this asset.)',
+            'available': headroom,
+            'requested': quantity,
+        }), 409
+
     log_audit(db, 'ASSET_SHOW_EDIT', 'show_asset', sa_id, show_id=show_id)
     _reset_asset_approval(db, show_id, 'asset_edited')
     db.commit()
