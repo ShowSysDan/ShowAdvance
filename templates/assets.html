@@ -69,13 +69,13 @@
     <option value="cost-desc">Highest cost</option>
     <option value="cost-asc">Lowest cost</option>
   </select>
-  <button id="bulk-edit-btn" class="btn btn-ghost btn-sm" onclick="enterBulkEdit()" title="Mass-toggle Hide-from-PM across categories, groups, and types">✎ Bulk: Hide-from-PM</button>
+  <button id="bulk-edit-btn" class="btn btn-ghost btn-sm" onclick="enterBulkEdit()" title="Mass-toggle which types are hidden from the show-page advance picker. Hidden types can still be added via the approvals portal.">✎ Bulk: Hide from Advance Picker</button>
 </div>
 
 {# ── Bulk Edit Toolbar (only visible in bulk-edit mode) ── #}
 <div id="bulk-edit-toolbar" style="display:none;margin-bottom:12px;padding:8px 12px;background:rgba(245,127,32,.10);border:1px solid rgba(245,127,32,.4);border-radius:4px;align-items:center;gap:10px;flex-wrap:wrap">
-  <strong style="font-size:12px;color:var(--accent)">BULK EDIT · HIDE FROM PM</strong>
-  <span style="font-size:11px;color:var(--text-dim)">Check a category or group to apply to every type beneath it. <span style="font-style:italic">Indeterminate (—)</span> means at least one child differs.</span>
+  <strong style="font-size:12px;color:var(--accent)">BULK EDIT · HIDE FROM ADVANCE PICKER</strong>
+  <span style="font-size:11px;color:var(--text-dim)">Checked types are removed from the show-page asset picker, so only the approvals portal can add them. Check a category / group to cascade. <span style="font-style:italic">Indeterminate (—)</span> means at least one child differs.</span>
   <span id="bulk-edit-counter" style="margin-left:auto;font-size:11px;color:var(--text-dim)">0 pending</span>
   <button class="btn btn-sm btn-ghost" onclick="cancelBulkEdit()">Cancel</button>
   <button id="bulk-edit-save-btn" class="btn btn-sm btn-primary" onclick="saveBulkEdit()" disabled>Save</button>
@@ -239,7 +239,7 @@
           <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
             <label class="checkbox-label"><input type="checkbox" id="type-is-system" onchange="onTypeClassChange()"> System <span style="font-size:10px;color:var(--text-dim)">(contains component types)</span></label>
             <label class="checkbox-label"><input type="checkbox" id="type-is-package" onchange="onTypeClassChange()"> Package <span style="font-size:10px;color:var(--text-dim)">(bundle / quote line)</span></label>
-            <label class="checkbox-label"><input type="checkbox" id="type-hide-from-pm"> Hide from PM by default <span style="font-size:10px;color:var(--text-dim)">(auto-hidden when added to a show)</span></label>
+            <label class="checkbox-label"><input type="checkbox" id="type-hide-from-pm"> Hide from advance picker <span style="font-size:10px;color:var(--text-dim)">(only asset managers can add this to a show — line stays fully visible once added)</span></label>
           </div>
         </div>
         <div class="field-group" style="grid-column:span 2">
@@ -523,7 +523,7 @@ function _bulkCheckboxHtml(scope, id, state) {
   const checked = state === 'checked' ? 'checked' : '';
   return `<input type="checkbox" class="bulk-cb" data-scope="${scope}" data-id="${id}" ${checked} ${indet ? 'data-indet="1"' : ''}
                  onclick="event.stopPropagation();onBulkCheckbox(this)"
-                 title="${state === 'mixed' ? 'Mixed — at least one descendant differs. Click to set all hidden.' : (state === 'checked' ? 'All hidden from PM. Click to show all.' : 'All shown to PM. Click to hide all.')}"
+                 title="${state === 'mixed' ? 'Mixed — at least one descendant differs. Click to hide all from the advance picker.' : (state === 'checked' ? 'All hidden from advance picker (manager-only adds). Click to expose to PMs.' : 'All visible in the advance picker. Click to hide all (manager-only adds).')}"
                  style="flex-shrink:0;margin-right:4px;cursor:pointer;accent-color:var(--accent);width:14px;height:14px">`;
 }
 

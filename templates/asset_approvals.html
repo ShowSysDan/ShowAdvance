@@ -557,7 +557,10 @@ let _apprDefaultEnd   = '';
 
 async function _loadApprAssetTypes() {
   if (_apprAllTypes) return _apprAllTypes;
-  const r = await fetch('/api/asset-types');
+  // include_hidden: the approval portal IS the authority for restricted
+  // assets, so the manager needs to see types flagged "hide from advance
+  // picker" here even though the show-page picker doesn't show them.
+  const r = await fetch('/api/asset-types?include_hidden=1');
   _apprAllTypes = await r.json();
   // Populate category filter
   const sel = document.getElementById('appr-asset-cat-filter');
