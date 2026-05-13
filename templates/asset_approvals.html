@@ -11,6 +11,7 @@
   margin-bottom: 16px;
 }
 .approvals-toolbar .field-group { margin: 0; }
+.approvals-presets, .approvals-pager { display: inline-flex; gap: 4px; padding-left: 8px; border-left: 1px solid var(--border); align-self: stretch; align-items: center; }
 .approvals-legend {
   margin-left: auto;
   font-size: 11px;
@@ -161,9 +162,14 @@
     <input type="date" id="range-end" class="field-input" value="{{ range_end }}" style="width:160px">
   </div>
   <button class="btn btn-primary btn-sm" onclick="applyRange()">Apply</button>
-  <button class="btn btn-ghost btn-sm" onclick="presetRange(21)">Next 3 weeks</button>
-  <button class="btn btn-ghost btn-sm" onclick="presetRange(7)">Next week</button>
-  <button class="btn btn-ghost btn-sm" onclick="presetRange(42)">Next 6 weeks</button>
+  <div class="approvals-presets" title="Reset the window to start from today">
+    <button class="btn btn-ghost btn-sm" onclick="presetRange(21)" title="Today through today + 21 days">↻ Today + 3 weeks</button>
+    <button class="btn btn-ghost btn-sm" onclick="presetRange(42)" title="Today through today + 42 days">↻ Today + 6 weeks</button>
+  </div>
+  <div class="approvals-pager" title="Shift the window forward / back by its current span">
+    <button class="btn btn-ghost btn-sm" onclick="shiftRange(-1)" title="Previous window">« Prev</button>
+    <button class="btn btn-ghost btn-sm" onclick="shiftRange(+1)" title="Next window">Next »</button>
+  </div>
   <div class="approvals-legend">
     <span><span class="dot ok"></span>Approved</span>
     <span><span class="dot pending"></span>Pending</span>
@@ -401,11 +407,34 @@ function applyRange() {
   window.location.search = '?' + p.toString();
 }
 function presetRange(days) {
+  // Always anchored to today — pressing twice does NOT advance further.
+  // Use the Prev/Next pager to skip past today by a window-width step.
   const today = new Date();
   const end = new Date(today); end.setDate(today.getDate() + days);
   const fmt = d => d.toISOString().slice(0,10);
   document.getElementById('range-start').value = fmt(today);
   document.getElementById('range-end').value   = fmt(end);
+  applyRange();
+}
+function shiftRange(direction) {
+  // Slide the current window forward (+1) or back (-1) by its own span,
+  // so repeated clicks step through page after page of shows.
+  const startEl = document.getElementById('range-start');
+  const endEl   = document.getElementById('range-end');
+  const s = startEl.value;
+  const e = endEl.value;
+  if (!s || !e) return;
+  const start = new Date(s);
+  const end   = new Date(e);
+  if (isNaN(start.getTime()) || isNaN(end.getTime())) return;
+  // Span in whole days, inclusive — the same arithmetic the server uses.
+  const spanDays = Math.max(1, Math.round((end - start) / 86400000));
+  const stepMs = direction * (spanDays + 1) * 86400000;  // +1 so windows don't share an edge
+  const newStart = new Date(start.getTime() + stepMs);
+  const newEnd   = new Date(end.getTime()   + stepMs);
+  const fmt = d => d.toISOString().slice(0,10);
+  startEl.value = fmt(newStart);
+  endEl.value   = fmt(newEnd);
   applyRange();
 }
 function toggleShow(head) {
