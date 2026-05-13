@@ -11129,7 +11129,15 @@ def show_asset_add(show_id):
     rental_end   = data.get('rental_end')   or default_end
 
     type_row = db.execute('SELECT rental_cost, weekly_rate, hide_from_pm FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
-    if data.get('locked_price') is not None:
+    # Price override is only honoured for asset managers (the approval portal).
+    # Regular users adding from the show page always get the rate-card price —
+    # the approver is the only role allowed to manipulate prices.
+    is_price_authority = (
+        session.get('user_role') == 'admin'
+        or session.get('is_content_admin')
+        or session.get('is_asset_manager')
+    )
+    if is_price_authority and data.get('locked_price') is not None:
         locked_price = float(data['locked_price'])
     elif type_row:
         locked_price = _compute_locked_price(

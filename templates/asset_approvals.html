@@ -233,20 +233,25 @@
       </thead>
       <tbody>
       {% for a in s.assets %}
-        {% set default_price = (a.catalog_daily_rate or 0) %}
-        {% set is_override = (a.locked_price|float) != (default_price|float) %}
+        {% set orig_price = a.original_locked_price %}
+        {% set is_override = (orig_price is not none) and ((a.locked_price|float) != (orig_price|float)) %}
         <tr data-sa-id="{{ a.id }}" data-qty="{{ a.quantity or 1 }}">
           <td class="text-dim">{{ a.category_name }}</td>
           <td>{{ a.type_name }}{% if a.manufacturer or a.model %}<br><span class="text-dim" style="font-size:10px">{{ a.manufacturer }} {{ a.model }}</span>{% endif %}</td>
           <td style="text-align:right">{{ a.quantity or 1 }}</td>
           <td class="text-dim">{{ a.rental_start or '—' }} → {{ a.rental_end or '—' }}</td>
-          <td style="text-align:right">
+          <td style="text-align:right;white-space:nowrap">
             <input type="number" step="0.01" min="0"
                    class="field-input field-input-sm appr-price-input {% if is_override %}overridden{% endif %}"
                    value="{{ '%.2f' | format(a.locked_price or 0) }}"
                    data-original="{{ '%.2f' | format(a.locked_price or 0) }}"
+                   data-add-time-price="{{ '%.2f' | format(orig_price or 0) if orig_price is not none else '' }}"
                    onchange="savePrice(this, {{ s.id }}, {{ a.id }})"
                    title="Unit price override for this show only">
+            <button class="btn btn-xs btn-ghost appr-restore-btn"
+                    style="margin-left:4px;padding:1px 6px;font-size:10px;{% if not is_override %}display:none{% endif %}"
+                    title="Restore to the price set when this asset was added to the show ($ {{ '%.2f' | format(orig_price or 0) }}). Rate-card changes don't apply to existing rentals."
+                    onclick="restorePrice(this, {{ s.id }}, {{ a.id }})">↻</button>
           </td>
           <td class="appr-line-total">${{ '%.2f' | format((a.locked_price or 0) * (a.quantity or 1)) }}</td>
           <td>
@@ -328,8 +333,9 @@
           <input type="number" id="appr-add-qty" class="field-input" value="1" min="1" oninput="updateApprAddState()">
         </div>
         <div class="field-group">
-          <label class="field-label">UNIT PRICE (locked)</label>
+          <label class="field-label" title="Auto-filled from the rate card. As approver you may override before adding — the value gets locked to this line on save and becomes the new restore target.">UNIT PRICE</label>
           <input type="text" id="appr-add-price" class="field-input" placeholder="0.00">
+          <div style="font-size:10px;color:var(--text-dim);margin-top:2px">Auto-filled from rate card · editable here (approver override) · locks on save</div>
         </div>
         <div class="field-group">
           <label class="field-label">RENTAL START</label>
@@ -427,11 +433,49 @@ async function savePrice(input, showId, saId) {
   });
   if (!r.ok) { alert('Price save failed'); input.value = input.dataset.original; return; }
   input.dataset.original = newPrice.toFixed(2);
-  input.classList.add('overridden');
-  // Update the line total + show total client-side
+  // Update line total + override styling + restore-button visibility
   const tr = input.closest('tr');
   const qty = parseInt(tr.dataset.qty || '1', 10);
   tr.querySelector('.appr-line-total').textContent = '$' + (newPrice * qty).toFixed(2);
+  const addTime = parseFloat(input.dataset.addTimePrice);
+  const restoreBtn = tr.querySelector('.appr-restore-btn');
+  const isOverride = !isNaN(addTime) && Math.abs(newPrice - addTime) >= 0.005;
+  input.classList.toggle('overridden', isOverride);
+  if (restoreBtn) restoreBtn.style.display = isOverride ? '' : 'none';
+}
+
+async function restorePrice(btn, showId, saId) {
+  const tr = btn.closest('tr');
+  const input = tr.querySelector('.appr-price-input');
+  const addTime = parseFloat(input.dataset.addTimePrice);
+  if (isNaN(addTime)) { alert('No original price recorded for this line.'); return; }
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = '…';
+  try {
+    const r = await fetch(`/shows/${showId}/assets/${saId}/reset-price`, {
+      method: 'POST',
+      headers: {'X-Requested-With': 'XMLHttpRequest'},
+    });
+    const d = await r.json();
+    if (!r.ok || !d.success) {
+      alert(d.error || 'Restore failed');
+      btn.textContent = orig;
+      btn.disabled = false;
+      return;
+    }
+    const newPrice = Number(d.new_price);
+    input.value = newPrice.toFixed(2);
+    input.dataset.original = newPrice.toFixed(2);
+    input.classList.remove('overridden');
+    const qty = parseInt(tr.dataset.qty || '1', 10);
+    tr.querySelector('.appr-line-total').textContent = '$' + (newPrice * qty).toFixed(2);
+    btn.style.display = 'none';
+  } catch (e) {
+    alert('Network error');
+    btn.textContent = orig;
+    btn.disabled = false;
+  }
 }
 async function removeAsset(showId, saId) {
   if (!confirm('Remove this asset from the show? This will reset approval.')) return;
