@@ -10711,7 +10711,8 @@ def _get_asset_availability(db, asset_type_id, start_date=None, end_date=None):
 
     shows = db.execute(f"""
         SELECT sa.id, sa.show_id, sa.quantity, sa.rental_start, sa.rental_end,
-               sa.is_hidden, s.name as show_name
+               sa.is_hidden, sa.locked_price, sa.original_locked_price,
+               s.name as show_name
         FROM show_assets sa
         JOIN shows s ON s.id = sa.show_id
         WHERE sa.asset_type_id = ?{date_filter}
@@ -10730,6 +10731,22 @@ def _get_asset_availability(db, asset_type_id, start_date=None, end_date=None):
         'shows': [dict(r) for r in shows],
         'unlimited': False,
     }
+
+
+def _compute_locked_price(daily_rate, weekly_rate, rental_start, rental_end):
+    """Apply the rate-card formula used at add-time: weekly when applicable,
+    else daily × days. Returns a float."""
+    try:
+        d_start = date.fromisoformat(str(rental_start)) if rental_start else None
+        d_end   = date.fromisoformat(str(rental_end))   if rental_end   else None
+        days = max(1, (d_end - d_start).days + 1) if d_start and d_end else 1
+    except (ValueError, TypeError):
+        days = 1
+    daily = float(daily_rate or 0)
+    weekly = float(weekly_rate or 0)
+    if weekly > 0 and days >= 7:
+        return weekly * math.ceil(days / 7)
+    return daily * days
 
 
 def _find_overbooked_types(db):
@@ -11111,23 +11128,13 @@ def show_asset_add(show_id):
     rental_start = data.get('rental_start') or default_start
     rental_end   = data.get('rental_end')   or default_end
 
-    # Smart rate: weekly if weekly_rate set and rental >= 7 days, else daily × days
     type_row = db.execute('SELECT rental_cost, weekly_rate, hide_from_pm FROM asset_types WHERE id=?', (asset_type_id,)).fetchone()
     if data.get('locked_price') is not None:
         locked_price = float(data['locked_price'])
     elif type_row:
-        daily_rate  = float(type_row['rental_cost'] or 0)
-        weekly_rate = float(type_row['weekly_rate'] or 0)
-        try:
-            d_start = date.fromisoformat(str(rental_start)) if rental_start else None
-            d_end   = date.fromisoformat(str(rental_end))   if rental_end   else None
-            days = max(1, (d_end - d_start).days + 1) if d_start and d_end else 1
-        except (ValueError, TypeError):
-            days = 1
-        if weekly_rate > 0 and days >= 7:
-            locked_price = weekly_rate * math.ceil(days / 7)
-        else:
-            locked_price = daily_rate * days
+        locked_price = _compute_locked_price(
+            type_row['rental_cost'], type_row['weekly_rate'], rental_start, rental_end
+        )
     else:
         locked_price = 0.0
 
@@ -11157,10 +11164,12 @@ def show_asset_add(show_id):
 
     db.execute("""
         INSERT INTO show_assets
-          (show_id, asset_type_id, quantity, rental_start, rental_end, locked_price, is_hidden, notes, added_by)
-        VALUES (?,?,?,?,?,?,?,?,?)
-    """, (show_id, asset_type_id, quantity, rental_start, rental_end, locked_price,
-          is_hidden, (data.get('notes') or '').strip(), session['user_id']))
+          (show_id, asset_type_id, quantity, rental_start, rental_end,
+           locked_price, original_locked_price, is_hidden, notes, added_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, (show_id, asset_type_id, quantity, rental_start, rental_end,
+          locked_price, locked_price, is_hidden,
+          (data.get('notes') or '').strip(), session['user_id']))
     db.commit()
     row = db.execute('SELECT * FROM show_assets ORDER BY id DESC LIMIT 1').fetchone()
 
@@ -11315,6 +11324,39 @@ def show_asset_remove(show_id, sa_id):
     syslog_logger.info(f"ASSET_REMOVED_FROM_SHOW show_id={show_id} sa_id={sa_id} by={session.get('username')}")
     db.close()
     return jsonify({'success': True})
+
+
+@app.route('/shows/<int:show_id>/assets/<int:sa_id>/reset-price', methods=['POST'])
+@show_advance_editor_required
+def show_asset_reset_price(show_id, sa_id):
+    """Restore this line's locked_price to the value it had at add-time
+    (stored in original_locked_price). Catalog rate-card changes since then
+    are intentionally NOT applied — they only affect new rentals."""
+    db = get_db()
+    row = db.execute(
+        'SELECT locked_price, original_locked_price FROM show_assets WHERE id=? AND show_id=?',
+        (sa_id, show_id)
+    ).fetchone()
+    if not row:
+        db.close()
+        return jsonify({'error': 'Not found'}), 404
+    old_price = float(row['locked_price'] or 0)
+    original = row['original_locked_price']
+    if original is None:
+        db.close()
+        return jsonify({'error': 'No original price recorded for this line.'}), 409
+    new_price = float(original)
+    if abs(new_price - old_price) < 0.005:
+        db.close()
+        return jsonify({'success': True, 'old_price': old_price, 'new_price': new_price, 'changed': False})
+    db.execute('UPDATE show_assets SET locked_price=? WHERE id=?', (new_price, sa_id))
+    db.commit()
+    log_audit(db, 'ASSET_PRICE_RESET', 'show_asset', sa_id, show_id=show_id,
+              detail=f'old={old_price:.2f} new={new_price:.2f} (restored to original)')
+    _reset_asset_approval(db, show_id, 'asset_price_reset')
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'old_price': old_price, 'new_price': new_price, 'changed': True})
 
 
 @app.route('/shows/<int:show_id>/assets/<int:sa_id>/toggle-hidden', methods=['POST'])
