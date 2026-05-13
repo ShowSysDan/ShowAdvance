@@ -1662,6 +1662,43 @@ def _send_email_direct(subject, recipients, body_text=None, body_html=None,
     return True, f'Sent to {sent_count} recipient(s).'
 
 
+def _log_outbox_send(recipients, subject, success, error_message, error_context):
+    """Write one row per recipient into email_outbox_log so admins can audit
+    what's been sent. Best-effort — failures here must never block the send."""
+    try:
+        purpose = ''
+        triggered_by = None
+        if error_context:
+            purpose = error_context.get('pdf_type') or error_context.get('purpose') or ''
+            tb = error_context.get('triggered_by')
+            if isinstance(tb, int):
+                triggered_by = tb
+        if not triggered_by:
+            try:
+                triggered_by = session.get('user_id')
+            except Exception:
+                triggered_by = None
+        # Subject capped to keep the table compact; full body lives in mail server logs.
+        subj = (subject or '')[:255]
+        err  = (error_message or '')[:500]
+        db = get_db()
+        for r in recipients or []:
+            try:
+                db.execute(
+                    "INSERT INTO email_outbox_log "
+                    "(recipient, subject, purpose, success, error_message, triggered_by) "
+                    "VALUES (?,?,?,?,?,?)",
+                    ((r or '')[:255], subj, (purpose or '')[:64],
+                     1 if success else 0, '' if success else err, triggered_by)
+                )
+            except Exception:
+                pass
+        db.commit()
+        db.close()
+    except Exception:
+        pass
+
+
 def _send_email(subject, recipients, body_text=None, body_html=None,
                 attachments=None, from_address=None, error_context=None):
     """
@@ -1675,20 +1712,24 @@ def _send_email(subject, recipients, body_text=None, body_html=None,
         body_html (str|None): HTML body
         attachments (list[dict]|None): Each dict: {'filename', 'data' (bytes), 'mimetype'}
         from_address (str|None): Override the configured from address
-        error_context (dict|None): {pdf_type, show_id, triggered_by} stamped
-            onto any rows the helpers write into email_send_errors.
+        error_context (dict|None): {pdf_type, show_id, triggered_by, purpose}
+            stamped onto any rows the helpers write into email_send_errors
+            and email_outbox_log.
 
     Returns:
         (bool, str): (success, message)
     """
     provider = get_app_setting('email_provider', 'smtp')
     if provider == 'direct':
-        return _send_email_direct(subject, recipients, body_text, body_html,
-                                  attachments, from_address,
-                                  error_context=error_context)
-    return _send_email_smtp(subject, recipients, body_text, body_html,
-                            attachments, from_address,
-                            error_context=error_context)
+        ok, msg = _send_email_direct(subject, recipients, body_text, body_html,
+                                     attachments, from_address,
+                                     error_context=error_context)
+    else:
+        ok, msg = _send_email_smtp(subject, recipients, body_text, body_html,
+                                   attachments, from_address,
+                                   error_context=error_context)
+    _log_outbox_send(recipients, subject, ok, msg, error_context)
+    return ok, msg
 
 
 def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_before=None):
@@ -7128,9 +7169,68 @@ def test_email_provider():
         subject='3·2·1→THEATER Email Test',
         recipients=[to_addr],
         body_text='This is a test email from 3·2·1→THEATER to verify your email configuration.',
-        error_context={'pdf_type': 'test', 'triggered_by': session.get('username')},
+        error_context={'pdf_type': 'test', 'purpose': 'test',
+                       'triggered_by': session.get('user_id')},
     )
     return jsonify({'success': success, 'message': message})
+
+
+@app.route('/settings/email-log', methods=['GET'])
+@admin_required
+def email_outbox_log_list():
+    """Return recent outgoing email activity (most recent first).
+
+    Query: ?status=all|success|failed (default all), ?limit=N (default 200)."""
+    status = (request.args.get('status') or 'all').lower()
+    try:
+        limit = max(1, min(int(request.args.get('limit') or 200), 1000))
+    except ValueError:
+        limit = 200
+    db = get_db()
+    sql = """
+        SELECT l.id, l.sent_at, l.recipient, l.subject, l.purpose,
+               l.success, l.error_message,
+               u.username AS triggered_by_name,
+               u.display_name AS triggered_by_display
+        FROM email_outbox_log l
+        LEFT JOIN users u ON u.id = l.triggered_by
+    """
+    params = []
+    if status == 'success':
+        sql += ' WHERE l.success = 1'
+    elif status == 'failed':
+        sql += ' WHERE l.success = 0'
+    sql += ' ORDER BY l.sent_at DESC, l.id DESC LIMIT ?'
+    params.append(limit)
+    rows = db.execute(sql, params).fetchall()
+    counts = db.execute("""
+        SELECT
+            COUNT(*) AS total,
+            SUM(CASE WHEN success=1 THEN 1 ELSE 0 END) AS successes,
+            SUM(CASE WHEN success=0 THEN 1 ELSE 0 END) AS failures
+        FROM email_outbox_log
+    """).fetchone()
+    db.close()
+    return jsonify({
+        'rows': [dict(r) for r in rows],
+        'total':     int(counts['total'] or 0),
+        'successes': int(counts['successes'] or 0),
+        'failures':  int(counts['failures'] or 0),
+    })
+
+
+@app.route('/settings/email-log/clear', methods=['POST'])
+@admin_required
+def email_outbox_log_clear():
+    """Wipe the outbox log. Errors and PDF send logs are NOT touched."""
+    db = get_db()
+    db.execute('DELETE FROM email_outbox_log')
+    db.commit()
+    log_audit(db, 'EMAIL_LOG_CLEARED', 'setting', None)
+    db.commit()
+    db.close()
+    syslog_logger.info(f"EMAIL_LOG_CLEARED by={session.get('username')}")
+    return jsonify({'success': True})
 
 
 # ─── Email Error Log ──────────────────────────────────────────────────────────
@@ -12260,6 +12360,19 @@ def _send_simple_email(to_addr, subject, body_text, body_html=None):
         return False
 
 
+def _send_simple_email_async(to_addr, subject, body_text, body_html=None):
+    """Fire-and-forget variant of _send_simple_email. Use from request handlers
+    where we don't want SMTP latency to block the HTTP response (registration
+    confirmation, password reset, approval/denial notices, etc.). Errors are
+    swallowed and logged in the same way as _send_simple_email."""
+    def _bg():
+        try:
+            _send_simple_email(to_addr, subject, body_text, body_html)
+        except Exception:
+            pass
+    threading.Thread(target=_bg, daemon=True).start()
+
+
 def _register_route():
     if session.get('user_id'):
         return redirect(url_for('dashboard'))
@@ -12304,7 +12417,7 @@ def _register_route():
                         """, (username, display_name, email, pw_hash, token, expires.isoformat()))
                         db.commit()
                         confirm_url = url_for('confirm_email', token=token, _external=True)
-                        _send_simple_email(
+                        _send_simple_email_async(
                             email,
                             '3·2·1→THEATER: Confirm Your Email',
                             f'Click the link to confirm your email address:\n{confirm_url}\n\nThis link expires in 24 hours.',
@@ -12322,7 +12435,7 @@ def _register_route():
                             _adb.close()
                             _settings_url = url_for('settings', _external=True) + '#registrations'
                             for _adm in _admins:
-                                _send_simple_email(
+                                _send_simple_email_async(
                                     _adm['email'],
                                     '3\u00b72\u00b71\u2192THEATER: New Registration Pending',
                                     f'A new account registration is awaiting your approval.\n\n'
@@ -12416,7 +12529,7 @@ def approve_registration(reg_id):
         log_audit(db, 'USER_APPROVED', 'user', uid,
                   detail=f'username={reg["username"]} role={role} approved_by={session.get("username")}')
         db.commit()
-        _send_simple_email(
+        _send_simple_email_async(
             reg['email'],
             '3·2·1→THEATER: Account Approved',
             f'Your account "{reg["username"]}" has been approved. You can now log in.',
@@ -12437,7 +12550,7 @@ def deny_registration(reg_id):
     if reg:
         db.execute('DELETE FROM user_pending_registration WHERE id=?', (reg_id,))
         db.commit()
-        _send_simple_email(
+        _send_simple_email_async(
             reg['email'],
             '3·2·1→THEATER: Registration Declined',
             f'Your registration request for "{reg["username"]}" was not approved.',
@@ -12477,7 +12590,7 @@ def _forgot_password_route():
                 """, (user['id'], token, expires.isoformat()))
                 db.commit()
                 reset_url = url_for('reset_password', token=token, _external=True)
-                _send_simple_email(
+                _send_simple_email_async(
                     user['email'],
                     '3·2·1→THEATER: Password Reset',
                     f'Click the link below to reset your password (expires in 2 hours):\n{reset_url}\n\n'

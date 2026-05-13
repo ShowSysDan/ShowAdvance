@@ -495,6 +495,20 @@ CREATE TABLE IF NOT EXISTS email_send_log (
 
 CREATE INDEX IF NOT EXISTS idx_email_send_log_show ON email_send_log(show_id, pdf_type, sent_at);
 
+-- General outgoing-email log: one row per attempted send (recipient + result).
+-- Used by Settings → Email → Recent Activity so admins can audit what went out.
+CREATE TABLE IF NOT EXISTS email_outbox_log (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    sent_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    recipient     TEXT NOT NULL,
+    subject       TEXT NOT NULL DEFAULT '',
+    purpose       TEXT NOT NULL DEFAULT '',
+    success       INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT DEFAULT '',
+    triggered_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_outbox_log_sent ON email_outbox_log(sent_at DESC);
+
 -- ── Asset Manager ────────────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS warehouse_locations (
@@ -1546,6 +1560,18 @@ def migrate_db():
             ON email_send_errors(resolved, sent_at);
         CREATE INDEX IF NOT EXISTS idx_email_send_errors_recipient
             ON email_send_errors(recipient);
+
+        CREATE TABLE IF NOT EXISTS email_outbox_log (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            sent_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            recipient     TEXT NOT NULL,
+            subject       TEXT NOT NULL DEFAULT '',
+            purpose       TEXT NOT NULL DEFAULT '',
+            success       INTEGER NOT NULL DEFAULT 0,
+            error_message TEXT DEFAULT '',
+            triggered_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_email_outbox_log_sent ON email_outbox_log(sent_at DESC);
     """)
 
     # Asset manager tables (safe to rerun)
@@ -2435,6 +2461,19 @@ CREATE INDEX IF NOT EXISTS idx_email_send_errors_unresolved
     ON email_send_errors(resolved, sent_at);
 CREATE INDEX IF NOT EXISTS idx_email_send_errors_recipient
     ON email_send_errors(recipient);
+
+-- General outgoing-email log: one row per attempted send (recipient + result).
+CREATE TABLE IF NOT EXISTS email_outbox_log (
+    id            SERIAL PRIMARY KEY,
+    sent_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    recipient     TEXT NOT NULL,
+    subject       TEXT NOT NULL DEFAULT '',
+    purpose       TEXT NOT NULL DEFAULT '',
+    success       INTEGER NOT NULL DEFAULT 0,
+    error_message TEXT DEFAULT '',
+    triggered_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_outbox_log_sent ON email_outbox_log(sent_at DESC);
 
 -- ── Asset Manager ─────────────────────────────────────────────────────────────
 
