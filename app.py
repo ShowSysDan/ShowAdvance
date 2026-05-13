@@ -10985,19 +10985,33 @@ def _get_asset_notification_recipients(db, exclude_user_id=None):
 def _notify_asset_recipients(db, subject, body_text, exclude_user_id=None):
     """Send a system notification to all asset-permission holders.
 
+    The recipient lookup runs synchronously (DB connection is request-bound),
+    but the actual SMTP sends happen in a background daemon thread so that
+    callers (e.g. /assets/approve) aren't held hostage by SMTP latency.
     Failures are swallowed so that the triggering action still succeeds; each
     recipient send is independent.
     """
     try:
-        recipients = _get_asset_notification_recipients(db, exclude_user_id)
+        recipients = list(_get_asset_notification_recipients(db, exclude_user_id))
     except Exception as exc:
         app.logger.error(f'asset notify recipient lookup failed: {exc}')
         return
-    for _name, _email in recipients:
-        try:
-            _send_simple_email(_email, subject, body_text)
-        except Exception as exc:
-            app.logger.error(f'asset notify send to {_email} failed: {exc}')
+    if not recipients:
+        return
+
+    def _send_all(rcpts, subj, body):
+        for _name, _email in rcpts:
+            try:
+                _send_simple_email(_email, subj, body)
+            except Exception as exc:
+                try:
+                    app.logger.error(f'asset notify send to {_email} failed: {exc}')
+                except Exception:
+                    pass
+
+    threading.Thread(
+        target=_send_all, args=(recipients, subject, body_text), daemon=True
+    ).start()
 
 
 def _reset_asset_approval(db, show_id, reason):
