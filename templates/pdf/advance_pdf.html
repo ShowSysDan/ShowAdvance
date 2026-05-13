@@ -176,10 +176,7 @@
               <td class="qty">{{ r.quantity }}×</td>
               <td>
                 {{ r.type_name }}
-                {% set meta_bits = [] %}
-                {% if r.manufacturer %}{% set _ = meta_bits.append(r.manufacturer) %}{% endif %}
-                {% if r.model %}{% set _ = meta_bits.append(r.model) %}{% endif %}
-                {% if meta_bits %}<span class="meta"> · {{ meta_bits|join(' · ') }}</span>{% endif %}
+                {% if r.model %}<span class="meta"> · {{ r.model }}</span>{% endif %}
                 {% if r.notes %}<span class="meta"> — {{ r.notes }}</span>{% endif %}
               </td>
             </tr>

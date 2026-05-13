@@ -595,28 +595,59 @@ function filterApprAssets() {
 
 function renderApprAssetResults(q, cat) {
   const container = document.getElementById('appr-asset-search-results');
-  const lq = q.toLowerCase();
+  const lq = (q || '').toLowerCase().trim();
   const filtered = (_apprAllTypes || []).filter(t => {
     if (cat && t.category_name !== cat) return false;
+    if (!lq) return true;
     const hay = [t.name, t.category_name, t.manufacturer, t.model].join(' ').toLowerCase();
-    return !lq || hay.includes(lq);
+    return hay.includes(lq);
   });
   if (!filtered.length) { container.innerHTML = '<p style="padding:20px;text-align:center;color:var(--text-dim)">No items found.</p>'; return; }
-  const byCat = {};
-  filtered.forEach(t => { if (!byCat[t.category_name]) byCat[t.category_name] = []; byCat[t.category_name].push(t); });
+
+  // Lower score wins — name beats model beats manufacturer beats other.
+  function score(t) {
+    if (!lq) return 0;
+    const n = (t.name||'').toLowerCase();
+    const m = (t.model||'').toLowerCase();
+    const mfr = (t.manufacturer||'').toLowerCase();
+    if (n.startsWith(lq))  return 0;
+    if (n.includes(lq))    return 1;
+    if (m.startsWith(lq))  return 2;
+    if (m.includes(lq))    return 3;
+    if (mfr.includes(lq))  return 4;
+    return 5;
+  }
+
+  const renderCard = (t) => {
+    const rate = `$${Number(t.rental_cost||0).toFixed(2)}/day`;
+    return `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal"
+             onclick="selectApprAssetType(${t.id},'${_esc(t.name).replace(/'/g,"\\'")}',${t.rental_cost||0},${t.weekly_rate||0},${t.is_system?1:0})">
+      <div style="font-weight:500">${_esc(t.name)}</div>
+      ${t.manufacturer ? `<div style="font-size:10px;color:var(--text-dim)">${_esc(t.manufacturer)} ${_esc(t.model||'')}</div>` : ''}
+      <div style="font-size:10px;color:var(--text-dim)">${rate}${t.is_consumable?' · consumable':''}</div>
+    </button>`;
+  };
+
   let html = '<div style="display:flex;flex-direction:column;gap:10px">';
-  for (const [c, items] of Object.entries(byCat)) {
-    html += `<div><div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase">${_esc(c)}</div><div style="display:flex;flex-wrap:wrap;gap:5px">`;
-    items.forEach(t => {
-      const rate = `$${Number(t.rental_cost||0).toFixed(2)}/day`;
-      html += `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal"
-               onclick="selectApprAssetType(${t.id},'${_esc(t.name).replace(/'/g,"\\'")}',${t.rental_cost||0},${t.weekly_rate||0},${t.is_system?1:0})">
-        <div style="font-weight:500">${_esc(t.name)}</div>
-        ${t.manufacturer ? `<div style="font-size:10px;color:var(--text-dim)">${_esc(t.manufacturer)} ${_esc(t.model||'')}</div>` : ''}
-        <div style="font-size:10px;color:var(--text-dim)">${rate}${t.is_consumable?' · consumable':''}</div>
-      </button>`;
+  if (lq) {
+    // Search mode: flat list, relevance-ranked.
+    const ranked = filtered.slice().sort((a, b) => {
+      const sa = score(a), sb = score(b);
+      if (sa !== sb) return sa - sb;
+      return (a.name || '').localeCompare(b.name || '');
     });
-    html += '</div></div>';
+    html += '<div style="display:flex;flex-wrap:wrap;gap:5px">';
+    ranked.forEach(t => { html += renderCard(t); });
+    html += '</div>';
+  } else {
+    // Browse mode: group by category.
+    const byCat = {};
+    filtered.forEach(t => { if (!byCat[t.category_name]) byCat[t.category_name] = []; byCat[t.category_name].push(t); });
+    for (const [c, items] of Object.entries(byCat)) {
+      html += `<div><div style="font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase">${_esc(c)}</div><div style="display:flex;flex-wrap:wrap;gap:5px">`;
+      items.forEach(t => { html += renderCard(t); });
+      html += '</div></div>';
+    }
   }
   html += '</div>';
   container.innerHTML = html;
