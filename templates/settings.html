@@ -111,11 +111,17 @@
         <thead><tr><th>NAME / EMAIL</th><th>DEPARTMENT</th><th>PHONE</th>{% if user.role == 'admin' %}<th style="width:72px;text-align:center" title="All email types (legacy)">ALL</th><th style="width:72px;text-align:center" title="Advance sheet emails">ADVANCE</th><th style="width:72px;text-align:center" title="Production/schedule emails">PROD</th><th style="width:72px;text-align:center" title="Post-show report emails">POST</th>{% endif %}{% if user.role == 'admin' or is_content_admin %}<th style="width:80px;white-space:nowrap">ACTIONS</th>{% endif %}</tr></thead>
         <tbody>
           {% for c in contacts %}
-          <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}">
+          {% set _vf_list = c.venue_filter | from_json %}
+          <tr data-id="{{ c.id }}" data-dept="{{ c.department }}" data-recipient="{{ '1' if c.report_recipient else '0' }}" data-venue-filter="{{ c.venue_filter or '' }}">
             <td class="contact-name">
               <div style="font-weight:500" data-field="name">{{ c.name }}</div>
               {% if c.title %}<div class="text-dim" style="font-size:11px" data-field="title">{{ c.title }}</div>{% endif %}
               {% if c.email %}<div style="font-size:11px;color:var(--accent)" data-field="email"><a href="mailto:{{ c.email }}" style="color:var(--accent)">{{ c.email }}</a></div>{% endif %}
+              {% if _vf_list %}
+              <div style="font-size:10px;color:var(--text-dim);margin-top:3px" title="Only receives emails for: {{ _vf_list | join(', ') }}">
+                <span style="background:rgba(245,127,32,.12);color:var(--accent);padding:1px 5px;border-radius:3px;font-weight:600">VENUES: {{ _vf_list | length }}</span>
+              </div>
+              {% endif %}
             </td>
             <td>{% if c.department %}<span class="dept-badge">{{ c.department }}</span>{% else %}—{% endif %}</td>
             <td class="mono text-sm" data-field="phone">{{ c.phone or '—' }}</td>
@@ -1773,6 +1779,24 @@
           </label>
         </div>
       </div>
+      <div class="field-group" style="margin-top:4px">
+        <div class="field-label" style="margin-bottom:6px;display:flex;align-items:center;gap:8px">
+          VENUE FILTER
+          <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-dim);font-size:11px">— leave all unchecked for "all venues"</span>
+        </div>
+        <div id="edit-venue-filter-list" style="display:flex;flex-direction:column;gap:4px;max-height:180px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:8px;background:var(--bg-surface)">
+          {% if contact_venues %}
+            {% for v in contact_venues %}
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:1px 0">
+              <input type="checkbox" class="edit-venue-filter-cb" value="{{ v }}" style="accent-color:var(--accent)">
+              <span style="font-size:12px">{{ v }}</span>
+            </label>
+            {% endfor %}
+          {% else %}
+            <span class="text-dim" style="font-size:11px">No venues defined yet.</span>
+          {% endif %}
+        </div>
+      </div>
       {% endif %}
     </div>
     <div class="modal-footer">
@@ -2260,6 +2284,20 @@ function editContact(btn, id) {
   if (advChk)  advChk.checked  = row.querySelector('[data-email-type=advance]')?.classList.contains('on') || false;
   if (prodChk) prodChk.checked = row.querySelector('[data-email-type=production]')?.classList.contains('on') || false;
   if (postChk) postChk.checked = row.querySelector('[data-email-type=postnotes]')?.classList.contains('on') || false;
+
+  // Restore venue-filter checkbox state from the row's data attribute
+  let allowed = [];
+  try {
+    const raw = row.dataset.venueFilter || '';
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) allowed = parsed;
+    }
+  } catch (_) {}
+  document.querySelectorAll('#edit-venue-filter-list .edit-venue-filter-cb').forEach(cb => {
+    cb.checked = allowed.includes(cb.value);
+  });
+
   document.getElementById('edit-modal').classList.remove('hidden');
 }
 
@@ -2268,6 +2306,9 @@ function closeEditModal() { document.getElementById('edit-modal').classList.add(
 async function saveContact() {
   const id = document.getElementById('edit-id').value;
   const recipientChk = document.getElementById('edit-recipient');
+  const venueFilter = Array.from(
+    document.querySelectorAll('#edit-venue-filter-list .edit-venue-filter-cb:checked')
+  ).map(cb => cb.value);
   const data = {
     name: document.getElementById('edit-name').value,
     title: document.getElementById('edit-title').value,
@@ -2278,6 +2319,9 @@ async function saveContact() {
     advance_recipient: document.getElementById('edit-advance-recipient')?.checked || false,
     production_recipient: document.getElementById('edit-production-recipient')?.checked || false,
     postnotes_recipient: document.getElementById('edit-postnotes-recipient')?.checked || false,
+    // Empty list intentionally means "no restriction" — backend normalises
+    // it to NULL so every venue is allowed.
+    venue_filter: venueFilter,
   };
   const resp = await fetch(`/settings/contacts/${id}/edit`, {
     method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data)

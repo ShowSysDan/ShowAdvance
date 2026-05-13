@@ -348,6 +348,20 @@ def pretty_json_filter(value):
         return value or ''
 
 
+@app.template_filter('from_json')
+def from_json_filter(value):
+    """Parse a JSON string in a template, returning [] on any failure so
+    callers can safely iterate / count. Useful for columns that hold JSON
+    lists (e.g. contacts.venue_filter)."""
+    if not value:
+        return []
+    try:
+        out = json.loads(value)
+        return out if isinstance(out, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
 @app.template_filter('multi')
 def multi_filter(value, sep=', '):
     """Render a multi-select value cleanly. Accepts either a JSON-encoded
@@ -1770,7 +1784,8 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         if not smtp_cfg.get('smtp_host'):
             return False, 'SMTP not configured.', 0
 
-    # Fetch recipients based on pdf_type
+    # Fetch recipients based on pdf_type. Filter again in Python by each
+    # contact's venue_filter (JSON list) — empty / NULL means "all venues".
     db = get_db()
     if pdf_type == 'advance':
         recip_col = 'advance_recipient'
@@ -1780,13 +1795,36 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         recip_col = 'postnotes_recipient'
     else:
         recip_col = 'report_recipient'
-    recipients = [
-        r['email'] for r in
-        db.execute(
-            f"SELECT email FROM contacts WHERE ({recip_col}=1 OR report_recipient=1) AND email != '' ORDER BY name"
-        ).fetchall()
-    ]
+    show_venue_row = db.execute(
+        'SELECT venue FROM shows WHERE id=?', (show_id,)
+    ).fetchone()
+    show_venue = (show_venue_row['venue'] if show_venue_row else '') or ''
+    rows = db.execute(
+        f"SELECT email, venue_filter FROM contacts "
+        f"WHERE ({recip_col}=1 OR report_recipient=1) AND email != '' "
+        f"ORDER BY name"
+    ).fetchall()
     db.close()
+
+    recipients = []
+    for r in rows:
+        raw = r['venue_filter']
+        # Empty / missing → no venue filter, contact gets every show.
+        if not raw or str(raw).strip() in ('', '[]', 'null'):
+            recipients.append(r['email'])
+            continue
+        try:
+            allowed = json.loads(raw)
+            if not isinstance(allowed, list) or not allowed:
+                recipients.append(r['email'])
+                continue
+        except (ValueError, TypeError):
+            # Corrupt JSON — fail open so a bad row doesn't silently drop the
+            # recipient. Misconfiguration is admin-visible in Settings.
+            recipients.append(r['email'])
+            continue
+        if show_venue in allowed:
+            recipients.append(r['email'])
 
     if not recipients:
         return False, 'No report recipients configured.', 0
@@ -5124,6 +5162,8 @@ def settings():
     ).fetchall() if _can_manage_crew else []
     job_positions = [dict(p) for p in positions_raw]
     distinct_venues = _get_distinct_venues(db3) if _can_manage_crew else []
+    # Always-available venue list for contact venue-filter UI (cheap query).
+    contact_venues = _get_distinct_venues(db3)
 
     # Crew members with rate level info
     crew_members_list = [dict(m) for m in db3.execute(
@@ -5211,6 +5251,7 @@ def settings():
                            position_categories=position_categories,
                            job_positions=job_positions,
                            distinct_venues=distinct_venues,
+                           contact_venues=contact_venues,
                            crew_members_list=crew_members_list,
                            pay_rate_levels=pay_rate_levels,
                            wifi_network=all_settings.get('wifi_network', ''),
@@ -5225,16 +5266,48 @@ def settings():
                            user=get_current_user())
 
 
+def _normalize_venue_filter(raw):
+    """Accept a list/JSON-string/empty value and return a JSON string suitable
+    for storage in contacts.venue_filter, or None when there's no restriction.
+    Empty / falsy → None (no filter, all venues). De-dupes and strips items."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        try:
+            raw = json.loads(s)
+        except ValueError:
+            return None
+    if not isinstance(raw, list):
+        return None
+    cleaned = []
+    seen = set()
+    for v in raw:
+        if not isinstance(v, str):
+            continue
+        v = v.strip()
+        if not v or v in seen:
+            continue
+        seen.add(v)
+        cleaned.append(v)
+    if not cleaned:
+        return None
+    return json.dumps(cleaned)
+
+
 @app.route('/settings/contacts/add', methods=['POST'])
 @content_admin_required
 def add_contact():
     db = get_db()
     name = request.form.get('name','').strip()
+    # venue_filter not exposed on the add form yet — set via edit modal.
     cur = db.execute("""
         INSERT INTO contacts (name, title, department, phone, email,
                               report_recipient, advance_recipient, production_recipient,
-                              postnotes_recipient)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              postnotes_recipient, venue_filter)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (name,
           request.form.get('title','').strip(),
           request.form.get('department','').strip(),
@@ -5243,7 +5316,8 @@ def add_contact():
           1 if request.form.get('report_recipient') else 0,
           1 if request.form.get('advance_recipient') else 0,
           1 if request.form.get('production_recipient') else 0,
-          1 if request.form.get('postnotes_recipient') else 0))
+          1 if request.form.get('postnotes_recipient') else 0,
+          None))
     cid_new = cur.lastrowid
     log_audit_change(db, 'CONTACT_ADD', 'contact', cid_new, detail=name,
                      table='contacts')
@@ -5259,18 +5333,22 @@ def edit_contact(cid):
     data = request.get_json(force=True) or {}
     db = get_db()
     before = _snapshot_row(db, 'contacts', cid)
-    db.execute("""
-        UPDATE contacts SET name=?, title=?, department=?, phone=?, email=?,
-                            report_recipient=?, advance_recipient=?, production_recipient=?,
-                            postnotes_recipient=?
-        WHERE id=?
-    """, (data.get('name',''), data.get('title',''), data.get('department',''),
-          data.get('phone',''), data.get('email',''),
-          1 if data.get('report_recipient') else 0,
-          1 if data.get('advance_recipient') else 0,
-          1 if data.get('production_recipient') else 0,
-          1 if data.get('postnotes_recipient') else 0,
-          cid))
+    # venue_filter is only updated when the key is present in the payload;
+    # otherwise we preserve the existing value (no accidental clears).
+    sets = ["name=?", "title=?", "department=?", "phone=?", "email=?",
+            "report_recipient=?", "advance_recipient=?",
+            "production_recipient=?", "postnotes_recipient=?"]
+    params = [data.get('name',''), data.get('title',''), data.get('department',''),
+              data.get('phone',''), data.get('email',''),
+              1 if data.get('report_recipient') else 0,
+              1 if data.get('advance_recipient') else 0,
+              1 if data.get('production_recipient') else 0,
+              1 if data.get('postnotes_recipient') else 0]
+    if 'venue_filter' in data:
+        sets.append('venue_filter=?')
+        params.append(_normalize_venue_filter(data.get('venue_filter')))
+    params.append(cid)
+    db.execute(f"UPDATE contacts SET {', '.join(sets)} WHERE id=?", params)
     after = _snapshot_row(db, 'contacts', cid)
     log_audit(db, 'CONTACT_EDIT', 'contact', cid, detail=data.get('name',''),
               before=before, after=after)
