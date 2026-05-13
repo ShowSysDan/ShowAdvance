@@ -137,9 +137,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 00-2-2h-4a2 2 0 00-2 2v2"/><line x1="12" y1="12" x2="12" y2="16"/><line x1="10" y1="14" x2="14" y2="14"/></svg>
         Asset Manager
       </a>
-      <a href="{{ url_for('asset_approvals') }}" class="nav-item sub {% if request.endpoint == 'asset_approvals' %}active{% endif %}">
+      <a href="{{ url_for('asset_approvals') }}" class="nav-item sub {% if request.endpoint == 'asset_approvals' %}active{% endif %}" id="nav-approvals-link">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
         Approvals
+        <span id="nav-approvals-badge" class="nav-approvals-badge" hidden></span>
       </a>
       <a href="{{ url_for('asset_reports') }}" class="nav-item sub {% if request.endpoint == 'asset_reports' %}active{% endif %}">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
@@ -350,6 +351,26 @@
   cursor:pointer;font-weight:600;letter-spacing:.04em;transition:background .15s,color .15s;
 }
 .view-as-btn:hover { background:rgba(245,127,32,.12);color:#F57F20;border-color:rgba(245,127,32,.4) }
+
+/* Pending-approvals badge on the Approvals nav link */
+.nav-approvals-badge {
+  display:inline-flex;align-items:center;justify-content:center;
+  margin-left:auto;
+  min-width:18px;height:18px;padding:0 5px;
+  font-size:10px;font-weight:700;line-height:1;
+  border-radius:999px;
+  background:rgba(148,163,184,.25);color:var(--text-dim);
+  border:1px solid rgba(148,163,184,.35);
+}
+.nav-approvals-badge.urgent {
+  background:rgba(220,38,38,.22);color:#FCA5A5;
+  border-color:rgba(220,38,38,.55);
+  animation:approvals-badge-pulse 2.2s ease-in-out infinite;
+}
+@keyframes approvals-badge-pulse {
+  0%, 100% { box-shadow:0 0 0 0 rgba(220,38,38,0); }
+  50%      { box-shadow:0 0 0 4px rgba(220,38,38,.18); }
+}
 </style>
 <script>
 async function setViewAs(role) {
@@ -658,6 +679,47 @@ function dismissMsg(id, btn) {
   fetch('/api/messages/' + id + '/dismiss', { method:'POST' })
     .then(() => { const el = document.getElementById('site-msg-'+id); if(el) el.remove(); });
 }
+
+// ── Approvals queue badge ─────────────────────────────────────────────────────
+// Shows the count of unapproved shows inside the 6-week window on the nav link,
+// and turns red+pulses when at least one is due within the next 7 days.
+(function() {
+  const badge = document.getElementById('nav-approvals-badge');
+  if (!badge) return;
+  let _timer = null;
+
+  async function refreshBadge() {
+    try {
+      const r = await fetch('/api/asset-approvals/pending-count', {
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+      });
+      if (!r.ok) return;
+      const d = await r.json();
+      const pending = d.pending | 0;
+      const urgent  = d.urgent  | 0;
+      if (pending <= 0) {
+        badge.hidden = true;
+        badge.textContent = '';
+        badge.classList.remove('urgent');
+        return;
+      }
+      badge.hidden = false;
+      badge.textContent = String(pending);
+      badge.classList.toggle('urgent', urgent > 0);
+      badge.title = urgent > 0
+        ? `${pending} pending approval${pending === 1 ? '' : 's'} · ${urgent} due within ${d.urgent_days} day${d.urgent_days === 1 ? '' : 's'}`
+        : `${pending} pending approval${pending === 1 ? '' : 's'} in the next ${d.window_days} days`;
+    } catch (_) { /* silent */ }
+  }
+
+  refreshBadge();
+  // Periodic refresh so a long-lived tab stays in sync without a full reload.
+  _timer = setInterval(refreshBadge, 60 * 1000);
+  // Catch focus-back-to-tab cases for snappier feedback.
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) refreshBadge();
+  });
+})();
 </script>
 {% endif %}
 </body>

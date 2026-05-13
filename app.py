@@ -11701,16 +11701,20 @@ def asset_approvals():
     """Rental approval sub-page: shows whose load-in falls in a rolling
     (or custom) window, with their requested assets and approval state."""
     from datetime import date, timedelta
+    # Default lookahead window — kept in sync with the pending-count badge
+    # at /api/asset-approvals/pending-count so the queue you see matches the
+    # number on the Approvals nav link.
+    DEFAULT_WINDOW_DAYS = 42  # 6 weeks
     try:
         start_str = (request.args.get('start') or '').strip()
         end_str   = (request.args.get('end')   or '').strip()
         start = date.fromisoformat(start_str) if start_str else date.today()
-        end   = date.fromisoformat(end_str)   if end_str   else start + timedelta(days=21)
+        end   = date.fromisoformat(end_str)   if end_str   else start + timedelta(days=DEFAULT_WINDOW_DAYS)
         if end < start:
             end = start
     except ValueError:
         start = date.today()
-        end   = start + timedelta(days=21)
+        end   = start + timedelta(days=DEFAULT_WINDOW_DAYS)
 
     db = get_db()
     # Shows whose load-in date (fallback: show_date, then earliest performance)
@@ -11773,6 +11777,66 @@ def asset_approvals():
         range_end=end.isoformat(),
         user=get_current_user(),
     )
+
+
+@app.route('/api/asset-approvals/pending-count')
+@login_required
+def asset_approvals_pending_count():
+    """Lightweight count for the nav-badge: how many active shows inside the
+    6-week lookahead window have at least one gear request and are not yet
+    approved, and of those how many fall inside the next 7 days (urgent).
+
+    Returns {'pending': N, 'urgent': N, 'window_days': 42, 'urgent_days': 7}.
+    Accessible to any logged-in user since the badge is only rendered for
+    asset managers / admins in the nav template anyway.
+    """
+    from datetime import date, timedelta
+    WINDOW_DAYS = 42
+    URGENT_DAYS = 7
+    today = date.today()
+    end = today + timedelta(days=WINDOW_DAYS)
+    urgent_end = today + timedelta(days=URGENT_DAYS)
+
+    db = get_db()
+    rows = db.execute("""
+        SELECT s.id, s.assets_approved,
+               COALESCE(s.load_in_date, s.show_date,
+                        (SELECT MIN(perf_date) FROM show_performances sp
+                          WHERE sp.show_id = s.id)) AS effective_date,
+               (SELECT COUNT(*) FROM show_assets sa
+                 WHERE sa.show_id = s.id AND sa.is_hidden = 0) AS asset_count,
+               (SELECT COUNT(*) FROM show_external_rentals er
+                 WHERE er.show_id = s.id) AS ext_count
+        FROM shows s
+        WHERE COALESCE(s.status, 'active') = 'active'
+          AND COALESCE(s.assets_approved, 0) = 0
+    """).fetchall()
+
+    pending = 0
+    urgent = 0
+    for r in rows:
+        if (r['asset_count'] or 0) + (r['ext_count'] or 0) == 0:
+            continue  # nothing to approve
+        eff = r['effective_date']
+        if not eff:
+            continue
+        try:
+            eff_date = date.fromisoformat(str(eff)[:10])
+        except ValueError:
+            continue
+        if not (today <= eff_date <= end):
+            continue
+        pending += 1
+        if eff_date <= urgent_end:
+            urgent += 1
+
+    db.close()
+    return jsonify({
+        'pending':     pending,
+        'urgent':      urgent,
+        'window_days': WINDOW_DAYS,
+        'urgent_days': URGENT_DAYS,
+    })
 
 
 @app.route('/shows/<int:show_id>/assets/approve', methods=['POST'])
