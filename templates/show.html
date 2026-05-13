@@ -907,8 +907,9 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
           <input type="number" id="asset-add-qty" class="field-input" value="1" min="1">
         </div>
         <div class="field-group">
-          <label class="field-label">UNIT PRICE (locked)</label>
+          <label class="field-label" title="Auto-calculated from the asset type's rate card. Override here if needed — the value is locked to this line on save.">UNIT PRICE</label>
           <input type="text" id="asset-add-price" class="field-input" placeholder="0.00">
+          <div style="font-size:10px;color:var(--text-dim);margin-top:2px">Auto-filled from rate card · editable · locks on save</div>
         </div>
         <div class="field-group">
           <label class="field-label">RENTAL START</label>
