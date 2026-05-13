@@ -3076,6 +3076,30 @@ def save_postnotes(show_id):
             INSERT OR REPLACE INTO post_show_notes (show_id, field_key, field_value)
             VALUES (?, ?, ?)
         """, (show_id, key, val or ''))
+
+    # Mirror the two numeric counts to typed columns on shows so future
+    # report queries don't have to CAST out of the EAV post_show_notes
+    # table. The EAV row is still the authoritative form-display source;
+    # this is purely a reporting projection.
+    def _parse_count(raw):
+        if raw is None:
+            return None
+        s = str(raw).strip()
+        if not s:
+            return None
+        try:
+            n = int(s)
+            return n if n >= 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    if 'cast_count' in data:
+        db.execute('UPDATE shows SET cast_count=? WHERE id=?',
+                   (_parse_count(data.get('cast_count')), show_id))
+    if 'crew_count' in data:
+        db.execute('UPDATE shows SET crew_count=? WHERE id=?',
+                   (_parse_count(data.get('crew_count')), show_id))
+
     db.execute('UPDATE shows SET updated_at=CURRENT_TIMESTAMP WHERE id=?', (show_id,))
     db.execute("""
         UPDATE shows SET last_saved_by=?, last_saved_at=CURRENT_TIMESTAMP WHERE id=?
