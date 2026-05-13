@@ -3882,7 +3882,7 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
     contacts = db.execute('SELECT * FROM contacts ORDER BY name').fetchall()
     contact_map = {c['id']: dict(c) for c in contacts}
 
-    logo_data = get_app_setting('logo_data', '')
+    logo_data = _get_logo_for_venue(db, show['venue'] if show else '')
 
     new_v = (show['advance_version'] or 0) + 1
     db.execute('UPDATE shows SET advance_version=? WHERE id=?', (new_v, show_id))
@@ -4125,7 +4125,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
     contact_map = {c['id']: dict(c) for c in contacts}
     contact_name_map = {c['name']: dict(c) for c in contacts}
 
-    logo_data = get_app_setting('logo_data', '')
+    logo_data = _get_logo_for_venue(db, show['venue'] if show else '')
 
     # WiFi always from global settings (not per-show)
     wifi_ssid = get_app_setting('wifi_network', '')
@@ -4494,7 +4494,7 @@ def _build_postnotes_pdf(show_id, exported_by_id=None, base_url=None):
     sched_rows = db.execute(
         'SELECT * FROM schedule_rows WHERE show_id=? ORDER BY sort_order,id', (show_id,)
     ).fetchall()
-    logo_data = get_app_setting('logo_data', '')
+    logo_data = _get_logo_for_venue(db, show['venue'] if show else '')
 
     new_v = (show['postnotes_version'] or 0) + 1
     db.execute('UPDATE shows SET postnotes_version=? WHERE id=?', (new_v, show_id))
@@ -6869,6 +6869,106 @@ def delete_logo():
     log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='logo_delete')
     db.commit(); db.close()
     syslog_logger.info(f"SETTINGS_CHANGE detail=logo_delete by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+def _get_logo_for_venue(db, venue_name):
+    """Return the data-URL logo to use for a given venue. Prefers a row in
+    venue_logos; falls back to the global logo_data app_setting. Always
+    returns a string ('' if no logo configured anywhere)."""
+    if venue_name:
+        row = db.execute(
+            'SELECT logo_data FROM venue_logos WHERE venue_name=?',
+            (venue_name,)
+        ).fetchone()
+        if row and row['logo_data']:
+            return row['logo_data']
+    return get_app_setting('logo_data', '') or ''
+
+
+_ALLOWED_LOGO_MIMES = ('image/png', 'image/jpeg', 'image/gif', 'image/webp')
+
+
+@app.route('/settings/venue-logos', methods=['GET'])
+@admin_required
+def venue_logos_list():
+    """Return every distinct active-show venue plus its configured logo (if any)."""
+    db = get_db()
+    # Distinct venues currently in use across shows (active + archived).
+    venues = [r['venue'] for r in db.execute(
+        "SELECT DISTINCT venue FROM shows "
+        "WHERE venue IS NOT NULL AND TRIM(venue) != '' "
+        "ORDER BY LOWER(venue)"
+    ).fetchall()]
+    logos = {r['venue_name']: r['logo_data'] for r in db.execute(
+        'SELECT venue_name, logo_data FROM venue_logos'
+    ).fetchall()}
+    db.close()
+    # Include any venues that only exist as logo overrides (e.g. logo
+    # configured before a show with that venue was created).
+    for v in logos.keys():
+        if v not in venues:
+            venues.append(v)
+    venues.sort(key=lambda v: v.lower())
+    return jsonify({
+        'venues': [
+            {'name': v, 'logo_data': logos.get(v, '')}
+            for v in venues
+        ]
+    })
+
+
+@app.route('/settings/venue-logos', methods=['POST'])
+@admin_required
+def venue_logo_upload():
+    """Upload or replace the logo for a venue. Multipart form with fields
+    `venue` (str) and `logo` (file)."""
+    import base64
+    venue_name = (request.form.get('venue') or '').strip()
+    if not venue_name:
+        return jsonify({'success': False, 'error': 'Venue name required.'}), 400
+    f = request.files.get('logo')
+    if not f or not f.filename:
+        return jsonify({'success': False, 'error': 'No file uploaded.'}), 400
+    data = f.read()
+    if len(data) > 2 * 1024 * 1024:
+        return jsonify({'success': False, 'error': 'Logo too large (max 2 MB).'}), 413
+    mime = f.content_type or 'image/png'
+    if mime not in _ALLOWED_LOGO_MIMES:
+        return jsonify({'success': False,
+                        'error': 'Unsupported image type. Allowed: PNG, JPEG, GIF, WebP.'}), 400
+    b64 = base64.b64encode(data).decode()
+    logo_data = f'data:{mime};base64,{b64}'
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO venue_logos (venue_name, logo_data, updated_at) "
+        "VALUES (?, ?, CURRENT_TIMESTAMP)",
+        (venue_name, logo_data)
+    )
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None,
+              detail=f'venue_logo_upload venue={venue_name}')
+    db.commit(); db.close()
+    syslog_logger.info(
+        f"SETTINGS_CHANGE detail=venue_logo_upload venue={venue_name} by={session.get('username')}"
+    )
+    return jsonify({'success': True})
+
+
+@app.route('/settings/venue-logos/delete', methods=['POST'])
+@admin_required
+def venue_logo_delete():
+    data = request.get_json(force=True) or {}
+    venue_name = (data.get('venue') or '').strip()
+    if not venue_name:
+        return jsonify({'success': False, 'error': 'Venue name required.'}), 400
+    db = get_db()
+    db.execute('DELETE FROM venue_logos WHERE venue_name=?', (venue_name,))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None,
+              detail=f'venue_logo_delete venue={venue_name}')
+    db.commit(); db.close()
+    syslog_logger.info(
+        f"SETTINGS_CHANGE detail=venue_logo_delete venue={venue_name} by={session.get('username')}"
+    )
     return jsonify({'success': True})
 
 

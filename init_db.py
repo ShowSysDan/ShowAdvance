@@ -500,6 +500,15 @@ CREATE TABLE IF NOT EXISTS email_send_log (
 
 CREATE INDEX IF NOT EXISTS idx_email_send_log_show ON email_send_log(show_id, pdf_type, sent_at);
 
+-- Per-venue logo overrides for PDF headers. Empty / missing row falls back
+-- to the global logo_data app_setting. Logo is stored as a data URL so the
+-- existing <img src> machinery in the PDF templates works unchanged.
+CREATE TABLE IF NOT EXISTS venue_logos (
+    venue_name TEXT PRIMARY KEY,
+    logo_data  TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- General outgoing-email log: one row per attempted send (recipient + result).
 -- Used by Settings → Email → Recent Activity so admins can audit what went out.
 CREATE TABLE IF NOT EXISTS email_outbox_log (
@@ -1613,6 +1622,12 @@ def migrate_db():
             triggered_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
         );
         CREATE INDEX IF NOT EXISTS idx_email_outbox_log_sent ON email_outbox_log(sent_at DESC);
+
+        CREATE TABLE IF NOT EXISTS venue_logos (
+            venue_name TEXT PRIMARY KEY,
+            logo_data  TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
 
     # Asset manager tables (safe to rerun)
@@ -2520,6 +2535,13 @@ CREATE TABLE IF NOT EXISTS email_outbox_log (
     triggered_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_email_outbox_log_sent ON email_outbox_log(sent_at DESC);
+
+-- Per-venue logo overrides for PDF headers.
+CREATE TABLE IF NOT EXISTS venue_logos (
+    venue_name TEXT PRIMARY KEY,
+    logo_data  TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- ── Asset Manager ─────────────────────────────────────────────────────────────
 

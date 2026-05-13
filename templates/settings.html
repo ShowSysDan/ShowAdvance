@@ -690,7 +690,7 @@
   <div class="form-section" style="margin-bottom:16px">
     <div class="form-section-header"><span class="section-icon">◈</span> ORGANIZATION LOGO</div>
     <div class="form-section-body">
-      <p class="text-dim" style="font-size:12px;margin-bottom:12px">Logo shown in PDF headers. Max 2 MB (PNG/JPG/SVG).</p>
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">Default logo shown in PDF headers when a show's venue has no override below. Max 2 MB (PNG/JPG/GIF/WebP).</p>
       {% if logo_data %}
       <div style="margin-bottom:12px">
         <img src="{{ logo_data }}" alt="Logo" style="max-height:60px;max-width:200px;border:1px solid var(--border);border-radius:4px;padding:4px">
@@ -705,6 +705,22 @@
         <div class="logo-save-msg field-msg"></div>
         <button type="submit" class="btn btn-primary">Upload Logo</button>
       </form>
+    </div>
+  </div>
+
+  <div class="form-section" style="margin-bottom:16px">
+    <div class="form-section-header" style="display:flex;align-items:center;gap:10px">
+      <span class="section-icon">◈</span> PER-VENUE LOGOS
+      <button class="btn btn-xs btn-ghost" style="margin-left:auto" onclick="loadVenueLogos()" title="Refresh list">Refresh</button>
+    </div>
+    <div class="form-section-body">
+      <p class="text-dim" style="font-size:12px;margin-bottom:12px">
+        Override the default logo for a specific venue. PDFs generated for shows at that venue will use the override.
+        Venues are auto-listed from existing shows. Max 2 MB per file (PNG/JPG/GIF/WebP).
+      </p>
+      <div id="venue-logos-list">
+        <p class="text-dim" style="font-size:12px">Loading…</p>
+      </div>
     </div>
   </div>
 
@@ -2649,6 +2665,97 @@ async function deleteLogo() {
   const resp = await fetch('/settings/logo/delete', {method:'POST'});
   const d = await resp.json();
   if (d.success) location.reload();
+}
+
+// ── Per-Venue Logos ──────────────────────────────────────────────
+function _venueLogoEsc(s) {
+  const d = document.createElement('div');
+  d.textContent = (s == null) ? '' : String(s);
+  return d.innerHTML;
+}
+
+async function loadVenueLogos() {
+  const host = document.getElementById('venue-logos-list');
+  if (!host) return;
+  host.innerHTML = '<p class="text-dim" style="font-size:12px">Loading…</p>';
+  try {
+    const r = await fetch('/settings/venue-logos');
+    if (!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    const venues = d.venues || [];
+    if (!venues.length) {
+      host.innerHTML = '<p class="text-dim" style="font-size:12px">No venues found yet. Create a show first.</p>';
+      return;
+    }
+    host.innerHTML = venues.map(v => {
+      const safe = _venueLogoEsc(v.name);
+      const hasLogo = !!v.logo_data;
+      const preview = hasLogo
+        ? `<img src="${v.logo_data}" alt="" style="max-height:48px;max-width:160px;border:1px solid var(--border);border-radius:4px;padding:3px;background:#fff">`
+        : `<span class="text-dim" style="font-size:11px;font-style:italic">Using default</span>`;
+      const removeBtn = hasLogo
+        ? `<button class="btn btn-xs btn-danger-ghost" onclick="deleteVenueLogo('${safe.replace(/'/g, "\\'")}')">Remove</button>`
+        : '';
+      return `<div class="venue-logo-row" style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="flex:1;min-width:0">
+          <div style="font-weight:600;font-size:13px">${safe}</div>
+          <div style="margin-top:6px">${preview}</div>
+        </div>
+        <form onsubmit="event.preventDefault(); uploadVenueLogo(this, '${safe.replace(/'/g, "\\'")}')" enctype="multipart/form-data"
+              style="display:flex;align-items:center;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end">
+          <input type="file" name="logo" class="field-input field-input-sm" accept="image/*" style="max-width:200px" required>
+          <button type="submit" class="btn btn-sm btn-primary">${hasLogo ? 'Replace' : 'Upload'}</button>
+          ${removeBtn}
+          <span class="venue-logo-msg field-msg" style="display:none;flex-basis:100%;font-size:11px"></span>
+        </form>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    host.innerHTML = '<p class="text-dim" style="font-size:12px;color:#F56565">Failed to load venue list.</p>';
+  }
+}
+
+async function uploadVenueLogo(form, venueName) {
+  const fd = new FormData(form);
+  fd.append('venue', venueName);
+  const msg = form.querySelector('.venue-logo-msg');
+  const btn = form.querySelector('button[type="submit"]');
+  if (msg) { msg.style.display = 'block'; msg.textContent = 'Uploading…'; msg.style.color = 'var(--text-muted)'; }
+  if (btn) btn.disabled = true;
+  try {
+    const r = await fetch('/settings/venue-logos', { method: 'POST', body: fd });
+    const d = await r.json();
+    if (msg) {
+      msg.textContent = d.success ? '✓ Saved' : (d.error || 'Upload failed');
+      msg.style.color = d.success ? 'var(--accent)' : 'var(--danger)';
+    }
+    if (d.success) {
+      showSaveToast(`✓ Logo saved for "${venueName}"`);
+      setTimeout(loadVenueLogos, 600);
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function deleteVenueLogo(venueName) {
+  if (!confirm(`Remove the override logo for "${venueName}"? (Default logo will be used.)`)) return;
+  const r = await fetch('/settings/venue-logos/delete', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({ venue: venueName })
+  });
+  const d = await r.json();
+  if (d.success) {
+    showSaveToast(`✓ Override removed for "${venueName}"`);
+    loadVenueLogos();
+  } else {
+    alert(d.error || 'Remove failed');
+  }
+}
+
+if (document.getElementById('venue-logos-list')) {
+  loadVenueLogos();
 }
 
 async function saveUploadSize(form) {
