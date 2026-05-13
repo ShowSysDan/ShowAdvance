@@ -1333,7 +1333,14 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
         body: JSON.stringify({quantity: next})
       });
-      if (!r.ok) throw new Error('Save failed');
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        const msg = e.error || 'Save failed';
+        inp.value = orig;
+        if (typeof showSaveToast === 'function') showSaveToast(msg, 'error');
+        else alert(msg);
+        return;
+      }
       if (typeof showSaveToast === 'function') showSaveToast('Quantity updated');
       loadAssetsTab();
     } catch(e) {

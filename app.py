@@ -11084,6 +11084,36 @@ def show_asset_edit(show_id, sa_id):
     is_hidden    = (1 if data.get('is_hidden') else 0) if 'is_hidden' in data else existing['is_hidden']
     notes        = (data.get('notes') or '').strip()  if 'notes'      in data else existing['notes']
 
+    # Server-side availability enforcement. _get_asset_availability sums the
+    # CURRENT show_assets rows (which include this one) — back out this row's
+    # existing quantity so we measure the post-update delta cleanly.
+    pre_avail = _get_asset_availability(db, existing['asset_type_id'], rental_start, rental_end)
+    if pre_avail and not pre_avail.get('unlimited'):
+        remaining = pre_avail.get('available')
+        if remaining is not None:
+            # Only subtract our own current quantity if the existing row's date
+            # range actually overlaps the new range (and thus was counted).
+            own_overlaps = (
+                existing['rental_start'] and existing['rental_end']
+                and rental_start and rental_end
+                and existing['rental_end'] >= rental_start
+                and existing['rental_start'] <= rental_end
+            )
+            remaining_excl_self = remaining + (existing['quantity'] if own_overlaps else 0)
+            if remaining_excl_self - quantity < 0:
+                type_name_row = db.execute(
+                    'SELECT name FROM asset_types WHERE id=?', (existing['asset_type_id'],)
+                ).fetchone()
+                type_name = type_name_row['name'] if type_name_row else f"Type #{existing['asset_type_id']}"
+                db.close()
+                return jsonify({
+                    'error': f'Not enough units available for "{type_name}" — '
+                             f'{max(0, remaining_excl_self)} unit{"" if remaining_excl_self == 1 else "s"} available, '
+                             f'{quantity} requested.',
+                    'available': remaining_excl_self,
+                    'requested': quantity,
+                }), 409
+
     db.execute("""
         UPDATE show_assets SET quantity=?, rental_start=?, rental_end=?,
                is_hidden=?, notes=?

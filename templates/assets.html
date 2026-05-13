@@ -405,6 +405,9 @@
 .avail-cal-day.booked:hover { background:rgba(245,127,32,.35); }
 .avail-cal-day.full { background:rgba(197,48,48,.2); color:#FC8181; font-weight:600; cursor:pointer; }
 .avail-cal-day.full:hover { background:rgba(197,48,48,.3); }
+.avail-cal-day.overbooked { background:rgba(197,48,48,.45); color:#fff; font-weight:700; cursor:pointer; outline:1px solid #FC8181; }
+.avail-cal-day.overbooked:hover { background:rgba(197,48,48,.6); }
+.avail-cal-day.overbooked::after { content:"!"; font-size:9px; margin-left:2px; }
 .avail-cal-day.empty-cell { opacity:0; }
 .comp-back-bar { padding:8px 14px; border-bottom:1px solid var(--border); display:flex; align-items:center; gap:8px; flex-shrink:0; background:var(--bg); }
 </style>
@@ -1107,8 +1110,16 @@ function renderAvailCalendar() {
     const qty = bk.reduce((s,b) => s+(b.quantity||1), 0);
     const isToday = ds === today ? ' today' : '';
     let cls = '';
-    if (!unlimited && qty > 0) cls = (qty >= usable && usable > 0) ? ' full' : ' booked';
-    const tip = qty > 0 ? `${qty} booked${usable>0?' / '+usable+' usable':''}` : 'Available';
+    if (!unlimited && qty > 0) {
+      if (qty > usable && usable >= 0)        cls = ' overbooked';
+      else if (qty >= usable && usable > 0)   cls = ' full';
+      else                                    cls = ' booked';
+    }
+    const tip = qty > 0
+      ? (cls === ' overbooked'
+          ? `⚠ OVERBOOKED — ${qty} booked / ${usable} usable (${qty - usable} over)`
+          : `${qty} booked${usable>0?' / '+usable+' usable':''}`)
+      : 'Available';
     html += `<div class="avail-cal-day${cls}${isToday}" onclick="showAvailDayDetail('${ds}')" title="${tip}">${d}</div>`;
   }
   grid.innerHTML = html;
