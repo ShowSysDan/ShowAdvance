@@ -28,6 +28,7 @@ let _syncSince = '';           // ISO timestamp cursor for advance-field sync
 let _syncInterval = null;      // advance field poll handle (3 s)
 let _heartbeatInterval = null; // presence-only poll handle for other tabs (15 s)
 let _focusedField = null;      // field_key the current user has focused right now
+let _syncSeeded = false;       // false until the first poll seeds _syncSince; suppresses spurious toasts during slow page loads
 
 // Deterministic per-user colour palette (8 colours, cycled by name hash)
 const _PRESENCE_COLORS = [
@@ -65,6 +66,11 @@ async function _pollAdvanceSync() {
     if (d.since) _syncSince = d.since;
 
     // ── Merge field values ───────────────────────────────────────────────────
+    // On the very first poll after a page load, the server-rendered form may
+    // be stale (slow HTML download while other users were editing). Merge
+    // silently so the user doesn't see a confusing "N fields updated" toast
+    // for what is effectively just the freshest data hydrating into the form.
+    const isFirstPoll = !_syncSeeded;
     const focused = document.activeElement;
     const fields = d.fields || {};
     let mergedCount = 0;
@@ -73,17 +79,22 @@ async function _pollAdvanceSync() {
       if (!el || el === focused) continue;   // never overwrite what you're typing
       if (el.type === 'checkbox') {
         const next = (value === 'true');
-        if (el.checked !== next) { el.checked = next; mergedCount++; _flashField(el); }
+        if (el.checked !== next) {
+          el.checked = next;
+          mergedCount++;
+          if (!isFirstPoll) _flashField(el);
+        }
       } else if (el.value !== value) {
         el.value = value;
         mergedCount++;
-        _flashField(el);
+        if (!isFirstPoll) _flashField(el);
         evaluateAllConditionals();
       }
     }
-    if (mergedCount > 0) {
+    if (mergedCount > 0 && !isFirstPoll) {
       showSaveToast(`↓ ${mergedCount} field${mergedCount > 1 ? 's' : ''} updated`);
     }
+    _syncSeeded = true;
 
     // ── Update presence indicators ───────────────────────────────────────────
     _updatePresenceBadge(d.active_users || []);
@@ -722,6 +733,9 @@ async function saveAdvance() {
     const d = await resp.json();
     if (d.success) {
       _isDirty = false;
+      // Advance the sync cursor past our own write so the next poll doesn't
+      // echo our edits back as "↓ N fields updated".
+      if (d.since) _syncSince = d.since;
       setSaveStatus('saved', '✓ Saved');
       showSaveToast('✓ Saved');
       setTimeout(() => setSaveStatus('', ''), 3000);

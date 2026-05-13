@@ -2834,10 +2834,17 @@ def save_advance(show_id):
     _snapshot_form_history(db, show_id, 'advance', {'advance_data': data})
     log_audit(db, 'FORM_SAVE', 'form', show_id, show_id=show_id, detail='type=advance')
 
+    # Return the new MAX(updated_at) so the client can bump its sync cursor
+    # past its own writes and the next poll won't echo this user's edits back.
+    ts_row = db.execute(
+        "SELECT MAX(updated_at) FROM advance_data WHERE show_id = ?", (show_id,)
+    ).fetchone()
+    new_since = ts_row[0] if ts_row and ts_row[0] else ''
+
     db.commit()
     db.close()
     syslog_logger.info(f"FORM_SAVE show_id={show_id} type=advance by={session.get('username')}")
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'since': new_since})
 
 
 # ─── Performances (multiple dates/times per show) ─────────────────────────────
@@ -10990,6 +10997,27 @@ def show_asset_add(show_id):
     # Default is_hidden from the asset type's hide_from_pm flag
     is_hidden = 1 if (type_row and type_row['hide_from_pm']) else 0
 
+    # Server-side availability enforcement. Counts all existing show_assets for
+    # this type in the requested date range (the requesting show may have none
+    # yet, or may already hold lines from earlier requests this same click-burst
+    # fired in parallel) and rejects if this new line would push it negative.
+    pre_avail = _get_asset_availability(db, asset_type_id, rental_start, rental_end)
+    if pre_avail and not pre_avail.get('unlimited'):
+        remaining = pre_avail.get('available')
+        if remaining is not None and remaining - quantity < 0:
+            type_name = db.execute(
+                'SELECT name FROM asset_types WHERE id=?', (asset_type_id,)
+            ).fetchone()
+            type_name = type_name['name'] if type_name else f'Type #{asset_type_id}'
+            db.close()
+            return jsonify({
+                'error': f'Not enough units available for "{type_name}" \u2014 '
+                         f'{max(0, remaining)} unit{"" if remaining == 1 else "s"} available, '
+                         f'{quantity} requested.',
+                'available': remaining,
+                'requested': quantity,
+            }), 409
+
     db.execute("""
         INSERT INTO show_assets
           (show_id, asset_type_id, quantity, rental_start, rental_end, locked_price, is_hidden, notes, added_by)
@@ -11004,7 +11032,9 @@ def show_asset_add(show_id):
     db.commit()
     syslog_logger.info(f"ASSET_ADDED_TO_SHOW show_id={show_id} type_id={asset_type_id} qty={quantity} by={session.get('username')}")
     result = dict(row)
-    # Check for over-allocation and notify admins
+    # Concurrent-write safety net: pre-check above prevents over-allocation for
+    # single-user flows, but two simultaneous writers from different sessions
+    # could both pass the check and both insert. Notify admins if that happens.
     try:
         _avail = _get_asset_availability(db, asset_type_id, rental_start, rental_end)
         if _avail and not _avail.get('unlimited') and _avail.get('available') is not None and _avail['available'] < 0:
@@ -11013,7 +11043,7 @@ def show_asset_add(show_id):
             _show_name = show['name'] if show else f'Show #{show_id}'
             _notify_asset_recipients(
                 db,
-                f'3\u00b72\u00b71\u2192THEATER: Asset Over-Allocated \u2014 {_type_name}',
+                f'3·2·1→THEATER: Asset Over-Allocated — {_type_name}',
                 f'Asset "{_type_name}" is now over-allocated for show "{_show_name}".\n\n'
                 f'Current availability: {_avail["available"]} (negative = over-allocated)\n'
                 f'Total units: {_avail.get("total_items","?")}, In maintenance: {_avail.get("in_maintenance",0)}, '
