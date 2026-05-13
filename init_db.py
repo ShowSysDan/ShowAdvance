@@ -584,6 +584,7 @@ CREATE TABLE IF NOT EXISTS show_assets (
     rental_start   DATE,
     rental_end     DATE,
     locked_price   REAL DEFAULT 0.0,
+    original_locked_price REAL DEFAULT NULL,
     is_hidden      INTEGER DEFAULT 0,
     notes          TEXT DEFAULT '',
     added_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -1318,11 +1319,24 @@ def migrate_db():
         'ALTER TABLE audit_log ADD COLUMN undone_by INTEGER REFERENCES users(id) ON DELETE SET NULL',
         'ALTER TABLE audit_log ADD COLUMN undone_by_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL',
         'ALTER TABLE overhead_labor_groups ADD COLUMN project_id INTEGER REFERENCES overhead_projects(id) ON DELETE SET NULL',
+        'ALTER TABLE show_assets ADD COLUMN original_locked_price REAL DEFAULT NULL',
     ]:
         try:
             conn.execute(alter_sql)
         except Exception:
             pass  # Column already exists
+
+    # Backfill original_locked_price for legacy rows where the column was just
+    # added. Use the current locked_price as the best-available "original" so
+    # the Reset button has something to restore to for pre-migration lines.
+    try:
+        conn.execute("""
+            UPDATE show_assets
+               SET original_locked_price = locked_price
+             WHERE original_locked_price IS NULL
+        """)
+    except Exception:
+        pass
 
     # Staffing / crew scheduling tables (safe to rerun)
     conn.executescript("""
@@ -2512,6 +2526,7 @@ CREATE TABLE IF NOT EXISTS show_assets (
     rental_start   DATE,
     rental_end     DATE,
     locked_price   REAL DEFAULT 0.0,
+    original_locked_price REAL DEFAULT NULL,
     is_hidden      INTEGER DEFAULT 0,
     notes          TEXT DEFAULT '',
     added_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -2956,6 +2971,7 @@ def migrate_db_postgres():
             f"ALTER TABLE \"{app_schema}\".overhead_projects ADD COLUMN IF NOT EXISTS color TEXT DEFAULT ''",
             f'ALTER TABLE "{app_schema}".overhead_projects ADD COLUMN IF NOT EXISTS archived INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".overhead_projects ADD COLUMN IF NOT EXISTS created_by INTEGER',
+            f'ALTER TABLE "{app_schema}".show_assets ADD COLUMN IF NOT EXISTS original_locked_price REAL DEFAULT NULL',
         ]
 
         shared_alters = [
@@ -2977,6 +2993,17 @@ def migrate_db_postgres():
         for sql in app_alters + shared_alters:
             cur.execute(sql)
             n += 1
+
+        # Backfill original_locked_price from the current locked_price for any
+        # legacy show_assets rows that pre-date this column.
+        try:
+            cur.execute(f"""
+                UPDATE "{app_schema}".show_assets
+                   SET original_locked_price = locked_price
+                 WHERE original_locked_price IS NULL
+            """)
+        except Exception as e:
+            print(f"[migrate_pg] original_locked_price backfill warning: {e}")
 
         conn.commit()
         cur.close()

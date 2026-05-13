@@ -10711,7 +10711,8 @@ def _get_asset_availability(db, asset_type_id, start_date=None, end_date=None):
 
     shows = db.execute(f"""
         SELECT sa.id, sa.show_id, sa.quantity, sa.rental_start, sa.rental_end,
-               sa.is_hidden, sa.locked_price, s.name as show_name
+               sa.is_hidden, sa.locked_price, sa.original_locked_price,
+               s.name as show_name
         FROM show_assets sa
         JOIN shows s ON s.id = sa.show_id
         WHERE sa.asset_type_id = ?{date_filter}
@@ -11163,10 +11164,12 @@ def show_asset_add(show_id):
 
     db.execute("""
         INSERT INTO show_assets
-          (show_id, asset_type_id, quantity, rental_start, rental_end, locked_price, is_hidden, notes, added_by)
-        VALUES (?,?,?,?,?,?,?,?,?)
-    """, (show_id, asset_type_id, quantity, rental_start, rental_end, locked_price,
-          is_hidden, (data.get('notes') or '').strip(), session['user_id']))
+          (show_id, asset_type_id, quantity, rental_start, rental_end,
+           locked_price, original_locked_price, is_hidden, notes, added_by)
+        VALUES (?,?,?,?,?,?,?,?,?,?)
+    """, (show_id, asset_type_id, quantity, rental_start, rental_end,
+          locked_price, locked_price, is_hidden,
+          (data.get('notes') or '').strip(), session['user_id']))
     db.commit()
     row = db.execute('SELECT * FROM show_assets ORDER BY id DESC LIMIT 1').fetchone()
 
@@ -11326,30 +11329,30 @@ def show_asset_remove(show_id, sa_id):
 @app.route('/shows/<int:show_id>/assets/<int:sa_id>/reset-price', methods=['POST'])
 @show_advance_editor_required
 def show_asset_reset_price(show_id, sa_id):
-    """Recompute this line's locked_price from the asset type's current rate
-    card (daily × days, or weekly × weeks when applicable) and update the row.
-    Returns the old and new prices."""
+    """Restore this line's locked_price to the value it had at add-time
+    (stored in original_locked_price). Catalog rate-card changes since then
+    are intentionally NOT applied — they only affect new rentals."""
     db = get_db()
-    row = db.execute("""
-        SELECT sa.*, at.rental_cost, at.weekly_rate
-        FROM show_assets sa
-        JOIN asset_types at ON at.id = sa.asset_type_id
-        WHERE sa.id=? AND sa.show_id=?
-    """, (sa_id, show_id)).fetchone()
+    row = db.execute(
+        'SELECT locked_price, original_locked_price FROM show_assets WHERE id=? AND show_id=?',
+        (sa_id, show_id)
+    ).fetchone()
     if not row:
         db.close()
         return jsonify({'error': 'Not found'}), 404
     old_price = float(row['locked_price'] or 0)
-    new_price = _compute_locked_price(
-        row['rental_cost'], row['weekly_rate'], row['rental_start'], row['rental_end']
-    )
+    original = row['original_locked_price']
+    if original is None:
+        db.close()
+        return jsonify({'error': 'No original price recorded for this line.'}), 409
+    new_price = float(original)
     if abs(new_price - old_price) < 0.005:
         db.close()
         return jsonify({'success': True, 'old_price': old_price, 'new_price': new_price, 'changed': False})
     db.execute('UPDATE show_assets SET locked_price=? WHERE id=?', (new_price, sa_id))
     db.commit()
     log_audit(db, 'ASSET_PRICE_RESET', 'show_asset', sa_id, show_id=show_id,
-              detail=f'old={old_price:.2f} new={new_price:.2f}')
+              detail=f'old={old_price:.2f} new={new_price:.2f} (restored to original)')
     _reset_asset_approval(db, show_id, 'asset_price_reset')
     db.commit()
     db.close()

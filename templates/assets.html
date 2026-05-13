@@ -1218,15 +1218,27 @@ window.showAvailDayDetail = function(dateStr) {
   }
   c.innerHTML = `<p style="padding:8px 0 4px;font-size:10px;font-weight:700;letter-spacing:.05em;color:var(--text-dim)">${dateStr}</p>` +
     bk.map(s => {
-      const price = (s.locked_price !== undefined && s.locked_price !== null)
-        ? `<span style="color:var(--text-dim);font-size:10px;flex-shrink:0" title="Locked unit price">$${Number(s.locked_price).toFixed(2)}</span>`
+      const cur = (s.locked_price !== undefined && s.locked_price !== null) ? Number(s.locked_price) : null;
+      const orig = (s.original_locked_price !== undefined && s.original_locked_price !== null) ? Number(s.original_locked_price) : null;
+      const priceLabel = cur !== null
+        ? `<span style="color:var(--text-dim);font-size:10px;flex-shrink:0" title="Current locked unit price">$${cur.toFixed(2)}</span>`
         : '';
-      return `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px;align-items:baseline">
-        <span style="font-weight:500;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.show_name)}</span>
+      const isOverridden = (cur !== null && orig !== null && Math.abs(cur - orig) >= 0.005);
+      const origLabel = isOverridden
+        ? `<span style="color:#F59E0B;font-size:10px;flex-shrink:0" title="This price has been overridden from its add-time value of $${orig.toFixed(2)}">(orig $${orig.toFixed(2)})</span>`
+        : '';
+      const resetBtn = (orig === null)
+        ? '' // No original recorded — nothing to restore to
+        : (isOverridden
+            ? `<button class="btn btn-xs btn-ghost" style="padding:1px 6px;font-size:10px;flex-shrink:0" title="Restore this line's price to its add-time value ($${orig.toFixed(2)}). Rate-card changes don't affect existing rentals." onclick="resetShowAssetPrice(${s.show_id}, ${s.id}, this)">↻ Restore $${orig.toFixed(2)}</button>`
+            : `<span style="color:var(--text-dim);font-size:10px;flex-shrink:0;font-style:italic" title="This line is already at its original price.">— at original —</span>`);
+      return `<div style="padding:4px 0;border-bottom:1px solid var(--border);font-size:12px;display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
+        <span style="font-weight:500;flex:1;min-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.show_name)}</span>
         <span style="color:var(--accent);flex-shrink:0">×${s.quantity}</span>
-        ${price}
+        ${priceLabel}
+        ${origLabel}
         <span style="color:var(--text-dim);font-size:10px;flex-shrink:0">${s.rental_start||''} – ${s.rental_end||''}</span>
-        <button class="btn btn-xs btn-ghost" style="padding:1px 6px;font-size:10px;flex-shrink:0" title="Reset this line's price to the asset type's current rate card" onclick="resetShowAssetPrice(${s.show_id}, ${s.id}, this)">↻ Reset price</button>
+        ${resetBtn}
       </div>`;
     }).join('');
 };
