@@ -11780,15 +11780,15 @@ def asset_approvals():
 
 
 @app.route('/api/asset-approvals/pending-count')
-@login_required
+@asset_manager_required
 def asset_approvals_pending_count():
     """Lightweight count for the nav-badge: how many active shows inside the
     6-week lookahead window have at least one gear request and are not yet
     approved, and of those how many fall inside the next 7 days (urgent).
 
     Returns {'pending': N, 'urgent': N, 'window_days': 42, 'urgent_days': 7}.
-    Accessible to any logged-in user since the badge is only rendered for
-    asset managers / admins in the nav template anyway.
+    Gated by @asset_manager_required so non-asset users can't see or query
+    the queue size at all (admins, content admins, asset managers only).
     """
     from datetime import date, timedelta
     WINDOW_DAYS = 42
