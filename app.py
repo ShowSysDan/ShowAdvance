@@ -348,6 +348,20 @@ def pretty_json_filter(value):
         return value or ''
 
 
+@app.template_filter('from_json')
+def from_json_filter(value):
+    """Parse a JSON string in a template, returning [] on any failure so
+    callers can safely iterate / count. Useful for columns that hold JSON
+    lists (e.g. contacts.venue_filter)."""
+    if not value:
+        return []
+    try:
+        out = json.loads(value)
+        return out if isinstance(out, list) else []
+    except (ValueError, TypeError):
+        return []
+
+
 @app.template_filter('multi')
 def multi_filter(value, sep=', '):
     """Render a multi-select value cleanly. Accepts either a JSON-encoded
@@ -1770,7 +1784,8 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         if not smtp_cfg.get('smtp_host'):
             return False, 'SMTP not configured.', 0
 
-    # Fetch recipients based on pdf_type
+    # Fetch recipients based on pdf_type. Filter again in Python by each
+    # contact's venue_filter (JSON list) — empty / NULL means "all venues".
     db = get_db()
     if pdf_type == 'advance':
         recip_col = 'advance_recipient'
@@ -1780,13 +1795,36 @@ def _send_pdf_email(show_id, pdf_type, triggered_by, exported_by_id=None, days_b
         recip_col = 'postnotes_recipient'
     else:
         recip_col = 'report_recipient'
-    recipients = [
-        r['email'] for r in
-        db.execute(
-            f"SELECT email FROM contacts WHERE ({recip_col}=1 OR report_recipient=1) AND email != '' ORDER BY name"
-        ).fetchall()
-    ]
+    show_venue_row = db.execute(
+        'SELECT venue FROM shows WHERE id=?', (show_id,)
+    ).fetchone()
+    show_venue = (show_venue_row['venue'] if show_venue_row else '') or ''
+    rows = db.execute(
+        f"SELECT email, venue_filter FROM contacts "
+        f"WHERE ({recip_col}=1 OR report_recipient=1) AND email != '' "
+        f"ORDER BY name"
+    ).fetchall()
     db.close()
+
+    recipients = []
+    for r in rows:
+        raw = r['venue_filter']
+        # Empty / missing → no venue filter, contact gets every show.
+        if not raw or str(raw).strip() in ('', '[]', 'null'):
+            recipients.append(r['email'])
+            continue
+        try:
+            allowed = json.loads(raw)
+            if not isinstance(allowed, list) or not allowed:
+                recipients.append(r['email'])
+                continue
+        except (ValueError, TypeError):
+            # Corrupt JSON — fail open so a bad row doesn't silently drop the
+            # recipient. Misconfiguration is admin-visible in Settings.
+            recipients.append(r['email'])
+            continue
+        if show_venue in allowed:
+            recipients.append(r['email'])
 
     if not recipients:
         return False, 'No report recipients configured.', 0
@@ -2542,13 +2580,64 @@ def dashboard():
         _venue_map[v].sort(key=lambda s: (s['show_date'] is None, s['show_date'] or ''))
     venue_groups = [(v, _venue_map[v]) for v in _names]
 
+    # Per-user home layout / density preference (default to current behaviour).
+    home_layout = 'columns'
+    home_density = 'normal'
+    try:
+        db2 = get_db()
+        pref = db2.execute(
+            'SELECT home_layout, home_density FROM users WHERE id=?',
+            (session['user_id'],)
+        ).fetchone()
+        db2.close()
+        if pref:
+            if pref['home_layout']  in ('columns', 'stacked'): home_layout  = pref['home_layout']
+            if pref['home_density'] in ('normal',  'slim'):    home_density = pref['home_density']
+    except Exception:
+        pass
+
     return render_template('dashboard.html',
                            active_shows=active,
                            archived_shows=archived,
                            venue_groups=venue_groups,
                            restricted=restricted,
+                           home_layout=home_layout,
+                           home_density=home_density,
                            motd_messages=get_active_messages(session.get('user_id'), 'motd'),
                            user=get_current_user())
+
+
+@app.route('/api/me/home-layout', methods=['POST'])
+@login_required
+def save_home_layout_prefs():
+    """Persist this user's home-dashboard layout + density preference.
+
+    Body: {"layout": "columns"|"stacked", "density": "normal"|"slim"}.
+    Either field is optional; only present keys are written. Unknown values
+    are rejected so the column always holds one of the documented options.
+    """
+    data = request.get_json(force=True) or {}
+    layout  = data.get('layout')
+    density = data.get('density')
+    sets, params = [], []
+    if layout is not None:
+        if layout not in ('columns', 'stacked'):
+            return jsonify({'error': 'Invalid layout'}), 400
+        sets.append('home_layout=?')
+        params.append(layout)
+    if density is not None:
+        if density not in ('normal', 'slim'):
+            return jsonify({'error': 'Invalid density'}), 400
+        sets.append('home_density=?')
+        params.append(density)
+    if not sets:
+        return jsonify({'error': 'No preference fields supplied'}), 400
+    params.append(session['user_id'])
+    db = get_db()
+    db.execute(f'UPDATE users SET {", ".join(sets)} WHERE id=?', params)
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'layout': layout, 'density': density})
 
 
 # ─── New Show ─────────────────────────────────────────────────────────────────
@@ -3831,7 +3920,7 @@ def _build_advance_pdf(show_id, exported_by_id=None, base_url=None):
     contacts = db.execute('SELECT * FROM contacts ORDER BY name').fetchall()
     contact_map = {c['id']: dict(c) for c in contacts}
 
-    logo_data = get_app_setting('logo_data', '')
+    logo_data = _get_logo_for_venue(db, show['venue'] if show else '')
 
     new_v = (show['advance_version'] or 0) + 1
     db.execute('UPDATE shows SET advance_version=? WHERE id=?', (new_v, show_id))
@@ -4074,7 +4163,7 @@ def _build_schedule_pdf(show_id, exported_by_id=None, base_url=None):
     contact_map = {c['id']: dict(c) for c in contacts}
     contact_name_map = {c['name']: dict(c) for c in contacts}
 
-    logo_data = get_app_setting('logo_data', '')
+    logo_data = _get_logo_for_venue(db, show['venue'] if show else '')
 
     # WiFi always from global settings (not per-show)
     wifi_ssid = get_app_setting('wifi_network', '')
@@ -4443,7 +4532,7 @@ def _build_postnotes_pdf(show_id, exported_by_id=None, base_url=None):
     sched_rows = db.execute(
         'SELECT * FROM schedule_rows WHERE show_id=? ORDER BY sort_order,id', (show_id,)
     ).fetchall()
-    logo_data = get_app_setting('logo_data', '')
+    logo_data = _get_logo_for_venue(db, show['venue'] if show else '')
 
     new_v = (show['postnotes_version'] or 0) + 1
     db.execute('UPDATE shows SET postnotes_version=? WHERE id=?', (new_v, show_id))
@@ -5073,6 +5162,8 @@ def settings():
     ).fetchall() if _can_manage_crew else []
     job_positions = [dict(p) for p in positions_raw]
     distinct_venues = _get_distinct_venues(db3) if _can_manage_crew else []
+    # Always-available venue list for contact venue-filter UI (cheap query).
+    contact_venues = _get_distinct_venues(db3)
 
     # Crew members with rate level info
     crew_members_list = [dict(m) for m in db3.execute(
@@ -5160,6 +5251,7 @@ def settings():
                            position_categories=position_categories,
                            job_positions=job_positions,
                            distinct_venues=distinct_venues,
+                           contact_venues=contact_venues,
                            crew_members_list=crew_members_list,
                            pay_rate_levels=pay_rate_levels,
                            wifi_network=all_settings.get('wifi_network', ''),
@@ -5174,16 +5266,48 @@ def settings():
                            user=get_current_user())
 
 
+def _normalize_venue_filter(raw):
+    """Accept a list/JSON-string/empty value and return a JSON string suitable
+    for storage in contacts.venue_filter, or None when there's no restriction.
+    Empty / falsy → None (no filter, all venues). De-dupes and strips items."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        s = raw.strip()
+        if not s:
+            return None
+        try:
+            raw = json.loads(s)
+        except ValueError:
+            return None
+    if not isinstance(raw, list):
+        return None
+    cleaned = []
+    seen = set()
+    for v in raw:
+        if not isinstance(v, str):
+            continue
+        v = v.strip()
+        if not v or v in seen:
+            continue
+        seen.add(v)
+        cleaned.append(v)
+    if not cleaned:
+        return None
+    return json.dumps(cleaned)
+
+
 @app.route('/settings/contacts/add', methods=['POST'])
 @content_admin_required
 def add_contact():
     db = get_db()
     name = request.form.get('name','').strip()
+    # venue_filter not exposed on the add form yet — set via edit modal.
     cur = db.execute("""
         INSERT INTO contacts (name, title, department, phone, email,
                               report_recipient, advance_recipient, production_recipient,
-                              postnotes_recipient)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                              postnotes_recipient, venue_filter)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (name,
           request.form.get('title','').strip(),
           request.form.get('department','').strip(),
@@ -5192,7 +5316,8 @@ def add_contact():
           1 if request.form.get('report_recipient') else 0,
           1 if request.form.get('advance_recipient') else 0,
           1 if request.form.get('production_recipient') else 0,
-          1 if request.form.get('postnotes_recipient') else 0))
+          1 if request.form.get('postnotes_recipient') else 0,
+          None))
     cid_new = cur.lastrowid
     log_audit_change(db, 'CONTACT_ADD', 'contact', cid_new, detail=name,
                      table='contacts')
@@ -5208,18 +5333,22 @@ def edit_contact(cid):
     data = request.get_json(force=True) or {}
     db = get_db()
     before = _snapshot_row(db, 'contacts', cid)
-    db.execute("""
-        UPDATE contacts SET name=?, title=?, department=?, phone=?, email=?,
-                            report_recipient=?, advance_recipient=?, production_recipient=?,
-                            postnotes_recipient=?
-        WHERE id=?
-    """, (data.get('name',''), data.get('title',''), data.get('department',''),
-          data.get('phone',''), data.get('email',''),
-          1 if data.get('report_recipient') else 0,
-          1 if data.get('advance_recipient') else 0,
-          1 if data.get('production_recipient') else 0,
-          1 if data.get('postnotes_recipient') else 0,
-          cid))
+    # venue_filter is only updated when the key is present in the payload;
+    # otherwise we preserve the existing value (no accidental clears).
+    sets = ["name=?", "title=?", "department=?", "phone=?", "email=?",
+            "report_recipient=?", "advance_recipient=?",
+            "production_recipient=?", "postnotes_recipient=?"]
+    params = [data.get('name',''), data.get('title',''), data.get('department',''),
+              data.get('phone',''), data.get('email',''),
+              1 if data.get('report_recipient') else 0,
+              1 if data.get('advance_recipient') else 0,
+              1 if data.get('production_recipient') else 0,
+              1 if data.get('postnotes_recipient') else 0]
+    if 'venue_filter' in data:
+        sets.append('venue_filter=?')
+        params.append(_normalize_venue_filter(data.get('venue_filter')))
+    params.append(cid)
+    db.execute(f"UPDATE contacts SET {', '.join(sets)} WHERE id=?", params)
     after = _snapshot_row(db, 'contacts', cid)
     log_audit(db, 'CONTACT_EDIT', 'contact', cid, detail=data.get('name',''),
               before=before, after=after)
@@ -6818,6 +6947,106 @@ def delete_logo():
     log_audit(db, 'SETTINGS_CHANGE', 'setting', None, detail='logo_delete')
     db.commit(); db.close()
     syslog_logger.info(f"SETTINGS_CHANGE detail=logo_delete by={session.get('username')}")
+    return jsonify({'success': True})
+
+
+def _get_logo_for_venue(db, venue_name):
+    """Return the data-URL logo to use for a given venue. Prefers a row in
+    venue_logos; falls back to the global logo_data app_setting. Always
+    returns a string ('' if no logo configured anywhere)."""
+    if venue_name:
+        row = db.execute(
+            'SELECT logo_data FROM venue_logos WHERE venue_name=?',
+            (venue_name,)
+        ).fetchone()
+        if row and row['logo_data']:
+            return row['logo_data']
+    return get_app_setting('logo_data', '') or ''
+
+
+_ALLOWED_LOGO_MIMES = ('image/png', 'image/jpeg', 'image/gif', 'image/webp')
+
+
+@app.route('/settings/venue-logos', methods=['GET'])
+@admin_required
+def venue_logos_list():
+    """Return every distinct active-show venue plus its configured logo (if any)."""
+    db = get_db()
+    # Distinct venues currently in use across shows (active + archived).
+    venues = [r['venue'] for r in db.execute(
+        "SELECT DISTINCT venue FROM shows "
+        "WHERE venue IS NOT NULL AND TRIM(venue) != '' "
+        "ORDER BY LOWER(venue)"
+    ).fetchall()]
+    logos = {r['venue_name']: r['logo_data'] for r in db.execute(
+        'SELECT venue_name, logo_data FROM venue_logos'
+    ).fetchall()}
+    db.close()
+    # Include any venues that only exist as logo overrides (e.g. logo
+    # configured before a show with that venue was created).
+    for v in logos.keys():
+        if v not in venues:
+            venues.append(v)
+    venues.sort(key=lambda v: v.lower())
+    return jsonify({
+        'venues': [
+            {'name': v, 'logo_data': logos.get(v, '')}
+            for v in venues
+        ]
+    })
+
+
+@app.route('/settings/venue-logos', methods=['POST'])
+@admin_required
+def venue_logo_upload():
+    """Upload or replace the logo for a venue. Multipart form with fields
+    `venue` (str) and `logo` (file)."""
+    import base64
+    venue_name = (request.form.get('venue') or '').strip()
+    if not venue_name:
+        return jsonify({'success': False, 'error': 'Venue name required.'}), 400
+    f = request.files.get('logo')
+    if not f or not f.filename:
+        return jsonify({'success': False, 'error': 'No file uploaded.'}), 400
+    data = f.read()
+    if len(data) > 2 * 1024 * 1024:
+        return jsonify({'success': False, 'error': 'Logo too large (max 2 MB).'}), 413
+    mime = f.content_type or 'image/png'
+    if mime not in _ALLOWED_LOGO_MIMES:
+        return jsonify({'success': False,
+                        'error': 'Unsupported image type. Allowed: PNG, JPEG, GIF, WebP.'}), 400
+    b64 = base64.b64encode(data).decode()
+    logo_data = f'data:{mime};base64,{b64}'
+    db = get_db()
+    db.execute(
+        "INSERT OR REPLACE INTO venue_logos (venue_name, logo_data, updated_at) "
+        "VALUES (?, ?, CURRENT_TIMESTAMP)",
+        (venue_name, logo_data)
+    )
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None,
+              detail=f'venue_logo_upload venue={venue_name}')
+    db.commit(); db.close()
+    syslog_logger.info(
+        f"SETTINGS_CHANGE detail=venue_logo_upload venue={venue_name} by={session.get('username')}"
+    )
+    return jsonify({'success': True})
+
+
+@app.route('/settings/venue-logos/delete', methods=['POST'])
+@admin_required
+def venue_logo_delete():
+    data = request.get_json(force=True) or {}
+    venue_name = (data.get('venue') or '').strip()
+    if not venue_name:
+        return jsonify({'success': False, 'error': 'Venue name required.'}), 400
+    db = get_db()
+    db.execute('DELETE FROM venue_logos WHERE venue_name=?', (venue_name,))
+    log_audit(db, 'SETTINGS_CHANGE', 'setting', None,
+              detail=f'venue_logo_delete venue={venue_name}')
+    db.commit(); db.close()
+    syslog_logger.info(
+        f"SETTINGS_CHANGE detail=venue_logo_delete venue={venue_name} by={session.get('username')}"
+    )
     return jsonify({'success': True})
 
 

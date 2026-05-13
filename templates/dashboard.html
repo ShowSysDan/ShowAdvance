@@ -52,10 +52,21 @@
     <button class="venue-pill active" data-venue="{{ venue }}" onclick="toggleVenue(this)">{{ venue }}</button>
     {% endfor %}
   </div>
+  <div class="dash-layout-toggles" title="Home dashboard layout (saved to your account)">
+    <label class="dash-layout-label">Layout</label>
+    <select id="dash-layout-select" class="field-input field-input-sm" onchange="saveHomeLayout()" aria-label="Dashboard layout">
+      <option value="columns" {% if home_layout == 'columns' %}selected{% endif %}>Columns (scroll)</option>
+      <option value="stacked" {% if home_layout == 'stacked' %}selected{% endif %}>Stacked (top→bottom)</option>
+    </select>
+    <select id="dash-density-select" class="field-input field-input-sm" onchange="saveHomeLayout()" aria-label="Card density">
+      <option value="normal" {% if home_density == 'normal' %}selected{% endif %}>Normal</option>
+      <option value="slim"   {% if home_density == 'slim'   %}selected{% endif %}>Slim</option>
+    </select>
+  </div>
 </div>
 
 {# ── Venue Columns ────────────────────────────────────────────────────────── #}
-<div class="venue-columns-wrap">
+<div class="venue-columns-wrap layout-{{ home_layout }} density-{{ home_density }}">
 <div class="venue-columns-top-scroll" id="venue-top-scroll"><div class="venue-columns-top-scroll-inner" id="venue-top-scroll-inner"></div></div>
 <div class="venue-columns" id="venue-columns">
   {% for venue, shows in venue_groups %}
@@ -204,6 +215,27 @@ function toggleVenue(btn) {
     btn.classList.remove('active');
     if (col) col.style.display = 'none';
   }
+}
+
+// Layout + density toggle — saves the user's preference and re-applies the
+// classes on the wrapper without a page reload so the change is immediate.
+async function saveHomeLayout() {
+  const layout  = document.getElementById('dash-layout-select').value;
+  const density = document.getElementById('dash-density-select').value;
+  const wrap = document.querySelector('.venue-columns-wrap');
+  if (wrap) {
+    wrap.classList.remove('layout-columns', 'layout-stacked');
+    wrap.classList.add('layout-' + layout);
+    wrap.classList.remove('density-normal', 'density-slim');
+    wrap.classList.add('density-' + density);
+  }
+  try {
+    await fetch('/api/me/home-layout', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+      body: JSON.stringify({ layout, density })
+    });
+  } catch (_) {}
 }
 
 function dismissMotd(id) {

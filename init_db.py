@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS users (
     is_document_viewer INTEGER DEFAULT 0,
     viewer_venues TEXT DEFAULT NULL,
     viewer_doc_types TEXT DEFAULT NULL,
+    -- Per-user home dashboard layout preference.
+    home_layout TEXT DEFAULT 'columns',    -- 'columns' | 'stacked'
+    home_density TEXT DEFAULT 'normal',    -- 'normal'  | 'slim'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -134,6 +137,9 @@ CREATE TABLE IF NOT EXISTS contacts (
     production_recipient INTEGER DEFAULT 0,
     postnotes_recipient INTEGER DEFAULT 0,
     system_recipient    INTEGER DEFAULT 0,
+    -- JSON list of venue names this contact should receive emails for.
+    -- NULL or empty list = no restriction (all venues, current default).
+    venue_filter        TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -496,6 +502,15 @@ CREATE TABLE IF NOT EXISTS email_send_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_email_send_log_show ON email_send_log(show_id, pdf_type, sent_at);
+
+-- Per-venue logo overrides for PDF headers. Empty / missing row falls back
+-- to the global logo_data app_setting. Logo is stored as a data URL so the
+-- existing <img src> machinery in the PDF templates works unchanged.
+CREATE TABLE IF NOT EXISTS venue_logos (
+    venue_name TEXT PRIMARY KEY,
+    logo_data  TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- General outgoing-email log: one row per attempted send (recipient + result).
 -- Used by Settings → Email → Recent Activity so admins can audit what went out.
@@ -1338,6 +1353,8 @@ def migrate_db():
         'ALTER TABLE show_assets ADD COLUMN original_locked_price REAL DEFAULT NULL',
         'ALTER TABLE shows ADD COLUMN cast_count INTEGER DEFAULT NULL',
         'ALTER TABLE shows ADD COLUMN crew_count INTEGER DEFAULT NULL',
+        "ALTER TABLE users ADD COLUMN home_layout TEXT DEFAULT 'columns'",
+        "ALTER TABLE users ADD COLUMN home_density TEXT DEFAULT 'normal'",
     ]:
         try:
             conn.execute(alter_sql)
@@ -1608,6 +1625,12 @@ def migrate_db():
             triggered_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
         );
         CREATE INDEX IF NOT EXISTS idx_email_outbox_log_sent ON email_outbox_log(sent_at DESC);
+
+        CREATE TABLE IF NOT EXISTS venue_logos (
+            venue_name TEXT PRIMARY KEY,
+            logo_data  TEXT NOT NULL DEFAULT '',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
     """)
 
     # Asset manager tables (safe to rerun)
@@ -1781,6 +1804,7 @@ def migrate_db():
         "ALTER TABLE contacts ADD COLUMN production_recipient INTEGER DEFAULT 0",
         "ALTER TABLE contacts ADD COLUMN postnotes_recipient INTEGER DEFAULT 0",
         "ALTER TABLE contacts ADD COLUMN system_recipient INTEGER DEFAULT 0",
+        "ALTER TABLE contacts ADD COLUMN venue_filter TEXT DEFAULT NULL",
         # Post-show notes versioning
         "ALTER TABLE shows ADD COLUMN postnotes_version INTEGER DEFAULT 0",
         # Venue-linked position categories
@@ -2031,6 +2055,9 @@ CREATE TABLE IF NOT EXISTS users (
     is_document_viewer INTEGER DEFAULT 0,
     viewer_venues TEXT DEFAULT NULL,
     viewer_doc_types TEXT DEFAULT NULL,
+    -- Per-user home dashboard layout preference.
+    home_layout TEXT DEFAULT 'columns',    -- 'columns' | 'stacked'
+    home_density TEXT DEFAULT 'normal',    -- 'normal'  | 'slim'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -2128,6 +2155,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     production_recipient INTEGER DEFAULT 0,
     postnotes_recipient  INTEGER DEFAULT 0,
     system_recipient     INTEGER DEFAULT 0,
+    venue_filter         TEXT DEFAULT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -2512,6 +2540,13 @@ CREATE TABLE IF NOT EXISTS email_outbox_log (
     triggered_by  INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_email_outbox_log_sent ON email_outbox_log(sent_at DESC);
+
+-- Per-venue logo overrides for PDF headers.
+CREATE TABLE IF NOT EXISTS venue_logos (
+    venue_name TEXT PRIMARY KEY,
+    logo_data  TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 
 -- ── Asset Manager ─────────────────────────────────────────────────────────────
 
@@ -2964,6 +2999,7 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS production_recipient INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS postnotes_recipient INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS system_recipient INTEGER DEFAULT 0',
+            f'ALTER TABLE "{app_schema}".contacts ADD COLUMN IF NOT EXISTS venue_filter TEXT DEFAULT NULL',
             f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS postnotes_version INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".position_categories ADD COLUMN IF NOT EXISTS is_venue INTEGER DEFAULT 0',
             f'''CREATE TABLE IF NOT EXISTS "{app_schema}".pay_rate_levels (
@@ -3066,6 +3102,8 @@ def migrate_db_postgres():
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS is_document_viewer INTEGER DEFAULT 0',
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS viewer_venues TEXT DEFAULT NULL',
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS viewer_doc_types TEXT DEFAULT NULL',
+            f"ALTER TABLE \"{shared_schema}\".users ADD COLUMN IF NOT EXISTS home_layout TEXT DEFAULT 'columns'",
+            f"ALTER TABLE \"{shared_schema}\".users ADD COLUMN IF NOT EXISTS home_density TEXT DEFAULT 'normal'",
         ]
 
         n = 0

@@ -5,7 +5,7 @@
 <style>
   @page {
     size: letter;
-    margin: 0.6in 0.55in 0.55in;
+    margin: 0.35in 0.55in 0.55in;
     @bottom-left   { content: element(footerLeft);   font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; }
     @bottom-center { content: "Page " counter(page) " of " counter(pages); font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; }
     @bottom-right  { content: element(footerRight);  font-size: 6.5pt; color: #888; border-top: 1px solid #ddd; padding-top: 4px; vertical-align: middle; text-align: right; }
@@ -15,7 +15,7 @@
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #1a1a1a; line-height: 1.4; }
 
-  .doc-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2.5px solid #000; }
+  .doc-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding-bottom: 6px; border-bottom: 2.5px solid #000; }
   .doc-title { font-size: 18pt; font-weight: 900; letter-spacing: 0.05em; text-transform: uppercase; }
   .doc-title span { color: #B8840A; }
   .doc-org { font-size: 7pt; color: #555; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 2px; }
@@ -53,7 +53,7 @@
   <div class="doc-header">
     <div style="display:flex;align-items:center;gap:12px">
       {% if logo_data %}
-      <img src="{{ logo_data }}" alt="Logo" style="max-height:40px;max-width:100px;object-fit:contain">
+      <img src="{{ logo_data }}" alt="Logo" style="max-height:80px;max-width:200px;object-fit:contain">
       {% endif %}
       <div>
         <div class="doc-title"><span style="text-transform:none">dpc</span> <span>{{ layout.label('header', 'POST-SHOW') }}</span> NOTES</div>
