@@ -1260,7 +1260,10 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
   // Re-check block state when qty changes
   document.getElementById('asset-add-qty')?.addEventListener('input', _updateAddAssetBlockState);
 
+  let _addAssetInFlight = false;
   window.submitAddAsset = async function() {
+    if (_addAssetInFlight) return;
+    const submitBtn = document.getElementById('asset-add-submit-btn');
     const typeId = document.getElementById('asset-add-type-id').value;
     const qty = parseInt(document.getElementById('asset-add-qty').value) || 1;
     // Final guard: check availability in case state got out of sync
@@ -1275,18 +1278,29 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
     const start = document.getElementById('asset-add-start').value;
     const end   = document.getElementById('asset-add-end').value;
     const notes = document.getElementById('asset-add-notes').value;
-    const r = await fetch(`/shows/${SHOW_ID}/assets`, {
-      method: 'POST',
-      headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
-      body: JSON.stringify({asset_type_id: typeId, quantity: qty, locked_price: price,
-                            rental_start: start, rental_end: end, notes})
-    });
-    if (r.ok) {
-      closeAssetAddModal();
-      loadAssetsTab();
-    } else {
-      const e = await r.json();
-      alert(e.error || 'Failed to add asset');
+    _addAssetInFlight = true;
+    const prevLabel = submitBtn ? submitBtn.textContent : '';
+    if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Adding…'; }
+    try {
+      const r = await fetch(`/shows/${SHOW_ID}/assets`, {
+        method: 'POST',
+        headers: {'Content-Type':'application/json','X-Requested-With':'XMLHttpRequest'},
+        body: JSON.stringify({asset_type_id: typeId, quantity: qty, locked_price: price,
+                              rental_start: start, rental_end: end, notes})
+      });
+      if (r.ok) {
+        closeAssetAddModal();
+        loadAssetsTab();
+      } else {
+        const e = await r.json().catch(() => ({}));
+        alert(e.error || 'Failed to add asset');
+        if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = prevLabel || 'Add to Show'; }
+      }
+    } catch (err) {
+      alert('Network error — please try again.');
+      if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = prevLabel || 'Add to Show'; }
+    } finally {
+      _addAssetInFlight = false;
     }
   };
 
