@@ -409,8 +409,37 @@ function presetRange(days) {
   applyRange();
 }
 function toggleShow(head) {
-  head.parentElement.classList.toggle('collapsed');
+  const card = head.parentElement;
+  card.classList.toggle('collapsed');
+  _persistExpandedState(card);
 }
+
+// ── Expanded-section persistence ─────────────────────────────────
+// Actions in this view (approve, remove, add, save price…) trigger a
+// page reload to refresh totals and approval badges. Without this,
+// every action would re-collapse the show the user was working in.
+// Stash the set of expanded show IDs in sessionStorage and rehydrate
+// after reload so the user's place is preserved across the session.
+const _APPR_EXPANDED_KEY = 'apprExpandedShowIds';
+function _getExpandedSet() {
+  try { return new Set(JSON.parse(sessionStorage.getItem(_APPR_EXPANDED_KEY) || '[]')); }
+  catch (_) { return new Set(); }
+}
+function _persistExpandedState(card) {
+  const id = card.dataset.showId;
+  if (!id) return;
+  const set = _getExpandedSet();
+  if (card.classList.contains('collapsed')) set.delete(id);
+  else set.add(id);
+  try { sessionStorage.setItem(_APPR_EXPANDED_KEY, JSON.stringify([...set])); } catch (_) {}
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const set = _getExpandedSet();
+  if (!set.size) return;
+  document.querySelectorAll('.appr-show').forEach(card => {
+    if (set.has(card.dataset.showId)) card.classList.remove('collapsed');
+  });
+});
 async function approveShow(showId) {
   const r = await fetch(`/shows/${showId}/assets/approve`, {method: 'POST'});
   const d = await r.json();
