@@ -1603,6 +1603,47 @@
     </div>
   </div>
 
+  <div class="form-section mt-lg" id="email-log-section">
+    <div class="form-section-header" style="display:flex;align-items:center;gap:10px">
+      <span class="section-icon">◈</span>
+      RECENT EMAIL ACTIVITY
+      <span id="email-log-summary" class="oh-pill"
+            style="font-size:10px;padding:1px 6px;border-radius:999px;background:var(--bg-hover);color:var(--text-dim);border:1px solid var(--border)"></span>
+      <div style="margin-left:auto;display:flex;gap:6px;align-items:center">
+        <select id="email-log-status" class="field-input field-input-sm"
+                style="width:auto" onchange="loadEmailLog()">
+          <option value="all">All</option>
+          <option value="success">Delivered only</option>
+          <option value="failed">Failed only</option>
+        </select>
+        <button class="btn btn-sm btn-ghost" onclick="loadEmailLog()">Refresh</button>
+        <button class="btn btn-sm btn-danger-ghost" onclick="clearEmailLog()"
+                title="Permanently delete every row in this log">Clear log</button>
+      </div>
+    </div>
+    <div class="form-section-body no-pad">
+      <p class="text-dim text-sm" style="padding:10px 14px 0">
+        One row per outgoing email — recipient, subject, and result.
+        Use this to confirm whether a message was actually sent.
+      </p>
+      <table class="data-table" id="email-log-table">
+        <thead>
+          <tr>
+            <th style="width:140px">WHEN</th>
+            <th style="min-width:200px">RECIPIENT</th>
+            <th style="min-width:240px">SUBJECT</th>
+            <th style="width:110px">PURPOSE</th>
+            <th style="width:90px;text-align:center">RESULT</th>
+            <th style="width:120px">TRIGGERED BY</th>
+          </tr>
+        </thead>
+        <tbody id="email-log-tbody">
+          <tr><td colspan="6" class="text-dim" style="text-align:center;padding:14px">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
 </div>
 {% endif %}
 
@@ -3567,6 +3608,70 @@ async function clearEmailErrors(scope) {
 // hides/shows panes; we just load whenever the section is on screen).
 if (document.getElementById('email-errors-tbody')) {
   loadEmailErrors();
+}
+
+// ── Recent Email Activity ─────────────────────────────────────────────────────
+function _emailLogEsc(s) {
+  const d = document.createElement('div');
+  d.textContent = (s == null) ? '' : String(s);
+  return d.innerHTML;
+}
+
+function _emailLogFmtWhen(ts) {
+  if (!ts) return '';
+  const d = new Date(String(ts).replace(' ', 'T') + (String(ts).endsWith('Z') ? '' : 'Z'));
+  if (isNaN(d.getTime())) return _emailLogEsc(ts);
+  return d.toLocaleString([], { year: 'numeric', month: 'short', day: '2-digit',
+                                hour: '2-digit', minute: '2-digit' });
+}
+
+async function loadEmailLog() {
+  const tbody = document.getElementById('email-log-tbody');
+  const summary = document.getElementById('email-log-summary');
+  if (!tbody) return;
+  tbody.innerHTML = '<tr><td colspan="6" class="text-dim" style="text-align:center;padding:14px">Loading…</td></tr>';
+  const status = document.getElementById('email-log-status').value || 'all';
+  try {
+    const r = await fetch('/settings/email-log?status=' + encodeURIComponent(status));
+    if (!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    if (summary) {
+      summary.textContent = `${d.total} total · ${d.successes} delivered · ${d.failures} failed`;
+    }
+    const rows = d.rows || [];
+    if (!rows.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-dim" style="text-align:center;padding:14px">No emails recorded yet.</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map(e => {
+      const who = e.triggered_by_display || e.triggered_by_name || '';
+      const resultCell = e.success
+        ? '<span style="color:#48BB78;font-weight:600">✓ Sent</span>'
+        : `<span style="color:#F56565;font-weight:600" title="${_emailLogEsc(e.error_message||'')}">✗ Failed</span>`;
+      return `<tr>
+        <td class="text-dim" style="font-size:11px;white-space:nowrap">${_emailLogFmtWhen(e.sent_at)}</td>
+        <td style="font-size:12px;font-family:var(--font-mono,monospace)">${_emailLogEsc(e.recipient || '')}</td>
+        <td style="font-size:12px">${_emailLogEsc(e.subject || '')}</td>
+        <td class="text-dim" style="font-size:11px">${_emailLogEsc(e.purpose || '')}</td>
+        <td style="text-align:center;font-size:11px">${resultCell}</td>
+        <td class="text-dim" style="font-size:11px">${_emailLogEsc(who)}</td>
+      </tr>`;
+    }).join('');
+  } catch (err) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-dim" style="text-align:center;padding:14px">Error loading.</td></tr>';
+  }
+}
+
+async function clearEmailLog() {
+  if (!confirm('Permanently delete every row in this email activity log?')) return;
+  const r = await fetch('/settings/email-log/clear', { method: 'POST' });
+  if (!r.ok) { showSaveToast('✗ Clear failed', 'error'); return; }
+  showSaveToast('✓ Email log cleared');
+  loadEmailLog();
+}
+
+if (document.getElementById('email-log-tbody')) {
+  loadEmailLog();
 }
 
 // ── AI Session Limit ──────────────────────────────────────────────────────────
