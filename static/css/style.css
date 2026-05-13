@@ -284,6 +284,53 @@ button.section-label:hover { color: var(--text); }
   font-size: 12px; color: var(--text-muted);
   padding: 16px 4px; text-align: center;
 }
+
+/* ── Dashboard layout toggles ──────────────────────────────────── */
+.dash-layout-toggles {
+  display: flex; align-items: center; gap: 6px;
+  margin-left: auto; flex-wrap: wrap;
+}
+.dash-layout-label {
+  font-family: var(--font-cond); font-size: 10px; font-weight: 700;
+  letter-spacing: 0.08em; color: var(--text-muted); text-transform: uppercase;
+}
+.dash-layout-toggles .field-input-sm {
+  width: auto; padding: 4px 8px; font-size: 12px;
+}
+
+/* ── Stacked layout (one venue per row, full-width cards) ─────── */
+.venue-columns-wrap.layout-stacked .venue-columns-top-scroll { display: none; }
+.venue-columns-wrap.layout-stacked .venue-columns {
+  display: flex; flex-direction: column; gap: 18px;
+  overflow-x: visible; padding-bottom: 0;
+}
+.venue-columns-wrap.layout-stacked .venue-col {
+  flex: 1 1 auto; width: 100%;
+}
+.venue-columns-wrap.layout-stacked .venue-col-body {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.venue-columns-wrap.layout-stacked .venue-col-header {
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 6px;
+}
+
+/* ── Slim density (tighter cards) ──────────────────────────────── */
+.venue-columns-wrap.density-slim .show-card {
+  padding: 6px 10px;
+}
+.venue-columns-wrap.density-slim .show-card-name {
+  font-size: 12px; margin-bottom: 2px;
+}
+.venue-columns-wrap.density-slim .show-card-dates div {
+  font-size: 10px;
+}
+.venue-columns-wrap.density-slim .venue-col-body { gap: 6px; }
+.venue-columns-wrap.density-slim.layout-stacked .venue-col-body {
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+}
 .multi-date-badge {
   display: inline-block; font-size: 9px; font-family: var(--font-cond);
   font-weight: 700; letter-spacing: 0.06em;

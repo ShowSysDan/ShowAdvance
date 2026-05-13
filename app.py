@@ -2542,13 +2542,64 @@ def dashboard():
         _venue_map[v].sort(key=lambda s: (s['show_date'] is None, s['show_date'] or ''))
     venue_groups = [(v, _venue_map[v]) for v in _names]
 
+    # Per-user home layout / density preference (default to current behaviour).
+    home_layout = 'columns'
+    home_density = 'normal'
+    try:
+        db2 = get_db()
+        pref = db2.execute(
+            'SELECT home_layout, home_density FROM users WHERE id=?',
+            (session['user_id'],)
+        ).fetchone()
+        db2.close()
+        if pref:
+            if pref['home_layout']  in ('columns', 'stacked'): home_layout  = pref['home_layout']
+            if pref['home_density'] in ('normal',  'slim'):    home_density = pref['home_density']
+    except Exception:
+        pass
+
     return render_template('dashboard.html',
                            active_shows=active,
                            archived_shows=archived,
                            venue_groups=venue_groups,
                            restricted=restricted,
+                           home_layout=home_layout,
+                           home_density=home_density,
                            motd_messages=get_active_messages(session.get('user_id'), 'motd'),
                            user=get_current_user())
+
+
+@app.route('/api/me/home-layout', methods=['POST'])
+@login_required
+def save_home_layout_prefs():
+    """Persist this user's home-dashboard layout + density preference.
+
+    Body: {"layout": "columns"|"stacked", "density": "normal"|"slim"}.
+    Either field is optional; only present keys are written. Unknown values
+    are rejected so the column always holds one of the documented options.
+    """
+    data = request.get_json(force=True) or {}
+    layout  = data.get('layout')
+    density = data.get('density')
+    sets, params = [], []
+    if layout is not None:
+        if layout not in ('columns', 'stacked'):
+            return jsonify({'error': 'Invalid layout'}), 400
+        sets.append('home_layout=?')
+        params.append(layout)
+    if density is not None:
+        if density not in ('normal', 'slim'):
+            return jsonify({'error': 'Invalid density'}), 400
+        sets.append('home_density=?')
+        params.append(density)
+    if not sets:
+        return jsonify({'error': 'No preference fields supplied'}), 400
+    params.append(session['user_id'])
+    db = get_db()
+    db.execute(f'UPDATE users SET {", ".join(sets)} WHERE id=?', params)
+    db.commit()
+    db.close()
+    return jsonify({'success': True, 'layout': layout, 'density': density})
 
 
 # ─── New Show ─────────────────────────────────────────────────────────────────

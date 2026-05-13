@@ -35,6 +35,9 @@ CREATE TABLE IF NOT EXISTS users (
     is_document_viewer INTEGER DEFAULT 0,
     viewer_venues TEXT DEFAULT NULL,
     viewer_doc_types TEXT DEFAULT NULL,
+    -- Per-user home dashboard layout preference.
+    home_layout TEXT DEFAULT 'columns',    -- 'columns' | 'stacked'
+    home_density TEXT DEFAULT 'normal',    -- 'normal'  | 'slim'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -1338,6 +1341,8 @@ def migrate_db():
         'ALTER TABLE show_assets ADD COLUMN original_locked_price REAL DEFAULT NULL',
         'ALTER TABLE shows ADD COLUMN cast_count INTEGER DEFAULT NULL',
         'ALTER TABLE shows ADD COLUMN crew_count INTEGER DEFAULT NULL',
+        "ALTER TABLE users ADD COLUMN home_layout TEXT DEFAULT 'columns'",
+        "ALTER TABLE users ADD COLUMN home_density TEXT DEFAULT 'normal'",
     ]:
         try:
             conn.execute(alter_sql)
@@ -2031,6 +2036,9 @@ CREATE TABLE IF NOT EXISTS users (
     is_document_viewer INTEGER DEFAULT 0,
     viewer_venues TEXT DEFAULT NULL,
     viewer_doc_types TEXT DEFAULT NULL,
+    -- Per-user home dashboard layout preference.
+    home_layout TEXT DEFAULT 'columns',    -- 'columns' | 'stacked'
+    home_density TEXT DEFAULT 'normal',    -- 'normal'  | 'slim'
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -3066,6 +3074,8 @@ def migrate_db_postgres():
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS is_document_viewer INTEGER DEFAULT 0',
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS viewer_venues TEXT DEFAULT NULL',
             f'ALTER TABLE "{shared_schema}".users ADD COLUMN IF NOT EXISTS viewer_doc_types TEXT DEFAULT NULL',
+            f"ALTER TABLE \"{shared_schema}\".users ADD COLUMN IF NOT EXISTS home_layout TEXT DEFAULT 'columns'",
+            f"ALTER TABLE \"{shared_schema}\".users ADD COLUMN IF NOT EXISTS home_density TEXT DEFAULT 'normal'",
         ]
 
         n = 0
