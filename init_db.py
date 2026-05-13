@@ -65,6 +65,8 @@ CREATE TABLE IF NOT EXISTS shows (
     advance_version INTEGER DEFAULT 0,
     schedule_version INTEGER DEFAULT 0,
     postnotes_version INTEGER DEFAULT 0,
+    cast_count INTEGER DEFAULT NULL,
+    crew_count INTEGER DEFAULT NULL,
     performance_company TEXT DEFAULT '',
     created_by INTEGER REFERENCES users(id),
     last_saved_by INTEGER REFERENCES users(id),
@@ -1334,6 +1336,8 @@ def migrate_db():
         'ALTER TABLE audit_log ADD COLUMN undone_by_log_id INTEGER REFERENCES audit_log(id) ON DELETE SET NULL',
         'ALTER TABLE overhead_labor_groups ADD COLUMN project_id INTEGER REFERENCES overhead_projects(id) ON DELETE SET NULL',
         'ALTER TABLE show_assets ADD COLUMN original_locked_price REAL DEFAULT NULL',
+        'ALTER TABLE shows ADD COLUMN cast_count INTEGER DEFAULT NULL',
+        'ALTER TABLE shows ADD COLUMN crew_count INTEGER DEFAULT NULL',
     ]:
         try:
             conn.execute(alter_sql)
@@ -1348,6 +1352,38 @@ def migrate_db():
             UPDATE show_assets
                SET original_locked_price = locked_price
              WHERE original_locked_price IS NULL
+        """)
+    except Exception:
+        pass
+
+    # Backfill cast_count / crew_count on shows from any existing post_show_notes
+    # rows so historical data is reportable as soon as the column exists. Empty
+    # strings and non-numeric values are skipped (left NULL) rather than coerced
+    # to 0 — NULL is the correct signal for "never entered".
+    try:
+        conn.execute("""
+            UPDATE shows
+               SET cast_count = (
+                 SELECT CAST(field_value AS INTEGER)
+                 FROM post_show_notes
+                 WHERE show_id = shows.id
+                   AND field_key = 'cast_count'
+                   AND field_value GLOB '[0-9]*'
+                   AND field_value != ''
+               )
+             WHERE cast_count IS NULL
+        """)
+        conn.execute("""
+            UPDATE shows
+               SET crew_count = (
+                 SELECT CAST(field_value AS INTEGER)
+                 FROM post_show_notes
+                 WHERE show_id = shows.id
+                   AND field_key = 'crew_count'
+                   AND field_value GLOB '[0-9]*'
+                   AND field_value != ''
+               )
+             WHERE crew_count IS NULL
         """)
     except Exception:
         pass
@@ -2023,6 +2059,8 @@ CREATE TABLE IF NOT EXISTS shows (
     advance_version INTEGER DEFAULT 0,
     schedule_version INTEGER DEFAULT 0,
     postnotes_version INTEGER DEFAULT 0,
+    cast_count INTEGER DEFAULT NULL,
+    crew_count INTEGER DEFAULT NULL,
     performance_company TEXT DEFAULT '',
     created_by INTEGER REFERENCES users(id),
     last_saved_by INTEGER REFERENCES users(id),
@@ -3011,6 +3049,8 @@ def migrate_db_postgres():
             f'ALTER TABLE "{app_schema}".overhead_projects ADD COLUMN IF NOT EXISTS archived INTEGER DEFAULT 0',
             f'ALTER TABLE "{app_schema}".overhead_projects ADD COLUMN IF NOT EXISTS created_by INTEGER',
             f'ALTER TABLE "{app_schema}".show_assets ADD COLUMN IF NOT EXISTS original_locked_price REAL DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS cast_count INTEGER DEFAULT NULL',
+            f'ALTER TABLE "{app_schema}".shows ADD COLUMN IF NOT EXISTS crew_count INTEGER DEFAULT NULL',
         ]
 
         shared_alters = [
@@ -3043,6 +3083,24 @@ def migrate_db_postgres():
             """)
         except Exception as e:
             print(f"[migrate_pg] original_locked_price backfill warning: {e}")
+
+        # Backfill shows.cast_count / shows.crew_count from any existing
+        # post_show_notes rows. Postgres-friendly numeric guard via regex.
+        for col in ('cast_count', 'crew_count'):
+            try:
+                cur.execute(f"""
+                    UPDATE "{app_schema}".shows AS s
+                       SET {col} = (
+                         SELECT CAST(p.field_value AS INTEGER)
+                         FROM "{app_schema}".post_show_notes p
+                         WHERE p.show_id = s.id
+                           AND p.field_key = %s
+                           AND p.field_value ~ '^[0-9]+$'
+                       )
+                     WHERE s.{col} IS NULL
+                """, (col,))
+            except Exception as e:
+                print(f"[migrate_pg] {col} backfill warning: {e}")
 
         conn.commit()
         cur.close()
