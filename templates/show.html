@@ -1134,23 +1134,6 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
       return;
     }
 
-    // Relevance score so item-name matches always beat model matches, which
-    // in turn beat manufacturer / category / parent matches. Lower is better.
-    // When there's no query we keep the original "group by category" layout
-    // since the user is browsing rather than searching.
-    function _score(t) {
-      if (!lq) return 0;
-      const name  = (t.name         || '').toLowerCase();
-      const model = (t.model        || '').toLowerCase();
-      const mfr   = (t.manufacturer || '').toLowerCase();
-      if (name.startsWith(lq))  return 0;   // exact prefix on name — strongest
-      if (name.includes(lq))    return 1;   // name match
-      if (model.startsWith(lq)) return 2;
-      if (model.includes(lq))   return 3;
-      if (mfr.includes(lq))     return 4;
-      return 5;                              // matched only via category / parent
-    }
-
     const renderCard = (t) => {
       const label = t.name;  // Description is always the primary title
       const sub = [t.manufacturer, t.model].filter(Boolean).join(' ');
@@ -1158,35 +1141,37 @@ window._laborRequestsData = {{ labor_requests_data | tojson }};
         ? `$${Number(t.rental_cost||0).toFixed(2)}/day · $${Number(t.weekly_rate||0).toFixed(2)}/wk`
         : `$${Number(t.rental_cost||0).toFixed(2)}/day`;
       const systemBadge = t.is_system ? '<span style="font-size:9px;font-weight:700;background:rgba(245,127,32,0.2);color:#F57F20;border-radius:3px;padding:1px 5px;margin-left:4px;letter-spacing:.04em">SYSTEM</span>' : '';
-      return `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal" onclick="selectAssetType(${t.id}, '${esc(label).replace(/'/g,"\\'")}', ${t.rental_cost || 0}, ${t.weekly_rate || 0}, ${t.is_system ? 1 : 0})">
+      return `<button class="btn btn-ghost btn-sm" style="text-align:left;white-space:normal;align-items:flex-start;flex-direction:column;gap:2px;width:100%;min-width:0" onclick="selectAssetType(${t.id}, '${esc(label).replace(/'/g,"\\'")}', ${t.rental_cost || 0}, ${t.weekly_rate || 0}, ${t.is_system ? 1 : 0})">
         <div style="font-weight:500">${esc(label)}${systemBadge}</div>
         ${sub ? `<div style="font-size:10px;color:var(--text-dim)">${esc(sub)}</div>` : ''}
         <div style="font-size:10px;color:var(--text-dim)">${rateLabel}${t.is_consumable ? ' · consumable' : ''}${t.is_system ? ' · system' : ''}</div>
       </button>`;
     };
 
+    const byName = (a, b) => (a.name || '').localeCompare(b.name || '', undefined, { numeric: true, sensitivity: 'base' });
+    const gridStyle = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;align-items:stretch';
+
     let html = '<div style="display:flex;flex-direction:column;gap:12px">';
     if (lq) {
-      // Search mode: flat list ranked by relevance, name → model → other.
-      const ranked = filtered.slice().sort((a, b) => {
-        const sa = _score(a), sb = _score(b);
-        if (sa !== sb) return sa - sb;
-        return (a.name || '').localeCompare(b.name || '');
-      });
-      html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
-      ranked.forEach(t => { html += renderCard(t); });
+      // Search mode: flat alphabetical list.
+      const sorted = filtered.slice().sort(byName);
+      html += `<div style="${gridStyle}">`;
+      sorted.forEach(t => { html += renderCard(t); });
       html += '</div>';
     } else {
-      // Browse mode: keep the category grouping.
+      // Browse mode: grouped by category, alphabetized within each group and
+      // by category heading so the layout is predictable.
       const byCat = {};
       filtered.forEach(t => {
-        const k = t.category_name;
+        const k = t.category_name || '';
         if (!byCat[k]) byCat[k] = [];
         byCat[k].push(t);
       });
-      for (const [cat, items] of Object.entries(byCat)) {
+      const cats = Object.keys(byCat).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: 'base' }));
+      for (const cat of cats) {
+        const items = byCat[cat].slice().sort(byName);
         html += `<div><div style="font-size:10px;font-weight:600;letter-spacing:.08em;color:var(--text-dim);margin-bottom:4px;text-transform:uppercase">${esc(cat)}</div>`;
-        html += '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+        html += `<div style="${gridStyle}">`;
         items.forEach(t => { html += renderCard(t); });
         html += '</div></div>';
       }
