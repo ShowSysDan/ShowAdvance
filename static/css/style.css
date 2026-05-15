@@ -699,6 +699,50 @@ html[data-theme="light"] select.field-input {
 }
 .recipient-dot.on { background: var(--accent); border-color: var(--accent); }
 
+/* Indicator-style checkboxes — render as an orange dot when checked,
+   matching the crew-tracker skill-dot. Used for labor scheduling
+   (.sched-check), the read-only "Scheduled" column in show advance
+   (.labor-is-scheduled), and the overhead-crew request grid (.oh-check). */
+input[type=checkbox].sched-check,
+input[type=checkbox].labor-is-scheduled,
+input[type=checkbox].oh-check {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border-light);
+  background: transparent;
+  margin: 0; padding: 0;
+  vertical-align: middle;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
+  flex-shrink: 0;
+}
+input[type=checkbox].sched-check:checked,
+input[type=checkbox].labor-is-scheduled:checked,
+input[type=checkbox].oh-check:checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+input[type=checkbox].sched-check:hover:not(:disabled),
+input[type=checkbox].labor-is-scheduled:hover:not(:disabled),
+input[type=checkbox].oh-check:hover:not(:disabled) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+input[type=checkbox].sched-check:focus-visible,
+input[type=checkbox].labor-is-scheduled:focus-visible,
+input[type=checkbox].oh-check:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+input[type=checkbox].labor-is-scheduled:disabled,
+input[type=checkbox].oh-check:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
 /* ── Modals ──────────────────────────────────────────────────────── */
 .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: flex; align-items: center; justify-content: center; z-index: 1000; }
 .modal-overlay.hidden { display: none; }
