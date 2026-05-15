@@ -11501,32 +11501,52 @@ def _compute_asset_snapshot_hash(db, show_id):
 
 
 def _reset_asset_approval(db, show_id, reason):
-    """If the show's assets were approved AND the canonical state has actually
-    changed since approval, flip back to unapproved and log it.
+    """Reconcile the approval flag against the canonical asset state.
 
-    Called from every write path that changes a show's gear. The hash check
-    means net-zero changes (add-then-remove, A->B->A) don't disturb approval
-    or spam the approver inbox; only true changes invalidate.
+    Called from every write path that changes a show's gear. If the show
+    has a stored snapshot from a previous approval, recomputes the current
+    hash and:
+      - hash matches snapshot, currently approved      -> no-op
+      - hash matches snapshot, currently unapproved    -> auto-restore
+        approval silently (logged as ASSET_APPROVAL_RESTORED). The original
+        approver/timestamp on the show row are kept since the canonical
+        state matches what they previously approved.
+      - hash differs, currently approved               -> reset to
+        unapproved, log ASSET_APPROVAL_RESET, email approvers (first
+        divergence only). Snapshot is kept as the "last approved" baseline
+        so a later revert can auto-restore.
+      - hash differs, currently unapproved             -> no-op (already
+        unapproved; no need to re-notify on every subsequent edit).
 
-    Legacy approved shows (snapshot IS NULL, approved before this column
-    existed) fall through to the always-reset behaviour — once they are
-    re-approved post-migration they pick up the round-trip semantics.
+    Shows with no snapshot (never approved, or legacy approved before this
+    column existed) are not auto-managed; manual approval is required.
+    Manual unapprove clears the snapshot to truly revoke approval.
     """
     row = db.execute(
         'SELECT s.assets_approved, s.assets_approval_snapshot, s.name '
         'FROM shows s WHERE s.id=?', (show_id,)
     ).fetchone()
-    if not row or not row['assets_approved']:
+    if not row:
         return
     stored = row['assets_approval_snapshot']
-    if stored:
-        current = _compute_asset_snapshot_hash(db, show_id)
-        if current == stored:
-            return
+    if not stored:
+        return
+    current = _compute_asset_snapshot_hash(db, show_id)
+    was_approved = bool(row['assets_approved'])
+    matches = (current == stored)
+    if matches and was_approved:
+        return
+    if matches and not was_approved:
+        db.execute(
+            'UPDATE shows SET assets_approved=1 WHERE id=?', (show_id,),
+        )
+        log_audit(db, 'ASSET_APPROVAL_RESTORED', 'show', show_id, show_id=show_id,
+                  detail=f'reason={reason}')
+        return
+    if not was_approved:
+        return
     db.execute(
-        'UPDATE shows SET assets_approved=0, assets_approved_by=NULL, '
-        'assets_approved_at=NULL, assets_approval_snapshot=NULL WHERE id=?',
-        (show_id,),
+        'UPDATE shows SET assets_approved=0 WHERE id=?', (show_id,),
     )
     log_audit(db, 'ASSET_APPROVAL_RESET', 'show', show_id, show_id=show_id,
               detail=f'reason={reason}')
