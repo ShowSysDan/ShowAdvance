@@ -12,6 +12,7 @@ import logging.handlers
 import atexit
 import subprocess
 import gzip
+import hashlib
 import threading
 import secrets
 import re
@@ -11453,20 +11454,78 @@ def _notify_asset_recipients(db, subject, body_text, exclude_user_id=None):
     ).start()
 
 
-def _reset_asset_approval(db, show_id, reason):
-    """If the show's assets were approved, flip back to unapproved and log it.
+def _compute_asset_snapshot_hash(db, show_id):
+    """Build a deterministic sha256 over the approval-relevant asset state.
 
-    Called from every write path that changes a show's gear so an advance
-    update silently re-queues the show for approval.
+    Two states with the same hash are considered equivalent for approval —
+    add-then-remove or A->B->A round-trips leave the hash unchanged so
+    approval survives. Rows are sorted by their content (not id) so a deleted
+    line that is re-added with identical fields hashes the same as the
+    original. Fields not visible to the approver (e.g. `notes`) are excluded.
+    """
+    assets = db.execute("""
+        SELECT asset_type_id, quantity, rental_start, rental_end,
+               locked_price, is_hidden
+        FROM show_assets
+        WHERE show_id = ?
+    """, (show_id,)).fetchall()
+    externals = db.execute("""
+        SELECT description, cost, pdf_filename
+        FROM show_external_rentals
+        WHERE show_id = ?
+    """, (show_id,)).fetchall()
+    asset_tuples = sorted(
+        (
+            int(r['asset_type_id']),
+            int(r['quantity'] or 0),
+            str(r['rental_start'] or ''),
+            str(r['rental_end'] or ''),
+            round(float(r['locked_price'] or 0.0), 2),
+            1 if r['is_hidden'] else 0,
+        )
+        for r in assets
+    )
+    external_tuples = sorted(
+        (
+            str(r['description'] or ''),
+            round(float(r['cost'] or 0.0), 2),
+            str(r['pdf_filename'] or ''),
+        )
+        for r in externals
+    )
+    payload = json.dumps(
+        {'a': asset_tuples, 'e': external_tuples},
+        separators=(',', ':'),
+    )
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()
+
+
+def _reset_asset_approval(db, show_id, reason):
+    """If the show's assets were approved AND the canonical state has actually
+    changed since approval, flip back to unapproved and log it.
+
+    Called from every write path that changes a show's gear. The hash check
+    means net-zero changes (add-then-remove, A->B->A) don't disturb approval
+    or spam the approver inbox; only true changes invalidate.
+
+    Legacy approved shows (snapshot IS NULL, approved before this column
+    existed) fall through to the always-reset behaviour — once they are
+    re-approved post-migration they pick up the round-trip semantics.
     """
     row = db.execute(
-        'SELECT s.assets_approved, s.name FROM shows s WHERE s.id=?', (show_id,)
+        'SELECT s.assets_approved, s.assets_approval_snapshot, s.name '
+        'FROM shows s WHERE s.id=?', (show_id,)
     ).fetchone()
     if not row or not row['assets_approved']:
         return
+    stored = row['assets_approval_snapshot']
+    if stored:
+        current = _compute_asset_snapshot_hash(db, show_id)
+        if current == stored:
+            return
     db.execute(
         'UPDATE shows SET assets_approved=0, assets_approved_by=NULL, '
-        'assets_approved_at=NULL WHERE id=?',
+        'assets_approved_at=NULL, assets_approval_snapshot=NULL WHERE id=?',
         (show_id,),
     )
     log_audit(db, 'ASSET_APPROVAL_RESET', 'show', show_id, show_id=show_id,
@@ -12169,10 +12228,13 @@ def show_assets_approve(show_id):
     if not row:
         db.close()
         return jsonify({'error': 'Show not found'}), 404
+    snapshot = _compute_asset_snapshot_hash(db, show_id)
     db.execute("""
         UPDATE shows SET assets_approved=1, assets_approved_by=?,
-               assets_approved_at=CURRENT_TIMESTAMP WHERE id=?
-    """, (session['user_id'], show_id))
+               assets_approved_at=CURRENT_TIMESTAMP,
+               assets_approval_snapshot=?
+         WHERE id=?
+    """, (session['user_id'], snapshot, show_id))
     log_audit(db, 'ASSET_APPROVAL_GRANTED', 'show', show_id, show_id=show_id)
     db.commit()
     me = db.execute('SELECT display_name, username FROM users WHERE id=?',
@@ -12214,7 +12276,8 @@ def show_assets_unapprove(show_id):
         return jsonify({'error': 'Show not found'}), 404
     db.execute("""
         UPDATE shows SET assets_approved=0, assets_approved_by=NULL,
-               assets_approved_at=NULL WHERE id=?
+               assets_approved_at=NULL, assets_approval_snapshot=NULL
+         WHERE id=?
     """, (show_id,))
     log_audit(db, 'ASSET_APPROVAL_REVOKED', 'show', show_id, show_id=show_id)
     db.commit()
