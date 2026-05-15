@@ -114,17 +114,17 @@
   }
   .oh-group-notes textarea {
     width: 100%;
-    /* Single-line height by default; user can drag-resize if they need more. */
-    min-height: 28px; height: 28px; resize: vertical;
+    /* Single-line by default; auto-grows with content. */
+    min-height: 28px; resize: vertical;
+    field-sizing: content;
     font-family: inherit; font-size: 12px;
     background: var(--bg-input, var(--bg-surface));
     border: 1px solid var(--border); border-radius: 4px;
     color: var(--text); padding: 4px 8px;
-    transition: height .15s ease;
+    transition: min-height .15s ease;
   }
-  .oh-group-notes textarea:focus,
-  .oh-group-notes textarea:not(:placeholder-shown) {
-    min-height: 48px; height: auto;
+  .oh-group-notes textarea:focus {
+    min-height: 48px;
   }
 
   /* Quick Fill bar — same idea as the show-page labor quickfill */
